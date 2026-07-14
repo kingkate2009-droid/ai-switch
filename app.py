@@ -97,6 +97,7 @@ def api_recognize_provider():
 
 @app.route("/api/backends", methods=["GET"])
 def api_list_backends():
+    from core.data import get_backend_config
     backends = []
     for name, adapter in get_all_backends().items():
         backends.append({
@@ -105,6 +106,8 @@ def api_list_backends():
             "status": adapter.get_status(),
             "version": adapter.get_version(),
             "config_files": adapter.config_files,
+            "supports_byok": adapter.supports_byok,
+            "config": get_backend_config(adapter.name),
         })
     return jsonify({"backends": backends})
 
@@ -114,13 +117,33 @@ def api_get_backend(name):
     adapter = get_backend(name)
     if not adapter:
         return jsonify({"error": "not found"}), 404
+    from core.data import get_backend_config
+    config = get_backend_config(adapter.name)
     return jsonify({
         "name": adapter.name,
         "display_name": adapter.display_name,
         "status": adapter.get_status(),
         "version": adapter.get_version(),
         "config_files": adapter.config_files,
+        "supports_byok": adapter.supports_byok,
+        "config": config,
     })
+
+
+@app.route("/api/backends/<name>/sync-config", methods=["PUT"])
+def api_save_backend_sync_config(name):
+    adapter = get_backend(name)
+    if not adapter:
+        return jsonify({"error": "not found"}), 404
+    body = request.get_json() or {}
+    from core.data import get_backend_config, save_backend_config
+    config = get_backend_config(adapter.name)
+    if "disabled" in body:
+        config["disabled"] = body["disabled"]
+    if "sync_vendors" in body:
+        config["sync_vendors"] = body["sync_vendors"]
+    save_backend_config(adapter.name, config)
+    return jsonify({"success": True, "config": config})
 
 
 @app.route("/api/backends/<name>/config", methods=["GET"])

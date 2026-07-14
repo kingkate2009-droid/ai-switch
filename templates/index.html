@@ -553,9 +553,13 @@ function renderBackendCards(list, containerId) {
 
 var _currentBackendDetail = null;
 var _currentConfigPath = null;
+var _currentBackendData = null;
+var _currentSyncTabActive = false;
 
 async function showBackendDetail(name) {
   _currentBackendDetail = name;
+  _currentBackendData = null;
+  _currentSyncTabActive = false;
   $('backendDetailTitle').textContent = name;
   $('backendDetailInfo').textContent = _('gateway.checking');
   $('backendConfigTabs').innerHTML = '';
@@ -568,31 +572,145 @@ async function showBackendDetail(name) {
     $('backendDetailInfo').textContent = data.error;
     return;
   }
+  _currentBackendData = data;
   var s = data.status || {};
   var info = data.display_name + ' v' + (data.version || '?') + ' — ' + (s.running ? _('gateway.yes') : _('gateway.stopped'));
   if (s.message) info += ' | ' + s.message;
   $('backendDetailInfo').textContent = info;
 
-  var files = data.config_files || [];
-  if (files.length === 0) {
-    $('backendConfigPane').innerHTML = '<p style="color:var(--text3);padding:20px">' + _('backends.noConfigFiles') + '</p>';
-    return;
-  }
   var tabs = $('backendConfigTabs');
+  tabs.innerHTML = '';
+
+  // "Sync" tab (only for BYOK-capable backends)
+  if (data.supports_byok) {
+    var syncBtn = document.createElement('button');
+    var syncLabel = data.config && data.config.disabled ? _('backends.syncDisabled') : (data.config && data.config.sync_vendors && data.config.sync_vendors !== 'all' ? _('backends.syncSelected') : _('backends.syncAll'));
+    syncBtn.textContent = '⚙ ' + _('backends.syncConfig');
+    syncBtn.className = 'btn btn-sm btn-primary';
+    syncBtn.id = 'syncTabBtn';
+    syncBtn.onclick = function() {
+      _currentSyncTabActive = true;
+      document.querySelectorAll('#backendConfigTabs .btn').forEach(function(b) { b.className = 'btn btn-sm'; });
+      syncBtn.className = 'btn btn-sm btn-primary';
+      renderSyncConfig(name, data);
+    };
+    tabs.appendChild(syncBtn);
+  }
+
+  var files = data.config_files || [];
   files.forEach(function(f, i) {
     var btn = document.createElement('button');
-    btn.className = 'btn btn-sm' + (i === 0 ? ' btn-primary' : '');
+    btn.className = 'btn btn-sm' + ((!data.supports_byok && i === 0) ? ' btn-primary' : '');
     btn.textContent = f.label;
     btn.dataset.path = f.path;
     btn.onclick = function() {
+      _currentSyncTabActive = false;
       document.querySelectorAll('#backendConfigTabs .btn').forEach(function(b) { b.className = 'btn btn-sm'; });
       btn.className = 'btn btn-sm btn-primary';
       loadBackendConfig(name, f.path);
     };
     tabs.appendChild(btn);
   });
-  // Load first file
-  if (files.length > 0) loadBackendConfig(name, files[0].path);
+  // Load first file (or sync config if that's the only thing)
+  if (files.length > 0 && !data.supports_byok) {
+    loadBackendConfig(name, files[0].path);
+  }
+}
+
+async function renderSyncConfig(name, data) {
+  _currentConfigPath = null;
+  $('backendSaveConfigBtn').style.display = 'none';
+  var config = data.config || {};
+  var disabled = config.disabled || false;
+  var syncVendors = config.sync_vendors;
+  var isAll = syncVendors === 'all' || !syncVendors;
+
+  var provs = _knownProviders;
+  if (!provs || provs.length === 0) {
+    // Fallback: list from the data we know
+    provs = [
+      "openai","anthropic","google","deepseek","openrouter","groq",
+      "together","xai","perplexity","mistral","cohere","moonshot","zai",
+      "minimax","alibaba","volcengine","fireworks","stepfun","deepinfra",
+      "cerebras","novita","venice","zeroone","ollama","qianfan","xiaomi-token-plan"
+    ];
+  }
+
+  var html = '<div style="padding:8px 0">';
+
+  // Enable/disable toggle
+  html += '<label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;cursor:pointer">';
+  html += '<input type="checkbox" id="syncDisabledCheck" ' + (disabled ? 'checked' : '') + '>';
+  html += '<span style="font-weight:600">' + _('backends.disableSync') + '</span>';
+  html += '</label>';
+
+  // Sync mode
+  html += '<div style="margin-bottom:12px;font-weight:600">' + _('backends.syncMode') + ':</div>';
+  html += '<label style="display:block;margin-bottom:8px;cursor:pointer">';
+  html += '<input type="radio" name="syncMode" value="all" ' + (isAll ? 'checked' : '') + ' onchange="toggleSyncVendorList()"> ';
+  html += _('backends.syncAllVendors');
+  html += '</label>';
+  html += '<label style="display:block;margin-bottom:12px;cursor:pointer">';
+  html += '<input type="radio" name="syncMode" value="selected" ' + (!isAll ? 'checked' : '') + ' onchange="toggleSyncVendorList()"> ';
+  html += _('backends.syncSelectedVendors');
+  html += '</label>';
+
+  // Provider checkboxes
+  var selected = Array.isArray(syncVendors) ? syncVendors : [];
+  html += '<div id="syncVendorList" style="' + (isAll ? 'display:none' : '') + ';border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;max-height:300px;overflow-y:auto">';
+  html += '<div style="margin-bottom:8px;font-size:13px;color:var(--text2)">' + _('backends.selectProviders') + ':</div>';
+  provs.forEach(function(p) {
+    var pid = typeof p === 'string' ? p : p.id;
+    var pname = typeof p === 'string' ? p : p.name;
+    var checked = selected.indexOf(pid) !== -1 || selected.indexOf(pname) !== -1;
+    html += '<label style="display:block;margin:4px 0;cursor:pointer;font-size:13px">';
+    html += '<input type="checkbox" class="sync-vendor-cb" value="' + esc(pid) + '" ' + (checked ? 'checked' : '') + '> ';
+    html += esc(pname);
+    html += '</label>';
+  });
+  html += '</div>';
+
+  html += '<div style="margin-top:16px">';
+  html += '<button class="btn btn-primary" onclick="saveSyncConfig(\'' + esc(name) + '\')">' + _('modal.save') + '</button>';
+  html += '</div>';
+  html += '</div>';
+
+  $('backendConfigPane').innerHTML = html;
+}
+
+function toggleSyncVendorList() {
+  var el = $('syncVendorList');
+  if (!el) return;
+  el.style.display = document.querySelector('input[name="syncMode"]:checked').value === 'selected' ? '' : 'none';
+}
+
+async function saveSyncConfig(name) {
+  var disabled = $('syncDisabledCheck') ? $('syncDisabledCheck').checked : false;
+  var mode = document.querySelector('input[name="syncMode"]:checked');
+  var syncVendors = 'all';
+  if (mode && mode.value === 'selected') {
+    syncVendors = [];
+    document.querySelectorAll('.sync-vendor-cb:checked').forEach(function(cb) {
+      syncVendors.push(cb.value);
+    });
+  }
+  var res = await api('/api/backends/' + name + '/sync-config', {
+    method: 'PUT',
+    body: JSON.stringify({disabled: disabled, sync_vendors: syncVendors}),
+  });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast(_('toast.saved'), 'success');
+  // Refresh the backend data
+  var newData = await api('/api/backends/' + name);
+  if (!newData.error) {
+    _currentBackendData = newData;
+    // Update the sync tab label
+    var syncBtn = $('syncTabBtn');
+    if (syncBtn) {
+      var cfg = newData.config || {};
+      syncBtn.textContent = '⚙ ' + (cfg.disabled ? _('backends.syncDisabled') : (cfg.sync_vendors && cfg.sync_vendors !== 'all' ? _('backends.syncSelected') : _('backends.syncAll')));
+    }
+  }
 }
 
 async function loadBackendConfig(name, path) {
@@ -632,6 +750,8 @@ function closeBackendDetail() {
   $('backendDetailModal').classList.remove('open');
   _currentBackendDetail = null;
   _currentConfigPath = null;
+  _currentBackendData = null;
+  _currentSyncTabActive = false;
 }
 
 // ── Vendor List ─────────────────────────

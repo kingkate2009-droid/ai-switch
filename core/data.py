@@ -186,6 +186,10 @@ def update_settings(**kwargs) -> dict:
     return data["settings"]
 
 
+def get_backend_config(backend_name: str) -> dict:
+    return _load_data().get("backends", {}).get(backend_name, {})
+
+
 def get_backend_configs() -> dict:
     return _load_data().get("backends", {})
 

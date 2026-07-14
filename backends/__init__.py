@@ -42,8 +42,23 @@ def init_backends(data_dir: str = "") -> None:
     _discover_adapters()
 
 
-def on_key_added(vendor: dict, key: dict) -> None:
+def _filtered_adapters(vendor: dict, key: dict) -> list[BackendAdapter]:
+    """Iterates adapters that should receive an event for this vendor+key pair."""
+    result = []
     for adapter in _adapters.values():
+        try:
+            if adapter.supports_byok and adapter.should_sync(vendor, key):
+                result.append(adapter)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Backend %s should_sync failed: %s", adapter.name, e
+            )
+    return result
+
+
+def on_key_added(vendor: dict, key: dict) -> None:
+    for adapter in _filtered_adapters(vendor, key):
         try:
             adapter.on_key_added(vendor, key)
         except Exception as e:
@@ -52,7 +67,7 @@ def on_key_added(vendor: dict, key: dict) -> None:
 
 
 def on_key_updated(vendor: dict, key: dict) -> None:
-    for adapter in _adapters.values():
+    for adapter in _filtered_adapters(vendor, key):
         try:
             adapter.on_key_updated(vendor, key)
         except Exception as e:
@@ -61,7 +76,7 @@ def on_key_updated(vendor: dict, key: dict) -> None:
 
 
 def on_key_removed(vendor: dict, key: dict) -> None:
-    for adapter in _adapters.values():
+    for adapter in _filtered_adapters(vendor, key):
         try:
             adapter.on_key_removed(vendor, key)
         except Exception as e:
