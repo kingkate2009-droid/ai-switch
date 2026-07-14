@@ -4,61 +4,57 @@
   <a href="README.md">English</a>
 </p>
 
-<p align="center">
-  <img src="static/icon.svg" alt="OpenClaw Auto Manager" width="120"/>
-</p>
-
-<h1 align="center">OpenClaw Auto Manager</h1>
+<h1 align="center">AI Switch</h1>
 
 <p align="center">
-  <strong>Multi-vendor API key manager for <a href="https://github.com/anthropics/openclaw">OpenClaw</a></strong>
+  <strong>Unified AI API Key &amp; Backend Management</strong>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
   <a href="#features">Features</a> •
   <a href="#supported-providers">Providers</a> •
+  <a href="#supported-backends">Backends</a> •
   <a href="#configuration">Config</a> •
   <a href="#license">License</a>
 </p>
 
 ---
 
-A visual multi-vendor API key manager designed for OpenClaw. Add, detect, and sync your AI provider API keys with one click. Supports 26+ mainstream providers with automatic health checking and OpenClaw configuration sync.
+A unified management platform for AI provider API keys and development tool backends. Add, detect, and sync your API keys across OpenClaw, OpenCode, Claude Code, Codex CLI, Cline, Aider, Continue.dev, Hermes Agent, QwenCode — all from one place.
 
 ## Features
 
-- **Multi-vendor Management** — Left panel for providers, right panel for API keys
+- **Multi-vendor Management** — Vendor list + key table layout
 - **26+ Built-in Providers** — OpenAI, Anthropic, DeepSeek, Groq, Google Gemini, xAI, Together AI, and more
-- **Provider-specific Health Checks** — Each provider uses the correct API format for probing
-- **OpenClaw Auto-Sync** — Healthy keys auto-sync to OpenClaw config, unhealthy keys auto-remove
-- **Enable/Disable Keys** — Toggle keys to auto-sync or remove from OpenClaw config
-- **Batch Import** — Paste text to auto-parse URL + API Key + provider
+- **Provider-specific Health Checks** — Each provider uses correct API format for probing
+- **Multi-backend Auto-Sync** — Healthy keys auto-sync to all supported AI tools
+- **Enable/Disable Keys** — Toggle keys to control backend sync
+- **Batch Import** — Paste text to auto-parse URL + API Key + provider (Base64 auto-decode)
+- **Config File Editor** — View and edit backend configuration files with backup
+- **Dashboard View** — Stats cards, backend status, quick actions
 - **Light/Dark Theme** — One-click toggle, saves preference
 - **Multi-language** — English / 简体中文 / 繁體中文
-- **Gateway Status** — View and restart OpenClaw Gateway
-- **Remote Gateway** — Connect to remote OpenClaw via SSH or Gateway API
+- **Adapter Architecture** — Add new backends by dropping in one Python file
 
 ## Quick Start
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USER/openclaw-auto-manager.git
-cd openclaw-auto-manager
+git clone https://github.com/kingkate2009-droid/ai-switch.git
+cd ai-switch
 
 # Install dependencies
 pip install -r requirements.txt
 
 # Start
-python3 app.py
+python3 run.py
 # → Open http://127.0.0.1:8787
-
-# Click "Sync from OpenClaw" to import existing config
 ```
 
-**Requirements**: Python 3.9+, OpenClaw CLI installed and configured
+**Requirements**: Python 3.9+
 
-**Compatible with**: OpenClaw 2026.3.0+ (recommended: 2026.6.11+)
+**Compatible with**: OpenClaw 2026.6.11+, OpenCode, Claude Code, Codex CLI, Cline 3.x+, Aider, Continue.dev, Hermes Agent, QwenCode
 
 ### Docker
 
@@ -71,27 +67,25 @@ docker compose up -d
 
 ### Add a Provider
 
-Click **+ Add Vendor** → Select provider from dropdown (auto-fills URL) → Enter name → Save
+Click **Vendors** → **+ Add Vendor** → Select provider (auto-fills URL) → Enter name → Save
 
 ### Add an API Key
 
-Select provider → Click **+ Add Key** → Enter name and key → Save
+Select vendor → Click **+ Add Key** → Enter name and key → Save
 
 ### Health Check
 
 - Single check: Click **Check** on the key row
-- Check all: Click **Check All Health** in toolbar
-- Healthy key → auto-sync to OpenClaw
-- Unhealthy key → removed from OpenClaw and disabled (kept in system)
+- Check all: Click **Check All Health** on Dashboard
+- Healthy key → auto-sync to all backend tools
 
 ### Batch Import
 
-Supported format (one per line):
+Drag or paste key text. Supports multi-line, JSON, and Base64 formats:
 
 ```
 openai https://api.openai.com/v1 sk-proj-xxxx...
 deepseek https://api.deepseek.com/v1 sk-xxxx...
-https://api.groq.com/openai/v1 gsk_xxxx...
 ```
 
 Auto-detects URL → matches provider → preview → one-click import
@@ -106,18 +100,31 @@ Auto-detects URL → matches provider → preview → one-click import
 
 Unknown providers default to `openai_chat` probe.
 
+## Supported Backends
+
+| Backend | Config Files |
+|---|---|
+| OpenClaw | `openclaw.json`, `auth-profiles.json`, `models.json` |
+| OpenCode | `auth.json`, `opencode.jsonc`, `tui.jsonc` |
+| Claude Code | `settings.json`, `~/.claude.json`, `keybindings.json` |
+| Codex CLI | `auth.json`, `config.toml` |
+| Cline | `secrets.json`, `config.json`, `globalState.json`, `cline_mcp_settings.json` |
+| Aider | `.aider.conf.yml`, `.aider.model.settings.yml`, `.aider.model.metadata.json` |
+| Continue.dev | `config.json`, `config.yaml`, `.continuerc.json` |
+| Hermes Agent | `config.yaml`, `.env` |
+| QwenCode | `settings.json`, `.env` |
+
 ## Configuration
 
 | Item | Path |
 |---|---|
-| Manager data | `~/.openclaw-auto-manager/data.json` |
-| Health cache | `~/.openclaw-auto-manager/health_cache.json` |
-| OpenClaw config | `~/.openclaw/openclaw.json` |
-| Port | `8787` (env: `OPENCLAW_MANAGER_PORT`) |
+| Manager data | `~/.ai-switch/data.json` (auto-migrated from `~/.openclaw-auto-manager`) |
+| Health cache | `~/.ai-switch/health_cache.json` |
+| Port | `8787` (env: `AI_SWITCH_PORT`) |
 
 ## Security
 
-> **API Keys are stored in `~/.openclaw-auto-manager/data.json`.**
+> **API Keys are stored in `~/.ai-switch/data.json`.**
 > This file is NOT inside the project directory.
 > Never commit it to version control.
 
@@ -127,6 +134,7 @@ Unknown providers default to `openai_chat` probe.
 - **Frontend**: Vanilla JS + CSS Variables theming
 - **Storage**: JSON file (no database needed)
 - **i18n**: Client-side locale switching
+- **Architecture**: Pluggable adapter pattern
 
 ## Roadmap
 
@@ -136,6 +144,7 @@ Unknown providers default to `openai_chat` probe.
 - [ ] Key usage statistics
 - [ ] Export/import config
 - [ ] PWA support
+- [ ] Additional backend adapters
 
 ## License
 
