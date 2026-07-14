@@ -236,6 +236,8 @@ def _is_model_error(body: str) -> bool:
         "no available channel for model", "model not available", "model access denied",
         "model not supported", "unknown model", "unrecognized model", "unsupportedmodel",
         "unsupported model", "does not support the coding plan",
+        "无权访问", "无权限", "no access to model", "cannot access model",
+        "令牌无权", "not allowed to access",
     ]):
         return True
     return False

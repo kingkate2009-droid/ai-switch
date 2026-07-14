@@ -7,59 +7,157 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
+<svg style="display:none">
+<symbol id="ico-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="ico-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><line x1="10.85" y1="12.15" x2="19" y2="4"/><line x1="18" y1="5" x2="20" y2="7"/><line x1="15" y1="8" x2="17" y2="10"/></symbol>
+<symbol id="ico-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/></symbol>
+<symbol id="ico-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
+<symbol id="ico-sync" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+<symbol id="ico-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+<symbol id="ico-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+<symbol id="ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+<symbol id="ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
+<symbol id="ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></symbol>
+<symbol id="ico-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+<symbol id="ico-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+<symbol id="ico-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="ico-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+<symbol id="ico-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
+<symbol id="ico-openclaw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M8 10l4 2 4-2"/></symbol>
+</svg>
+
 <div class="app">
   <aside class="sidebar">
     <div class="logo">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M8 10l4 2 4-2"/></svg>
       <h1 data-i18n="app.title">{{ t('app.title') }}</h1>
     </div>
+
     <nav>
-      <a class="active" href="#" data-view="vendors" data-i18n="nav.vendors">{{ t('nav.vendors') }}</a>
-      <a href="#" data-view="gateway" data-i18n="nav.gateway">{{ t('nav.gateway') }}</a>
+      <a href="#" class="nav-item active" data-view="dashboard" onclick="switchView('dashboard');return false">
+        <svg width="18" height="18"><use href="#ico-grid"/></svg>
+        <span data-i18n="nav.dashboard">{{ t('nav.dashboard') }}</span>
+      </a>
+      <a href="#" class="nav-item" data-view="vendors" onclick="switchView('vendors');return false">
+        <svg width="18" height="18"><use href="#ico-key"/></svg>
+        <span data-i18n="nav.vendors">{{ t('nav.vendors') }}</span>
+      </a>
+      <a href="#" class="nav-item" data-view="backends" onclick="switchView('backends');return false">
+        <svg width="18" height="18"><use href="#ico-box"/></svg>
+        <span data-i18n="nav.backends">{{ t('nav.backends') }}</span>
+      </a>
     </nav>
-    <div class="gateway-status" id="gatewayMiniStatus">
-      <span class="status-dot unknown"></span>
-      <span><span data-i18n="gateway.status">{{ t('gateway.status') }}</span> <span id="gatewayMiniText" data-i18n="gateway.checking">{{ t('gateway.checking') }}</span></span>
+
+    <div class="sidebar-footer">
+      <div class="mini-status" id="miniBackendStatus">
+        <span class="dot unknown" id="miniDot"></span>
+        <span id="miniLabel" data-i18n="gateway.checking">{{ t('gateway.checking') }}</span>
+      </div>
+      <select class="lang-select" id="langSelect" onchange="switchLang(this.value)">
+        <option value="en" {% if lang == 'en' %}selected{% endif %}>EN</option>
+        <option value="zh-CN" {% if lang == 'zh-CN' %}selected{% endif %}>简</option>
+        <option value="zh-TW" {% if lang == 'zh-TW' %}selected{% endif %}>繁</option>
+      </select>
     </div>
   </aside>
 
   <main>
-    <header class="toolbar">
-      <h2 id="viewTitle" data-i18n="nav.vendors">{{ t('nav.vendors') }}</h2>
-      <div class="toolbar-actions">
-        <button class="btn btn-secondary" onclick="showBatchImportModal()" data-i18n="toolbar.batchImport">{{ t('toolbar.batchImport') }}</button>
-        <button class="btn btn-secondary" onclick="syncFromOpenclaw()" data-i18n="toolbar.sync">{{ t('toolbar.sync') }}</button>
-        <button class="btn btn-secondary" onclick="checkAllHealth()" data-i18n="toolbar.checkAllHealth">{{ t('toolbar.checkAllHealth') }}</button>
-        <button class="btn btn-primary" onclick="showAddVendorModal()" data-i18n="toolbar.addVendor">{{ t('toolbar.addVendor') }}</button>
-        <select class="lang-select" id="langSelect" onchange="switchLang(this.value)">
-          <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ t('lang.en') }}</option>
-          <option value="zh-CN" {% if lang == 'zh-CN' %}selected{% endif %}>{{ t('lang.zhCN') }}</option>
-          <option value="zh-TW" {% if lang == 'zh-TW' %}selected{% endif %}>{{ t('lang.zhTW') }}</option>
-        </select>
-        <button class="btn btn-sm" id="themeToggle" onclick="toggleTheme()">{{ t('theme.dark') }}</button>
+    <!-- ═══ Dashboard ═══ -->
+    <div class="view" id="view-dashboard">
+      <div class="page-head">
+        <h2 data-i18n="dashboard.title">{{ t('dashboard.title') }}</h2>
+        <p class="page-desc" data-i18n="dashboard.desc">{{ t('dashboard.desc') }}</p>
       </div>
-    </header>
 
-    <div class="view active" id="view-vendors">
-      <div class="master-detail">
-        <div class="master-panel">
-          <div class="master-header">
-            <span data-i18n="vendorList.title">{{ t('vendorList.title') }}</span>
-          </div>
+      <div class="stats-row" id="statsRow">
+        <div class="stat-card"><div class="stat-value" id="statVendors">-</div><div class="stat-label" data-i18n="dashboard.vendors">{{ t('dashboard.vendors') }}</div></div>
+        <div class="stat-card"><div class="stat-value" id="statKeys">-</div><div class="stat-label" data-i18n="dashboard.keys">{{ t('dashboard.keys') }}</div></div>
+        <div class="stat-card success"><div class="stat-value" id="statHealthy">-</div><div class="stat-label" data-i18n="dashboard.healthy">{{ t('dashboard.healthy') }}</div></div>
+        <div class="stat-card"><div class="stat-value" id="statBackends">-</div><div class="stat-label" data-i18n="dashboard.backends">{{ t('dashboard.backends') }}</div></div>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-head">
+          <h3 data-i18n="dashboard.backendStatus">{{ t('dashboard.backendStatus') }}</h3>
+          <button class="btn btn-sm" onclick="refreshBackendStatus()">
+            <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+            <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+          </button>
+        </div>
+        <div id="dashBackendCards" class="backend-grid"></div>
+      </div>
+
+      <div class="dash-section">
+        <h3 data-i18n="dashboard.quickActions">{{ t('dashboard.quickActions') }}</h3>
+        <div class="action-row">
+          <button class="btn" onclick="switchView('vendors'); showAddVendorModal()">
+            <svg width="16" height="16"><use href="#ico-plus"/></svg>
+            <span data-i18n="dashboard.addVendor">{{ t('dashboard.addVendor') }}</span>
+          </button>
+          <button class="btn" onclick="showBatchImportModal()">
+            <svg width="16" height="16"><use href="#ico-upload"/></svg>
+            <span data-i18n="dashboard.batchImport">{{ t('dashboard.batchImport') }}</span>
+          </button>
+          <button class="btn" onclick="syncAll()">
+            <svg width="16" height="16"><use href="#ico-sync"/></svg>
+            <span data-i18n="toolbar.sync">{{ t('toolbar.sync') }}</span>
+          </button>
+          <button class="btn" onclick="checkAllHealth()">
+            <svg width="16" height="16"><use href="#ico-play"/></svg>
+            <span data-i18n="dashboard.checkAll">{{ t('dashboard.checkAll') }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Vendors ═══ -->
+    <div class="view" id="view-vendors">
+      <div class="page-head">
+        <h2 data-i18n="nav.vendors">{{ t('nav.vendors') }}</h2>
+        <div class="page-actions">
+          <button class="btn" onclick="showBatchImportModal()">
+            <svg width="14" height="14"><use href="#ico-upload"/></svg>
+            <span data-i18n="toolbar.batchImport">{{ t('toolbar.batchImport') }}</span>
+          </button>
+          <button class="btn" onclick="syncAll()">
+            <svg width="14" height="14"><use href="#ico-sync"/></svg>
+            <span data-i18n="toolbar.sync">{{ t('toolbar.sync') }}</span>
+          </button>
+          <button class="btn" onclick="checkAllHealth()">
+            <svg width="14" height="14"><use href="#ico-play"/></svg>
+            <span data-i18n="toolbar.checkAllHealth">{{ t('toolbar.checkAllHealth') }}</span>
+          </button>
+          <button class="btn btn-primary" onclick="showAddVendorModal()">
+            <svg width="14" height="14"><use href="#ico-plus"/></svg>
+            <span data-i18n="toolbar.addVendor">{{ t('toolbar.addVendor') }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="vendor-layout">
+        <div class="vendor-list-panel">
+          <div class="vendor-list-head" data-i18n="vendorList.title">{{ t('vendorList.title') }}</div>
           <div id="vendorList" class="vendor-list"></div>
         </div>
-        <div class="detail-panel">
+        <div class="vendor-detail-panel">
           <div id="keyDetail">
-            <div class="detail-header">
-              <h3 id="detailVendorName"></h3>
-              <code id="detailVendorUrl" class="vendor-url"></code>
-              <button class="btn-copy" onclick="copyText(_currentVendor.api_url)" title="Copy API URL">&#x2398;</button>
-              <div class="detail-actions">
-                <button class="btn btn-sm" onclick="editVendor()" data-i18n="action.edit" style="display:none" id="editVendorBtn">{{ t('action.edit') }}</button>
-                <button id="deleteVendorBtn" class="btn btn-sm btn-danger" onclick="deleteVendor()" data-i18n="vendorList.deleteVendor" style="display:none">{{ t('vendorList.deleteVendor') }}</button>
-                <button class="btn btn-sm btn-primary" id="addKeyBtn" onclick="showAddKeyModal()" data-i18n="keyList.addKey" style="display:none">{{ t('keyList.addKey') }}</button>
+            <div class="detail-head">
+              <div class="detail-head-left">
+                <h3 id="detailVendorName"></h3>
+                <code id="detailVendorUrl" class="detail-url"></code>
+                <button class="btn-icon" onclick="copyText(_currentVendor.api_url)" title="Copy URL"><svg width="14" height="14"><use href="#ico-copy"/></svg></button>
+              </div>
+              <div class="detail-head-actions">
+                <button id="addKeyBtn" class="btn btn-primary btn-sm" onclick="showAddKeyModal()" style="display:none">
+                  <svg width="12" height="12"><use href="#ico-plus"/></svg>
+                  <span data-i18n="keyList.addKey">{{ t('keyList.addKey') }}</span>
+                </button>
+                <button class="btn btn-sm" onclick="editVendor()" style="display:none" id="editVendorBtn" data-i18n="action.edit">{{ t('action.edit') }}</button>
+                <button id="deleteVendorBtn" class="btn btn-sm btn-danger" onclick="deleteVendor()" style="display:none">{{ t('vendorList.deleteVendor') }}</button>
               </div>
             </div>
+
             <div id="keyTableContainer">
               <div class="key-toolbar">
                 <input type="text" id="keySearch" oninput="filterKeys()" data-i18n-placeholder="keySearch.placeholder" placeholder="{{ t('keySearch.placeholder') }}">
@@ -76,22 +174,25 @@
                   <span id="batchCount" class="batch-count"></span>
                 </div>
               </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th class="col-check"><input type="checkbox" id="selectAllCheck" onchange="toggleSelectAll()"></th>
-                    <th data-i18n="table.keyName">{{ t('table.keyName') }}</th>
-                    <th data-i18n="table.apiKey">{{ t('table.apiKey') }}</th>
-                    <th data-i18n="table.status">{{ t('table.status') }}</th>
-                    <th data-i18n="table.latency">{{ t('table.latency') }}</th>
-                    <th data-i18n="table.models">{{ t('table.models') }}</th>
-                    <th data-i18n="table.actions">{{ t('table.actions') }}</th>
-                  </tr>
-                </thead>
-                <tbody id="keysBody"></tbody>
-              </table>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="col-check"><input type="checkbox" id="selectAllCheck" onchange="toggleSelectAll()"></th>
+                      <th data-i18n="table.keyName">{{ t('table.keyName') }}</th>
+                      <th data-i18n="table.apiKey">{{ t('table.apiKey') }}</th>
+                      <th data-i18n="table.status">{{ t('table.status') }}</th>
+                      <th data-i18n="table.latency">{{ t('table.latency') }}</th>
+                      <th data-i18n="table.models">{{ t('table.models') }}</th>
+                      <th data-i18n="table.actions">{{ t('table.actions') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody id="keysBody"></tbody>
+                </table>
+              </div>
             </div>
             <div id="noVendorSelected" class="empty-state">
+              <svg width="48" height="48" style="opacity:0.2;margin-bottom:12px"><use href="#ico-key"/></svg>
               <p data-i18n="vendorList.selectHint">{{ t('vendorList.selectHint') }}</p>
             </div>
           </div>
@@ -99,77 +200,64 @@
       </div>
     </div>
 
-    <div class="view" id="view-gateway">
-      <div class="gateway-panel">
-        <div class="card">
-          <h3 data-i18n="gatewayPanel.title">{{ t('gatewayPanel.title') }}</h3>
-          <div class="form-group" style="margin-bottom:16px">
+    <!-- ═══ Backends ═══ -->
+    <div class="view" id="view-backends">
+      <div class="page-head">
+        <h2 data-i18n="nav.backends">{{ t('nav.backends') }}</h2>
+        <p class="page-desc" data-i18n="backends.desc">{{ t('backends.desc') }}</p>
+      </div>
+
+      <div id="backendGrid" class="backend-grid"></div>
+
+      <!-- OpenClaw controls -->
+      <div class="section-card" id="openclawControls">
+        <div class="section-card-head">
+          <svg width="20" height="20"><use href="#ico-openclaw"/></svg>
+          <span>OpenClaw</span>
+        </div>
+        <div class="section-card-body">
+          <div class="control-row">
             <label data-i18n="gatewayPanel.mode">{{ t('gatewayPanel.mode') }}</label>
             <select id="gatewayMode" onchange="onGatewayModeChange()">
               <option value="local">{{ t('gatewayPanel.local') }}</option>
               <option value="remote">{{ t('gatewayPanel.remote') }}</option>
             </select>
           </div>
-
-          <!-- Local mode -->
           <div id="gatewayLocal">
-            <div id="gatewayStatusContent">
-              <div class="status-line"><span class="label" data-i18n="gatewayPanel.running">{{ t('gatewayPanel.running') }}</span> <span id="gRunning">-</span></div>
-              <div class="status-line"><span class="label" data-i18n="gatewayPanel.port">{{ t('gatewayPanel.port') }}</span> <span id="gPort">-</span></div>
-              <div class="status-line"><span class="label" data-i18n="gatewayPanel.message">{{ t('gatewayPanel.message') }}</span> <span id="gMessage">-</span></div>
-              <div class="status-line"><span class="label" data-i18n="gatewayPanel.openclawVersion">{{ t('gatewayPanel.openclawVersion') }}</span> <span id="gOpenclawVersion">-</span></div>
-              <div class="status-line"><span class="label" data-i18n="gatewayPanel.managerVersion">{{ t('gatewayPanel.managerVersion') }}</span> <span id="gManagerVersion">-</span></div>
-              <div id="versionWarning" style="display:none" class="status-line">⚠️ <span id="versionWarningText"></span></div>
+            <div class="status-grid" id="gatewayStatusContent">
+              <div class="status-item"><span class="label" data-i18n="gatewayPanel.running">{{ t('gatewayPanel.running') }}</span><span id="gRunning">-</span></div>
+              <div class="status-item"><span class="label" data-i18n="gatewayPanel.port">{{ t('gatewayPanel.port') }}</span><span id="gPort">-</span></div>
+              <div class="status-item"><span class="label" data-i18n="gatewayPanel.message">{{ t('gatewayPanel.message') }}</span><span id="gMessage">-</span></div>
+              <div class="status-item"><span class="label" data-i18n="gatewayPanel.openclawVersion">{{ t('gatewayPanel.openclawVersion') }}</span><span id="gOpenclawVersion">-</span></div>
+              <div class="status-item"><span class="label" data-i18n="gatewayPanel.managerVersion">{{ t('gatewayPanel.managerVersion') }}</span><span id="gManagerVersion">-</span></div>
             </div>
-            <div class="card-actions">
-              <button class="btn btn-secondary" onclick="refreshGatewayStatus()" data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</button>
-              <button class="btn btn-warning" onclick="restartGateway()" data-i18n="gatewayPanel.restart">{{ t('gatewayPanel.restart') }}</button>
+            <div id="versionWarning" style="display:none" class="warn-banner">⚠️ <span id="versionWarningText"></span></div>
+            <div class="control-actions">
+              <button class="btn" onclick="refreshGatewayStatus()">
+                <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+                <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+              </button>
+              <button class="btn btn-warning" onclick="restartGateway()">
+                <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+                <span data-i18n="gatewayPanel.restart">{{ t('gatewayPanel.restart') }}</span>
+              </button>
             </div>
           </div>
-
-          <!-- Remote mode -->
           <div id="gatewayRemote" style="display:none">
-            <div class="form-group">
-              <label data-i18n="gatewayPanel.remoteType">{{ t('gatewayPanel.remoteType') }}</label>
-              <select id="remoteType" onchange="onRemoteTypeChange()">
-                <option value="ssh">SSH</option>
-                <option value="gateway">Gateway API</option>
-              </select>
-            </div>
+            <div class="control-row"><label data-i18n="gatewayPanel.remoteType">{{ t('gatewayPanel.remoteType') }}</label><select id="remoteType" onchange="onRemoteTypeChange()"><option value="ssh">SSH</option><option value="gateway">Gateway API</option></select></div>
             <div id="remoteSshFields">
-              <div class="form-group">
-                <label data-i18n="connModal.host">{{ t('connModal.host') }}</label>
-                <input type="text" id="remoteHost" placeholder="192.168.1.100">
-              </div>
-              <div class="form-group">
-                <label data-i18n="connModal.port">{{ t('connModal.port') }}</label>
-                <input type="number" id="remotePort" value="22">
-              </div>
-              <div class="form-group">
-                <label data-i18n="connModal.user">{{ t('connModal.user') }}</label>
-                <input type="text" id="remoteUser" placeholder="root">
-              </div>
-              <div class="form-group">
-                <label data-i18n="connModal.keyFile">{{ t('connModal.keyFile') }}</label>
-                <input type="text" id="remoteKeyFile" placeholder="~/.ssh/id_rsa">
-              </div>
-              <div class="form-group">
-                <label data-i18n="connModal.configPath">{{ t('connModal.configPath') }}</label>
-                <input type="text" id="remoteConfigPath" value="~/.openclaw">
-              </div>
+              <div class="control-row"><label data-i18n="connModal.host">{{ t('connModal.host') }}</label><input type="text" id="remoteHost" placeholder="192.168.1.100"></div>
+              <div class="control-row"><label data-i18n="connModal.port">{{ t('connModal.port') }}</label><input type="number" id="remotePort" value="22"></div>
+              <div class="control-row"><label data-i18n="connModal.user">{{ t('connModal.user') }}</label><input type="text" id="remoteUser" placeholder="root"></div>
+              <div class="control-row"><label data-i18n="connModal.keyFile">{{ t('connModal.keyFile') }}</label><input type="text" id="remoteKeyFile" placeholder="~/.ssh/id_rsa"></div>
+              <div class="control-row"><label data-i18n="connModal.configPath">{{ t('connModal.configPath') }}</label><input type="text" id="remoteConfigPath" value="~/.openclaw"></div>
             </div>
             <div id="remoteGatewayFields" style="display:none">
-              <div class="form-group">
-                <label data-i18n="connModal.gatewayUrl">{{ t('connModal.gatewayUrl') }}</label>
-                <input type="text" id="remoteUrl" placeholder="ws://192.168.1.100:18789">
-              </div>
-              <div class="form-group">
-                <label data-i18n="connModal.token">{{ t('connModal.token') }}</label>
-                <input type="password" id="remoteToken" placeholder="Optional">
-              </div>
+              <div class="control-row"><label data-i18n="connModal.gatewayUrl">{{ t('connModal.gatewayUrl') }}</label><input type="text" id="remoteUrl" placeholder="ws://192.168.1.100:18789"></div>
+              <div class="control-row"><label data-i18n="connModal.token">{{ t('connModal.token') }}</label><input type="password" id="remoteToken" placeholder="Optional"></div>
             </div>
-            <div class="card-actions">
-              <button class="btn btn-secondary" onclick="testRemoteGateway()" data-i18n="connAction.test">{{ t('connAction.test') }}</button>
+            <div class="control-actions">
+              <button class="btn" onclick="testRemoteGateway()" data-i18n="connAction.test">{{ t('connAction.test') }}</button>
               <button class="btn btn-primary" onclick="saveRemoteGateway()" data-i18n="modal.save">{{ t('modal.save') }}</button>
             </div>
             <div id="remoteResult" style="display:none" class="conn-result"></div>
@@ -181,6 +269,8 @@
 </div>
 
 <div id="toastContainer" class="toast-container"></div>
+
+<!-- ═══ Modals ═══ -->
 
 <div class="modal-overlay" id="vendorModal" onclick="closeVendorModal()">
   <div class="modal" onclick="event.stopPropagation()">
@@ -212,9 +302,19 @@
           <option value="anthropic">Anthropic Compatible</option>
         </select>
       </div>
+      <div class="form-group">
+        <label class="checkbox-label"><input type="checkbox" id="vendorThinkingDisabled"><span data-i18n="vendorModal.disableThinking">{{ t('vendorModal.disableThinking') }}</span></label>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label"><input type="checkbox" id="vendorProxyEnabled" onchange="toggleProxyTarget()"><span data-i18n="vendorModal.proxyEnabled">{{ t('vendorModal.proxyEnabled') }}</span></label>
+      </div>
+      <div class="form-group" id="proxyTargetGroup" style="display:none">
+        <label for="vendorProxyTarget" data-i18n="vendorModal.proxyTarget">{{ t('vendorModal.proxyTarget') }}</label>
+        <input type="text" id="vendorProxyTarget" placeholder="https://original-api.com">
+      </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeVendorModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
+      <button class="btn" onclick="closeVendorModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
       <button class="btn btn-primary" onclick="saveVendor()" data-i18n="modal.save">{{ t('modal.save') }}</button>
     </div>
   </div>
@@ -234,14 +334,16 @@
       </div>
       <div class="form-group">
         <label for="keyApiKey" data-i18n="keyModal.apiKey">{{ t('keyModal.apiKey') }}</label>
-        <div class="input-with-toggle">
+        <div class="input-group">
           <input type="password" id="keyApiKey" data-i18n-placeholder="keyModal.placeholderApiKey" placeholder="{{ t('keyModal.placeholderApiKey') }}">
-          <button class="btn-toggle" id="toggleKeyBtn" onclick="toggleKeyVisibility()" data-i18n="modal.show">{{ t('modal.show') }}</button>
+          <button class="btn-toggle" id="toggleKeyBtn" onclick="toggleKeyVisibility()">
+            <svg width="14" height="14"><use href="#ico-eye"/></svg>
+          </button>
         </div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeKeyModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
+      <button class="btn" onclick="closeKeyModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
       <button class="btn btn-primary" onclick="saveKey()" data-i18n="modal.save">{{ t('modal.save') }}</button>
     </div>
   </div>
@@ -256,7 +358,7 @@
     <div class="modal-body">
       <div class="form-group">
         <label for="batchImportText" data-i18n="batchImport.label">{{ t('batchImport.label') }}</label>
-        <textarea id="batchImportText" rows="8" data-i18n-placeholder="batchImport.placeholder" placeholder="{{ t('batchImport.placeholder') }}"></textarea>
+        <textarea id="batchImportText" rows="8" data-i18n-placeholder="batchImport.placeholder" placeholder="{{ t('batchImport.placeholder') }}" oninput="debounceParseBatch()"></textarea>
       </div>
       <div id="batchImportPreview" style="display:none">
         <h4 data-i18n="batchImport.preview">{{ t('batchImport.preview') }}</h4>
@@ -265,8 +367,8 @@
       <div id="batchImportError" class="error-message" style="display:none"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeBatchImportModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
-      <button class="btn btn-secondary" id="batchParseBtn" onclick="parseBatchImport()" data-i18n="batchImport.parse">{{ t('batchImport.parse') }}</button>
+      <button class="btn" onclick="closeBatchImportModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
+      <button class="btn" id="batchParseBtn" onclick="parseBatchImport()" data-i18n="batchImport.parse">{{ t('batchImport.parse') }}</button>
       <button class="btn btn-primary" id="batchApplyBtn" onclick="applyBatchImport()" style="display:none" data-i18n="batchImport.import">{{ t('batchImport.import') }}</button>
     </div>
   </div>
@@ -282,15 +384,39 @@
       <div id="modelsModalList"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModelsModal()" data-i18n="modal.close">{{ t('modal.close') }}</button>
+      <button class="btn" onclick="closeModelsModal()" data-i18n="modal.close">{{ t('modal.close') }}</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="backendDetailModal" onclick="closeBackendDetail()">
+  <div class="modal modal-wide" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="backendDetailTitle"></h3>
+      <button class="btn-close" onclick="closeBackendDetail()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="backendDetailInfo" style="margin-bottom:16px;font-size:13px;color:var(--text2)"></div>
+      <div id="backendConfigTabs" style="display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:0"></div>
+      <div id="backendConfigPane" style="min-height:200px"></div>
+    </div>
+    <div class="modal-footer" id="backendDetailFooter">
+      <button class="btn" onclick="closeBackendDetail()" data-i18n="modal.close">{{ t('modal.close') }}</button>
+      <button class="btn btn-primary" id="backendSaveConfigBtn" onclick="saveBackendConfig()" style="display:none" data-i18n="modal.save">{{ t('modal.save') }}</button>
     </div>
   </div>
 </div>
 
 <script>
-let LOCALE_STRINGS = {};
-let currentLang = '{{ lang }}';
+let CURRENT_LANG = '{{ lang }}';
+let ALL_LOCALES = {{ all_locales | tojson }};
+let LOCALE_STRINGS = Object.assign({}, ALL_LOCALES['en'], ALL_LOCALES[CURRENT_LANG]);
 let selectedVendorId = null;
+let _knownProviders = [];
+let _allVendorsData = [];
+let _allHealthData = {};
+let _currentVendor = null;
+let _allKeysData = [];
 
 function _(key) { return LOCALE_STRINGS[key] || key; }
 
@@ -311,17 +437,213 @@ async function api(path, opts) {
     headers: { 'Content-Type': 'application/json', ...((opts && opts.headers) || {}) },
     ...opts,
   });
-  if (!res.ok) return {error: res.statusText};
+  if (!res.ok) {
+    let msg = res.statusText || ('HTTP ' + res.status);
+    try {
+      const body = await res.json();
+      if (body.error) msg = body.error;
+    } catch (_) {}
+    return {error: msg};
+  }
   return res.json();
 }
 
-// ── Vendor List ─────────────────────────────────────────
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(function() {
+    showToast(_('toast.copied') || 'Copied', 'success');
+  });
+}
+
+function showToast(msg, type) {
+  type = type || 'info';
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  $('toastContainer').appendChild(el);
+  setTimeout(function() {
+    el.classList.add('toast-leave');
+    setTimeout(function() { el.remove(); }, 250);
+  }, 3000);
+}
+
+// ── View Switching ───────────────────────
+
+function switchView(name) {
+  document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.nav-item').forEach(function(el) { el.classList.remove('active'); });
+  var v = $('view-' + name);
+  if (v) v.classList.add('active');
+  var n = document.querySelector('.nav-item[data-view="' + name + '"]');
+  if (n) n.classList.add('active');
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'vendors') loadVendors();
+  if (name === 'backends') loadBackends();
+}
+
+// ── Dashboard ────────────────────────────
+
+async function loadDashboard() {
+  const data = await api('/api/vendors');
+  const backends = await api('/api/backends');
+  _allVendorsData = data.vendors || [];
+  _allHealthData = data.health || {};
+
+  var totalKeys = 0, healthy = 0;
+  _allVendorsData.forEach(function(v) {
+    (v.keys || []).forEach(function(k) {
+      totalKeys++;
+      var ck = v.id + ':' + k.id;
+      var h = _allHealthData[ck] || {};
+      if (h.healthy === true) healthy++;
+    });
+  });
+
+  $('statVendors').textContent = _allVendorsData.length;
+  $('statKeys').textContent = totalKeys;
+  $('statHealthy').textContent = healthy;
+  $('statBackends').textContent = (backends.backends || []).length;
+
+  renderBackendCards((backends.backends || []), 'dashBackendCards');
+}
+
+// ── Backend Cards (shared) ──────────────
+
+function renderBackendCards(list, containerId) {
+  var container = $(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+  list.forEach(function(b) {
+    var s = b.status || {};
+    var running = s.running === true;
+    var version = s.version || '';
+    var msg = s.message || '';
+    var card = document.createElement('div');
+    card.className = 'backend-card';
+    card.style.cursor = 'pointer';
+    card.onclick = function() { showBackendDetail(b.name); };
+    card.innerHTML = [
+      '<div class="backend-card-head">',
+        '<div class="backend-icon ' + (running ? 'active' : '') + '">',
+          '<svg width="20" height="20"><use href="#ico-box"/></svg>',
+        '</div>',
+        '<div class="backend-info">',
+          '<div class="backend-name">' + esc(b.display_name || b.name) + '</div>',
+          '<div class="backend-version">' + esc(version) + '</div>',
+        '</div>',
+        '<span class="backend-badge ' + (running ? 'badge-ok' : 'badge-off') + '">' + (running ? _('gateway.yes') : _('gateway.stopped')) + '</span>',
+      '</div>',
+      '<div class="backend-card-body">',
+        '<div class="backend-msg">' + esc(msg.slice(0, 120)) + '</div>',
+      '</div>',
+    ].join('');
+    container.appendChild(card);
+  });
+  if (list.length === 0) {
+    container.innerHTML = '<div class="empty-state" style="padding:40px"><p data-i18n="backends.none">{{ t("backends.none") }}</p></div>';
+  }
+}
+
+// ── Backend Detail Modal ─────────────────
+
+var _currentBackendDetail = null;
+var _currentConfigPath = null;
+
+async function showBackendDetail(name) {
+  _currentBackendDetail = name;
+  $('backendDetailTitle').textContent = name;
+  $('backendDetailInfo').textContent = _('gateway.checking');
+  $('backendConfigTabs').innerHTML = '';
+  $('backendConfigPane').innerHTML = '';
+  $('backendSaveConfigBtn').style.display = 'none';
+  $('backendDetailModal').classList.add('open');
+
+  const data = await api('/api/backends/' + name);
+  if (data.error) {
+    $('backendDetailInfo').textContent = data.error;
+    return;
+  }
+  var s = data.status || {};
+  var info = data.display_name + ' v' + (data.version || '?') + ' — ' + (s.running ? _('gateway.yes') : _('gateway.stopped'));
+  if (s.message) info += ' | ' + s.message;
+  $('backendDetailInfo').textContent = info;
+
+  var files = data.config_files || [];
+  if (files.length === 0) {
+    $('backendConfigPane').innerHTML = '<p style="color:var(--text3);padding:20px">' + _('backends.noConfigFiles') + '</p>';
+    return;
+  }
+  var tabs = $('backendConfigTabs');
+  files.forEach(function(f, i) {
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-sm' + (i === 0 ? ' btn-primary' : '');
+    btn.textContent = f.label;
+    btn.dataset.path = f.path;
+    btn.onclick = function() {
+      document.querySelectorAll('#backendConfigTabs .btn').forEach(function(b) { b.className = 'btn btn-sm'; });
+      btn.className = 'btn btn-sm btn-primary';
+      loadBackendConfig(name, f.path);
+    };
+    tabs.appendChild(btn);
+  });
+  // Load first file
+  if (files.length > 0) loadBackendConfig(name, files[0].path);
+}
+
+async function loadBackendConfig(name, path) {
+  _currentConfigPath = path;
+  $('backendConfigPane').innerHTML = '<p style="color:var(--text3);padding:20px">Loading...</p>';
+  $('backendSaveConfigBtn').style.display = 'none';
+  const data = await api('/api/backends/' + name + '/config?path=' + encodeURIComponent(path));
+  if (data.error) {
+    $('backendConfigPane').innerHTML = '<p class="error-message">' + data.error + '</p>';
+    return;
+  }
+  var pathDisplay = document.createElement('div');
+  pathDisplay.style.cssText = 'padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-family:var(--mono);color:var(--text2);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis';
+  pathDisplay.textContent = path;
+  var ta = document.createElement('textarea');
+  ta.style.cssText = 'width:100%;min-height:300px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:13px;line-height:1.6;resize:vertical;outline:none';
+  ta.value = data.content;
+  ta.id = 'backendConfigTextarea';
+  $('backendConfigPane').innerHTML = '';
+  $('backendConfigPane').appendChild(pathDisplay);
+  $('backendConfigPane').appendChild(ta);
+  $('backendSaveConfigBtn').style.display = '';
+}
+
+async function saveBackendConfig() {
+  if (!_currentBackendDetail || !_currentConfigPath) return;
+  var content = $('backendConfigTextarea').value;
+  var res = await api('/api/backends/' + _currentBackendDetail + '/config', {
+    method: 'PUT',
+    body: JSON.stringify({path: _currentConfigPath, content: content}),
+  });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast(_('toast.saved'), 'success');
+}
+
+function closeBackendDetail() {
+  $('backendDetailModal').classList.remove('open');
+  _currentBackendDetail = null;
+  _currentConfigPath = null;
+}
+
+// ── Vendor List ─────────────────────────
 
 async function loadVendors() {
   const data = await api('/api/vendors');
+  _allVendorsData = data.vendors || [];
+  _allHealthData = data.health || {};
+
   const list = $('vendorList');
   list.innerHTML = '';
-  for (const v of data.vendors) {
+  for (const v of _allVendorsData) {
     const div = document.createElement('div');
     div.className = 'vendor-item' + (v.id === selectedVendorId ? ' selected' : '');
     div.dataset.vendorId = v.id;
@@ -330,31 +652,44 @@ async function loadVendors() {
     list.appendChild(div);
   }
   if (selectedVendorId) {
-    var exists = data.vendors.some(function(v) { return v.id === selectedVendorId; });
+    var exists = _allVendorsData.some(function(v) { return v.id === selectedVendorId; });
     if (exists) selectVendor(selectedVendorId);
     else { selectedVendorId = null; showEmptyState(); }
-  } else if (data.vendors.length > 0) {
-    selectVendor(data.vendors[0].id);
+  } else if (_allVendorsData.length > 0) {
+    selectVendor(_allVendorsData[0].id);
   } else {
     showEmptyState();
   }
-  updateGatewayMiniStatus(data);
+  updateMiniStatus(data);
   updateI18n();
+}
+
+function updateMiniStatus(data) {
+  // Count healthy
+  var health = data.health || {};
+  var ok = 0;
+  (data.vendors || []).forEach(function(v) {
+    (v.keys || []).forEach(function(k) {
+      var h = health[v.id + ':' + k.id] || {};
+      if (h.healthy === true) ok++;
+    });
+  });
+  var dot = $('miniDot');
+  if (ok > 0) { dot.className = 'dot healthy'; $('miniLabel').textContent = ok + ' ' + _('health.healthy'); }
+  else { dot.className = 'dot'; $('miniLabel').textContent = _('gateway.stopped'); }
 }
 
 function showEmptyState() {
   $('detailVendorName').textContent = '';
   $('detailVendorUrl').textContent = '';
   $('addKeyBtn').style.display = 'none';
+  $('editVendorBtn').style.display = 'none';
+  $('deleteVendorBtn').style.display = 'none';
   $('noVendorSelected').style.display = 'block';
   $('keyTableContainer').style.display = 'none';
 }
 
-// ── Key Detail ──────────────────────────────────────────
-
-var _allKeysData = [];
-var _allHealthData = {};
-var _currentVendor = null;
+// ── Key Detail ──────────────────────────
 
 async function selectVendor(id) {
   selectedVendorId = id;
@@ -372,7 +707,7 @@ async function selectVendor(id) {
 
   $('detailVendorName').textContent = v.name;
   $('detailVendorUrl').textContent = v.api_url;
-  $('addKeyBtn').style.display = 'inline-block';
+  $('addKeyBtn').style.display = 'inline-flex';
   $('editVendorBtn').style.display = 'inline-block';
   $('deleteVendorBtn').style.display = 'inline-block';
   $('noVendorSelected').style.display = 'none';
@@ -413,11 +748,10 @@ function filterKeys() {
       statusText = _('health.notChecked');
     }
     const latency = h.latency_ms ? h.latency_ms + 'ms' : '-';
-
     const models = h.models && h.models.length ? h.models : (k.models || []);
     const modelCount = models.length;
     const modelStr = modelCount > 0
-      ? '<a href="#" onclick="showKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\');return false" title="' + _('table.viewModels') + '">' + modelCount + '</a>'
+      ? '<a href="#" onclick="showKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\');return false">' + modelCount + '</a>'
       : '0';
 
     const tr = document.createElement('tr');
@@ -425,9 +759,9 @@ function filterKeys() {
     if (!enabled) tr.style.opacity = '0.5';
     tr.innerHTML = [
       '<td class="col-check"><input type="checkbox" class="key-check" value="' + k.id + '" onchange="onCheckChange()"></td>',
-      '<td><span class="key-name">' + esc(k.name) + '</span>' + (enabled ? '' : ' <span class="badge disabled-badge" data-i18n="badge.disabled">' + _('badge.disabled') + '</span>') + '</td>',
-      '<td class="key-cell"><code class="key-value">' + esc(k.api_key.slice(0,8)) + '...' + esc(k.api_key.slice(-4)) + '</code> <button class="btn-copy" onclick="copyText(\'' + esc(k.api_key) + '\')" title="Copy">&#x2398;</button></td>',
-      '<td class="status-cell"><span class="status-dot ' + statusClass + '"></span> ' + statusText + '</td>',
+      '<td><span class="key-name">' + esc(k.name) + '</span>' + (enabled ? '' : ' <span class="badge disabled-badge">' + _('badge.disabled') + '</span>') + '</td>',
+      '<td class="key-cell"><code>' + esc(k.api_key.slice(0,8)) + '...' + esc(k.api_key.slice(-4)) + '</code> <button class="btn-icon" onclick="copyText(\'' + esc(k.api_key) + '\')" title="Copy"><svg width="12" height="12"><use href="#ico-copy"/></svg></button></td>',
+      '<td class="status-cell"><span class="dot ' + statusClass + '"></span> ' + statusText + '</td>',
       '<td>' + latency + '</td>',
       '<td class="models-cell">' + modelStr + '</td>',
       '<td class="actions-cell">',
@@ -464,34 +798,20 @@ async function batchAction(action) {
   if (checks.length === 0) return;
   if (action === 'delete' && !confirm(_('confirm.batchDelete') + ' (' + checks.length + ')')) return;
   const ids = Array.from(checks).map(function(el) { return el.value; });
-  const res = await api('/api/vendors/' + _currentVendor.id + '/keys/batch', {
+  await api('/api/vendors/' + _currentVendor.id + '/keys/batch', {
     method: 'POST',
     body: JSON.stringify({key_ids: ids, action: action}),
   });
   loadVendors();
 }
 
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
-
-function copyText(text) {
-  navigator.clipboard.writeText(text).then(function() {
-    showToast(_('toast.copied') || 'Copied');
-  });
-}
-
-// ── Vendor Modal ────────────────────────────────────────
-
-var _knownProviders = [];
+// ── Vendor Modal ─────────────────────────
 
 async function loadProviderSelect() {
   const data = await api('/api/providers');
   _knownProviders = data.providers || [];
   const sel = $('vendorProviderSelect');
-  sel.innerHTML = '<option value="" data-i18n="vendorModal.selectProvider">' + _('vendorModal.selectProvider') + '</option>';
+  sel.innerHTML = '<option value="">' + _('vendorModal.selectProvider') + '</option>';
   for (const p of _knownProviders) {
     const opt = document.createElement('option');
     opt.value = p.id;
@@ -533,6 +853,10 @@ function showAddVendorModal() {
   $('vendorProvider').style.display = 'none';
   $('vendorApiUrl').value = '';
   $('vendorEndpointType').value = 'openai';
+  $('vendorThinkingDisabled').checked = false;
+  $('vendorProxyEnabled').checked = false;
+  $('vendorProxyTarget').value = '';
+  $('proxyTargetGroup').style.display = 'none';
   loadProviderSelect();
   $('vendorModal').classList.add('open');
 }
@@ -545,6 +869,10 @@ function editVendor() {
   $('vendorName').value = v.name;
   $('vendorApiUrl').value = v.api_url;
   $('vendorEndpointType').value = v.endpoint_type || 'openai';
+  $('vendorThinkingDisabled').checked = !!v.thinking_disabled;
+  $('vendorProxyEnabled').checked = !!v.proxy_target;
+  $('vendorProxyTarget').value = v.proxy_target || '';
+  $('proxyTargetGroup').style.display = v.proxy_target ? '' : 'none';
   loadProviderSelect();
   const match = _knownProviders.find(function(x) { return x.id === v.provider; });
   if (match) {
@@ -558,25 +886,19 @@ function editVendor() {
   $('vendorModal').classList.add('open');
 }
 
-function closeVendorModal() {
-  $('vendorModal').classList.remove('open');
-}
+function closeVendorModal() { $('vendorModal').classList.remove('open'); }
 
 async function deleteVendor() {
   if (!_currentVendor) return;
   const keyCount = (_currentVendor.keys || []).length;
   let msg;
-  if (keyCount > 0) {
-    msg = _('vendorList.confirmDeleteWithKeys').replace('{name}', _currentVendor.name).replace('{count}', keyCount);
-  } else {
-    msg = _('vendorList.confirmDelete').replace('{name}', _currentVendor.name);
-  }
+  if (keyCount > 0) msg = _('vendorList.confirmDeleteWithKeys').replace('{name}', _currentVendor.name).replace('{count}', keyCount);
+  else msg = _('vendorList.confirmDelete').replace('{name}', _currentVendor.name);
   if (!confirm(msg)) return;
   await api('/api/vendors/' + _currentVendor.id, { method: 'DELETE' });
   selectedVendorId = null;
   _currentVendor = null;
-  $('keyDetail').style.display = 'none';
-  $('noVendorSelected').style.display = 'block';
+  showEmptyState();
   loadVendors();
 }
 
@@ -590,6 +912,8 @@ async function saveVendor() {
     provider: providerVal || 'custom',
     api_url: $('vendorApiUrl').value.trim(),
     endpoint_type: $('vendorEndpointType').value,
+    thinking_disabled: $('vendorThinkingDisabled').checked,
+    proxy_target: $('vendorProxyEnabled').checked ? $('vendorProxyTarget').value.trim() : '',
   };
   if (!data.name) { alert('Name is required'); return; }
   if (id) {
@@ -598,14 +922,13 @@ async function saveVendor() {
     await api('/api/vendors', { method: 'POST', body: JSON.stringify(data) });
   }
   closeVendorModal();
-  if (id) {
-    await selectVendor(id);
-  } else {
-    loadVendors();
-  }
+  if (id) { await selectVendor(id); }
+  else { loadVendors(); }
 }
 
-// ── Key Modal ───────────────────────────────────────────
+function toggleProxyTarget() { $('proxyTargetGroup').style.display = $('vendorProxyEnabled').checked ? '' : 'none'; }
+
+// ── Key Modal ────────────────────────────
 
 function showAddKeyModal() {
   if (!selectedVendorId) return;
@@ -616,28 +939,23 @@ function showAddKeyModal() {
   $('keyModal').classList.add('open');
 }
 
-function closeKeyModal() {
-  $('keyModal').classList.remove('open');
-}
+function closeKeyModal() { $('keyModal').classList.remove('open'); }
 
 function toggleKeyVisibility() {
   const inp = $('keyApiKey');
   const btn = $('toggleKeyBtn');
   if (inp.type === 'password') {
     inp.type = 'text';
-    btn.textContent = _('modal.hide');
+    btn.innerHTML = '<svg width="14" height="14"><use href="#ico-eye-off"/></svg>';
   } else {
     inp.type = 'password';
-    btn.textContent = _('modal.show');
+    btn.innerHTML = '<svg width="14" height="14"><use href="#ico-eye"/></svg>';
   }
 }
 
 async function saveKey() {
   const kid = $('editKeyId').value;
-  const data = {
-    name: $('keyName').value.trim(),
-    api_key: $('keyApiKey').value.trim(),
-  };
+  const data = { name: $('keyName').value.trim(), api_key: $('keyApiKey').value.trim() };
   if (!data.name || !data.api_key) { alert('Name and API Key are required'); return; }
   if (kid) {
     await api('/api/vendors/' + selectedVendorId + '/keys/' + kid, { method: 'PUT', body: JSON.stringify(data) });
@@ -645,18 +963,14 @@ async function saveKey() {
     await api('/api/vendors/' + selectedVendorId + '/keys', { method: 'POST', body: JSON.stringify(data) });
   }
   closeKeyModal();
-  if (selectedVendorId) {
-    await selectVendor(selectedVendorId);
-  } else {
-    loadVendors();
-  }
+  if (selectedVendorId) { await selectVendor(selectedVendorId); }
+  else { loadVendors(); }
 }
 
 async function editKey(vendorId, keyId) {
-  const data = await api('/api/vendors');
-  const v = data.vendors.find(function(x) { return x.id === vendorId; });
+  const v = _allVendorsData.find(function(x) { return x.id === vendorId; });
   if (!v) return;
-  const k = v.keys.find(function(x) { return x.id === keyId; });
+  const k = (v.keys || []).find(function(x) { return x.id === keyId; });
   if (!k) return;
   $('keyModalTitle').textContent = _('keyModal.editTitle');
   $('editKeyId').value = keyId;
@@ -668,370 +982,224 @@ async function editKey(vendorId, keyId) {
 async function deleteKey(vendorId, keyId) {
   if (!confirm(_('confirm.delete'))) return;
   await api('/api/vendors/' + vendorId + '/keys/' + keyId, { method: 'DELETE' });
-  loadVendors();
+  if (selectedVendorId) { await selectVendor(selectedVendorId); }
+  else { loadVendors(); }
 }
 
-function showKeyModels(vendorId, keyId) {
-  const k = _allKeysData.find(function(x) { return x.id === keyId; });
-  if (!k) return;
-  const ck = vendorId + ':' + keyId;
-  const h = _allHealthData[ck] || {};
-  const models = h.models && h.models.length ? h.models : (k.models || []);
-  const list = $('modelsModalList');
-  if (!models.length) {
-    list.innerHTML = '<p>' + _('modelsModal.noModels') + '</p>';
-  } else {
-    const items = models.map(function(m) {
-      const name = typeof m === 'string' ? m : (m.id || m.name || JSON.stringify(m));
-      return '<div class="model-item">' + esc(name) + '</div>';
-    }).join('');
-    list.innerHTML = '<div class="model-list">' + items + '</div>';
-  }
-  $('modelsModalTitle').textContent = _('modelsModal.title') + ' (' + models.length + ')';
-  $('modelsModal').classList.add('open');
-}
+// ── Key Health Actions ───────────────────
 
-function closeModelsModal() {
-  $('modelsModal').classList.remove('open');
+async function checkKeyHealth(vendorId, keyId) {
+  const res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/health');
+  if (res.error) showToast(res.error, 'error');
+  else if (res.healthy) showToast(_('toast.checkOk'), 'success');
+  else showToast(_('toast.checkFail') + ': ' + (res.error || ''), 'error');
+  if (selectedVendorId) { await selectVendor(selectedVendorId); }
+  else { loadVendors(); }
 }
 
 async function enableKey(vendorId, keyId) {
   await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/enable', { method: 'POST' });
-  if (selectedVendorId) {
-    await selectVendor(selectedVendorId);
-  } else {
-    loadVendors();
-  }
+  await selectVendor(vendorId);
 }
 
 async function disableKey(vendorId, keyId) {
   await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/disable', { method: 'POST' });
-  if (selectedVendorId) {
-    await selectVendor(selectedVendorId);
-  } else {
-    loadVendors();
-  }
-}
-
-async function checkKeyHealth(vendorId, keyId) {
-  const btn = event && event.target;
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = _('action.checking'); }
-    const res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/health');
-    if (res.healthy) {
-      showToast(_('toast.checkOk'), 'success');
-    } else {
-      showToast(_('toast.checkFail') + ': ' + (res.error || ''), 'error');
-    }
-  } catch (e) {
-    showToast(_('toast.checkFail') + ': ' + e, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = _('action.check'); }
-    if (selectedVendorId) {
-      await selectVendor(selectedVendorId);
-    } else {
-      loadVendors();
-    }
-  }
-}
-
-function showToast(message, type) {
-  type = type || 'info';
-  const el = document.createElement('div');
-  el.className = 'toast toast-' + type;
-  el.textContent = message;
-  $('toastContainer').appendChild(el);
-  setTimeout(function() {
-    el.classList.add('toast-leave');
-    setTimeout(function() { el.remove(); }, 250);
-  }, 3000);
-}
-
-// ── Actions ─────────────────────────────────────────────
-
-async function syncFromOpenclaw() {
-  const res = await api('/api/sync', { method: 'POST' });
-  alert('Synced ' + res.synced + ' keys (total: ' + res.total + ')');
-  loadVendors();
+  await selectVendor(vendorId);
 }
 
 async function checkAllHealth() {
-  const btn = event && event.target;
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = _('action.checking'); }
-    const res = await api('/api/health/check-all', { method: 'POST' });
-    const arr = res.results || [];
-    const ok = arr.filter(function(r) { return r.healthy; }).length;
-    const fail = arr.filter(function(r) { return !r.healthy; }).length;
-    showToast(_('toast.checkAllDone').replace('{ok}', ok).replace('{fail}', fail), fail > 0 ? 'error' : 'success');
-  } catch (e) {
-    showToast(_('toast.checkFail') + ': ' + e, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = _('toolbar.checkAllHealth'); }
-    if (selectedVendorId) {
-      await selectVendor(selectedVendorId);
-    } else {
-      loadVendors();
-    }
+  const res = await api('/api/health/check-all', { method: 'POST' });
+  var ok = 0, fail = 0;
+  (res.results || []).forEach(function(h) { if (h.healthy) ok++; else fail++; });
+  showToast(_('toast.checkAllDone').replace('{ok}', ok).replace('{fail}', fail), fail > 0 ? 'error' : 'success');
+  if (selectedVendorId) { await selectVendor(selectedVendorId); }
+  else { loadVendors(); }
+}
+
+// ── Models Modal ─────────────────────────
+
+async function showKeyModels(vendorId, keyId) {
+  const v = _allVendorsData.find(function(x) { return x.id === vendorId; });
+  if (!v) return;
+  const k = (v.keys || []).find(function(x) { return x.id === keyId; });
+  if (!k) return;
+  const models = k.models || [];
+  const list = $('modelsModalList');
+  list.innerHTML = '';
+  if (models.length === 0) {
+    list.innerHTML = '<p style="color:var(--text2)">' + _('modelsModal.noModels') + '</p>';
+  } else {
+    models.forEach(function(m) {
+      var mid = typeof m === 'string' ? m : (m.id || m.name || '');
+      var div = document.createElement('div');
+      div.className = 'model-item';
+      div.textContent = mid;
+      list.appendChild(div);
+    });
   }
+  $('modelsModal').classList.add('open');
 }
 
-// ── Batch Import ────────────────────────────────────────
+function closeModelsModal() { $('modelsModal').classList.remove('open'); }
 
-let _batchEntries = [];
+// ── Batch Import ─────────────────────────
 
-function showBatchImportModal() {
-  _batchEntries = [];
-  $('batchImportText').value = '';
-  $('batchImportPreview').style.display = 'none';
-  $('batchImportError').style.display = 'none';
-  $('batchParseBtn').style.display = 'inline-block';
-  $('batchApplyBtn').style.display = 'none';
-  $('batchImportModal').classList.add('open');
-}
+var _debounceTimer = null;
 
-function closeBatchImportModal() {
-  $('batchImportModal').classList.remove('open');
+function debounceParseBatch() {
+  if (_debounceTimer) clearTimeout(_debounceTimer);
+  _debounceTimer = setTimeout(parseBatchImport, 400);
 }
 
 async function parseBatchImport() {
   const text = $('batchImportText').value.trim();
-  if (!text) { alert('Paste some provider info first'); return; }
-  const res = await api('/api/batch-import/parse', {
-    method: 'POST',
-    body: JSON.stringify({text: text}),
-  });
-  if (res.error) { $('batchImportError').textContent = res.error; $('batchImportError').style.display = 'block'; return; }
-  _batchEntries = res.entries;
-  if (_batchEntries.length === 0) {
-    $('batchImportError').textContent = 'No API keys or URLs found';
-    $('batchImportError').style.display = 'block';
-    return;
-  }
+  if (!text) { $('batchImportPreview').style.display = 'none'; $('batchApplyBtn').style.display = 'none'; return; }
+  const res = await api('/api/batch/parse', { method: 'POST', body: JSON.stringify({text: text}) });
+  if (res.error) { $('batchImportError').textContent = res.error; $('batchImportError').style.display = ''; return; }
   $('batchImportError').style.display = 'none';
-  let html = '<table><thead><tr><th style="width:36px"><input type="checkbox" id="batchSelectAll" checked onchange="batchToggleAll()"></th><th>' + _('table.keyName') + '</th><th>Provider</th><th>URL</th><th>API Key</th></tr></thead><tbody>';
-  for (let i = 0; i < _batchEntries.length; i++) {
-    const e = _batchEntries[i];
-    html += '<tr><td><input type="checkbox" class="batch-check" data-idx="' + i + '" checked></td><td>' + esc(e.name) + '</td><td>' + esc(e.provider) + '</td><td><code>' + esc(e.api_url) + '</code></td><td><code>' + esc(e.api_key.slice(0, 16)) + '...</code></td></tr>';
-  }
+  const entries = res.entries || [];
+  if (entries.length === 0) { $('batchImportPreview').style.display = 'none'; $('batchApplyBtn').style.display = 'none'; return; }
+  $('batchImportPreview').style.display = '';
+  var html = '<table><thead><tr><th>Vendor</th><th>Provider</th><th>Key</th></tr></thead><tbody>';
+  entries.forEach(function(e) {
+    html += '<tr><td>' + esc(e.vendor) + '</td><td>' + esc(e.provider) + '</td><td><code>' + esc((e.api_key || '').slice(0, 8)) + '...</code></td></tr>';
+  });
   html += '</tbody></table>';
   $('batchImportTableWrap').innerHTML = html;
-  $('batchImportPreview').style.display = 'block';
-  $('batchParseBtn').style.display = 'none';
-  $('batchApplyBtn').style.display = 'inline-block';
-}
-
-function batchToggleAll() {
-  const checked = $('batchSelectAll').checked;
-  document.querySelectorAll('.batch-check').forEach(function(el) { el.checked = checked; });
-}
-
-function _getSelectedBatchEntries() {
-  const checks = document.querySelectorAll('.batch-check:checked');
-  return Array.from(checks).map(function(el) { return _batchEntries[parseInt(el.dataset.idx)]; });
+  $('batchApplyBtn').style.display = '';
+  $('batchApplyBtn').disabled = false;
 }
 
 async function applyBatchImport() {
-  const selected = _getSelectedBatchEntries();
-  if (selected.length === 0) { alert('Select at least one entry'); return; }
-  $('batchApplyBtn').disabled = true;
-  $('batchApplyBtn').textContent = 'Importing...';
-  const res = await api('/api/batch-import/apply', {
-    method: 'POST',
-    body: JSON.stringify({entries: selected}),
+  const btn = $('batchApplyBtn');
+  btn.disabled = true;
+  try {
+    const text = $('batchImportText').value.trim();
+    const res = await api('/api/batch/import', { method: 'POST', body: JSON.stringify({text: text}) });
+    if (res.error) { showToast(res.error, 'error'); return; }
+    var imported = (res.created || []).length;
+    showToast('Imported ' + imported + ' key(s)', 'success');
+    closeBatchImportModal();
+    loadVendors();
+    // Run health check on imported keys
+    checkAllHealth();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closeBatchImportModal() {
+  $('batchImportModal').classList.remove('open');
+  $('batchImportText').value = '';
+  $('batchImportPreview').style.display = 'none';
+  $('batchApplyBtn').style.display = 'none';
+  $('batchImportError').style.display = 'none';
+  var btn = $('batchApplyBtn');
+  if (btn) btn.disabled = false;
+}
+
+function showBatchImportModal() {
+  $('batchImportText').value = '';
+  $('batchImportPreview').style.display = 'none';
+  $('batchApplyBtn').style.display = 'none';
+  $('batchImportError').style.display = 'none';
+  $('batchImportModal').classList.add('open');
+}
+
+function syncAll() {
+  api('/api/sync', { method: 'POST' }).then(function(res) {
+    if (res.error) showToast(res.error, 'error');
+    else showToast('Synced: ' + (res.synced || 0) + ' key(s)', 'success');
+    loadVendors();
   });
-  closeBatchImportModal();
-  loadVendors();
-  const imported = (res.created || []).filter(function(c) { return !c.skipped; }).length;
-  const skipped = (res.created || []).filter(function(c) { return c.skipped; }).length;
-  let msg = 'Imported ' + imported + ' key(s)';
-  if (skipped > 0) msg += ', ' + skipped + ' skipped (already exists)';
-  showToast(msg, imported > 0 ? 'success' : 'error');
+}
+
+// ── Backends Page ────────────────────────
+
+async function loadBackends() {
+  const data = await api('/api/backends');
+  if (data.error) return;
+  renderBackendCards((data.backends || []), 'backendGrid');
+  loadGatewayStatus();
+}
+
+async function refreshBackendStatus() {
+  const data = await api('/api/backends');
+  if (data.error) return;
+  renderBackendCards((data.backends || []), 'dashBackendCards');
+  renderBackendCards((data.backends || []), 'backendGrid');
+  showToast(_('toast.saved'), 'success');
+}
+
+// ── OpenClaw Gateway ─────────────────────
+
+async function loadGatewayStatus() {
+  const data = await api('/api/gateway/status');
+  if (data.error) return;
+  $('gRunning').textContent = data.running ? 'Yes' : 'No';
+  $('gPort').textContent = data.port || '-';
+  $('gMessage').textContent = (data.message || '').slice(0, 120);
+  $('gOpenclawVersion').textContent = data.openclaw_version || '-';
+  $('gManagerVersion').textContent = data.manager_version || '-';
+  if (data.version_warning) {
+    $('versionWarning').style.display = '';
+    $('versionWarningText').textContent = data.version_warning;
+  }
 }
 
 async function refreshGatewayStatus() {
-  const data = await api('/api/gateway/status');
-  $('gRunning').textContent = data.running ? _('gateway.yes') : _('gateway.no');
-  if (data.port) $('gPort').textContent = data.port;
-  $('gMessage').textContent = data.message || '-';
-  $('gOpenclawVersion').textContent = data.openclaw_version || '-';
-  $('gManagerVersion').textContent = data.manager_version || '-';
-  
-  // Version compatibility check
-  const warning = $('versionWarning');
-  if (data.openclaw_version && data.min_openclaw_version) {
-    const current = data.openclaw_version.replace(/^OpenClaw\s+/, '').split('-')[0];
-    const min = data.min_openclaw_version;
-    if (current < min) {
-      warning.style.display = 'block';
-      $('versionWarningText').textContent = `OpenClaw ${current} is outdated. Recommended: ${data.recommended_openclaw_version || min}+`;
-    } else {
-      warning.style.display = 'none';
-    }
-  } else {
-    warning.style.display = 'none';
-  }
-  
-  updateGatewayMiniStatus(data);
-}
-
-function updateGatewayMiniStatus(data) {
-  const dot = document.querySelector('#gatewayMiniStatus .status-dot');
-  const text = $('gatewayMiniText');
-  if (data.running) {
-    dot.className = 'status-dot healthy';
-    text.textContent = _('gateway.running') + (data.port ? ' (port ' + data.port + ')' : '');
-  } else {
-    dot.className = 'status-dot unhealthy';
-    text.textContent = _('gateway.stopped');
-  }
+  await loadGatewayStatus();
+  showToast(_('toast.saved'), 'success');
 }
 
 async function restartGateway() {
   if (!confirm(_('confirm.restart'))) return;
   const res = await api('/api/gateway/restart', { method: 'POST' });
-  alert(res.message || (res.success ? _('alert.restartSuccess') : _('alert.restartFailed')));
-  refreshGatewayStatus();
+  if (res.success) showToast(_('alert.restartSuccess'), 'success');
+  else showToast(_('alert.restartFailed') + ': ' + (res.message || ''), 'error');
 }
 
-// ── Language ────────────────────────────────────────────
-
-var ALL_LOCALES = {{ all_locales | tojson }};
-LOCALE_STRINGS = ALL_LOCALES[currentLang] || ALL_LOCALES['en'];
-
-// ── Gateway Config ──────────────────────────────────────
-
 function onGatewayModeChange() {
-  const mode = $('gatewayMode').value;
-  $('gatewayLocal').style.display = mode === 'local' ? 'block' : 'none';
-  $('gatewayRemote').style.display = mode === 'remote' ? 'block' : 'none';
-  if (mode === 'local') refreshGatewayStatus();
+  var mode = $('gatewayMode').value;
+  $('gatewayLocal').style.display = mode === 'local' ? '' : 'none';
+  $('gatewayRemote').style.display = mode === 'remote' ? '' : 'none';
 }
 
 function onRemoteTypeChange() {
-  const t = $('remoteType').value;
-  $('remoteSshFields').style.display = t === 'ssh' ? 'block' : 'none';
-  $('remoteGatewayFields').style.display = t === 'gateway' ? 'block' : 'none';
+  var type = $('remoteType').value;
+  $('remoteSshFields').style.display = type === 'ssh' ? '' : 'none';
+  $('remoteGatewayFields').style.display = type === 'gateway' ? '' : 'none';
 }
 
-async function testRemoteGateway() {
-  const type = $('remoteType').value;
-  let data = { type: type };
-  if (type === 'ssh') {
-    data.host = $('remoteHost').value.trim();
-    data.port = parseInt($('remotePort').value) || 22;
-    data.user = $('remoteUser').value.trim();
-    data.key_file = $('remoteKeyFile').value.trim();
-    data.config_path = $('remoteConfigPath').value.trim();
-  } else {
-    data.url = $('remoteUrl').value.trim();
-    data.token = $('remoteToken').value;
-  }
-  const res = await api('/api/gateway/remote/test', { method: 'POST', body: JSON.stringify(data) });
-  $('remoteResult').style.display = 'block';
-  $('remoteResult').className = 'conn-result ' + (res.success ? 'healthy' : 'unhealthy');
-  $('remoteResult').textContent = res.message || (res.success ? 'OK' : 'Failed');
-}
+async function testRemoteGateway() { /* stub */ }
+async function saveRemoteGateway() { /* stub */ }
 
-async function saveRemoteGateway() {
-  const data = {
-    mode: 'remote',
-    type: $('remoteType').value,
-  };
-  if (data.type === 'ssh') {
-    data.host = $('remoteHost').value.trim();
-    data.port = parseInt($('remotePort').value) || 22;
-    data.user = $('remoteUser').value.trim();
-    data.key_file = $('remoteKeyFile').value.trim();
-    data.config_path = $('remoteConfigPath').value.trim();
-  } else {
-    data.url = $('remoteUrl').value.trim();
-    data.token = $('remoteToken').value;
-  }
-  await api('/api/gateway/config', { method: 'POST', body: JSON.stringify(data) });
-  showToast(_('toast.saved'));
-}
+// ── Language & Theme ─────────────────────
 
-async function loadGatewayConfig() {
-  const res = await api('/api/gateway/config');
-  if (res.mode === 'remote') {
-    $('gatewayMode').value = 'remote';
-    onGatewayModeChange();
-    if (res.type) $('remoteType').value = res.type;
-    onRemoteTypeChange();
-    if (res.type === 'ssh') {
-      $('remoteHost').value = res.host || '';
-      $('remotePort').value = res.port || 22;
-      $('remoteUser').value = res.user || '';
-      $('remoteKeyFile').value = res.key_file || '';
-      $('remoteConfigPath').value = res.config_path || '~/.openclaw';
-    } else {
-      $('remoteUrl').value = res.url || '';
-      $('remoteToken').value = res.token || '';
-    }
-  }
-}
-
-function switchLang(code) {
-  currentLang = code;
-  LOCALE_STRINGS = ALL_LOCALES[code] || ALL_LOCALES['en'];
-  localStorage.setItem('opencaw_lang', code);
-  fetch('/api/lang', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({lang: code}) }).catch(function(){});
-  $('langSelect').value = code;
+async function switchLang(lang) {
+  CURRENT_LANG = lang;
+  document.documentElement.lang = lang;
+  LOCALE_STRINGS = Object.assign({}, ALL_LOCALES['en'], ALL_LOCALES[lang]);
   updateI18n();
-  document.documentElement.lang = code;
-  loadVendors();
-  if (document.querySelector('#view-gateway.active')) refreshGatewayStatus();
+  if (typeof loadVendors === 'function' && document.querySelector('#view-vendors.active')) loadVendors();
 }
-
-(function() {
-  var saved = localStorage.getItem('opencaw_lang');
-  if (saved && ALL_LOCALES[saved] && saved !== currentLang) switchLang(saved);
-})();
-
-// ── Theme ────────────────────────────────────────────────
 
 function toggleTheme() {
   var current = document.documentElement.getAttribute('data-theme') || 'dark';
-  var next = current === 'light' ? 'dark' : 'light';
+  var next = current === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('opencaw_theme', next);
-  updateThemeBtn(next);
-}
-
-function updateThemeBtn(theme) {
-  $('themeToggle').textContent = theme === 'dark' ? _('theme.dark') : _('theme.light');
 }
 
 (function() {
   var saved = localStorage.getItem('opencaw_theme');
-  if (saved === 'light' || saved === 'dark') {
-    document.documentElement.setAttribute('data-theme', saved);
-    updateThemeBtn(saved);
-  } else {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    updateThemeBtn('dark');
-  }
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
 })();
 
-// ── Navigation ──────────────────────────────────────────
+// ── Init ─────────────────────────────────
 
-document.querySelectorAll('nav a').forEach(function(a) {
-  a.addEventListener('click', function(e) {
-    e.preventDefault();
-    document.querySelectorAll('nav a').forEach(function(x) { x.classList.remove('active'); });
-    a.classList.add('active');
-    const view = a.dataset.view;
-    document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
-    document.getElementById('view-' + view).classList.add('active');
-    $('viewTitle').textContent = _('nav.' + view);
-    if (view === 'gateway') { refreshGatewayStatus(); loadGatewayConfig(); }
-  });
-});
-
-loadVendors();
-refreshGatewayStatus();
-updateI18n();
+switchView('dashboard');
 </script>
+
 </body>
 </html>

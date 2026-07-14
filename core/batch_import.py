@@ -3,7 +3,7 @@ import re
 import base64
 from typing import Optional
 
-from providers import get_provider, recognize_provider
+from core.providers import get_provider, recognize_provider
 
 URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 KEY_RE = re.compile(
@@ -51,8 +51,17 @@ def _try_base64_decode(text: str) -> str:
 
 def _find_api_keys(text: str) -> list[str]:
     """Find API keys in text, with Base64 auto-decode."""
-    # First try to decode any Base64 segments
-    words = text.split()
+    # Strip key: prefix and parenthetical annotations from entire text first
+    clean_text = text
+    # Strip leading "key:" / "api_key:" / etc.
+    if ":" in clean_text and clean_text.index(":") < 20:
+        prefix = clean_text.split(":", 1)[0].lower()
+        if prefix in ("key", "api_key", "apikey", "api-key", "token"):
+            clean_text = clean_text.split(":", 1)[1]
+    # Strip trailing parenthetical annotations like (Base64)
+    clean_text = re.sub(r'\s*\([^)]*\)\s*$', '', clean_text).strip()
+    
+    words = clean_text.split()
     decoded_parts = []
     for word in words:
         decoded_parts.append(_try_base64_decode(word))

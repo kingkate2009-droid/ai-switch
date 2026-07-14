@@ -1,10 +1,10 @@
 services:
   manager:
     build: .
-    container_name: openclaw-manager
+    container_name: ai-switch
     ports:
       - "8787:8787"
     volumes:
       - ~/.openclaw:/root/.openclaw:ro
-      - ~/.openclaw-auto-manager:/root/.openclaw-auto-manager
+      - ~/.ai-switch:/root/.ai-switch
     restart: unless-stopped

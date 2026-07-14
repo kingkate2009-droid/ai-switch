@@ -3,18 +3,13 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from config_manager import (
-    PROFILES_DIR,
-    _sync_key_to_openclaw,
-    _remove_from_openclaw,
-    get_vendor,
-    get_vendors,
-    reconcile_openclaw,
-    update_key_data,
-)
-from providers import get_provider, pick_default_model, probe_provider, scan_models
+from pathlib import Path
 
-HEALTH_CACHE_PATH = PROFILES_DIR / "health_cache.json"
+from core.data import get_vendor, get_vendors, update_key_data
+from core.providers import get_provider, pick_default_model, probe_provider, scan_models
+from backends import reconcile_all, on_key_added, on_key_removed
+DATA_DIR = Path.home() / ".ai-switch"
+HEALTH_CACHE_PATH = DATA_DIR / "health_cache.json"
 _lock = threading.Lock()
 
 
@@ -43,7 +38,7 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
     if not key_entry:
         return {"key_id": key_id, "healthy": False, "latency_ms": 0, "error": "Key not found"}
 
-    api_url = vendor["api_url"]
+    api_url = vendor.get("proxy_target", "") or vendor["api_url"]
     api_key = key_entry["api_key"]
     provider_id = vendor.get("provider", "openai")
     
@@ -96,7 +91,6 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
 
 def check_all_keys() -> list[dict]:
     results = []
-    reconcile_openclaw()
 
     for v in get_vendors():
         for k in v.get("keys", []):
@@ -110,17 +104,16 @@ def check_all_keys() -> list[dict]:
                     updates["models"] = models
                 if default_model:
                     updates["default_model"] = default_model
-                update_key_data(v["id"], k["id"], **updates)
-                _sync_key_to_openclaw(v, k, models_override=models)
+                updated = update_key_data(v["id"], k["id"], **updates)
+                if updated and updated.get("models"):
+                    on_key_updated(v, updated)
+                else:
+                    on_key_added(v, k if not updated else updated)
             else:
-                ocp_key = f"{v['provider']}@{k['name']}"
-                _remove_from_openclaw(ocp_key)
-                old = f"{v['provider']}-{k['id']}"
-                if old != ocp_key:
-                    _remove_from_openclaw(old)
                 update_key_data(v["id"], k["id"], enabled=False)
+                on_key_removed(v, k)
 
-    reconcile_openclaw()
+    reconcile_all()
     return results
 
 

@@ -9,6 +9,7 @@ nohup.out
 
 # Sensitive runtime data
 ~/.openclaw-auto-manager/
+~/.ai-switch/
 data.json
 health_cache.json
 

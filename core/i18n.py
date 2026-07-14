@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-LOCALES_DIR = Path(__file__).parent / "locales"
+LOCALES_DIR = Path(__file__).resolve().parent.parent / "locales"
 
 _translations: dict[str, dict[str, str]] = {}
 

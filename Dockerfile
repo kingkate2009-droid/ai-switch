@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV OPENCLAW_MANAGER_PORT=8787
+ENV AI_SWITCH_PORT=8787
 
 EXPOSE 8787
 
