@@ -207,60 +207,64 @@
         <p class="page-desc" data-i18n="backends.desc">{{ t('backends.desc') }}</p>
       </div>
 
+      <div id="backendSummaryBar" class="backend-summary-bar"></div>
+
       <div id="backendGrid" class="backend-grid"></div>
 
-      <!-- OpenClaw controls -->
-      <div class="section-card" id="openclawControls">
-        <div class="section-card-head">
-          <svg width="20" height="20"><use href="#ico-openclaw"/></svg>
-          <span>OpenClaw</span>
-        </div>
-        <div class="section-card-body">
-          <div class="control-row">
-            <label data-i18n="gatewayPanel.mode">{{ t('gatewayPanel.mode') }}</label>
-            <select id="gatewayMode" onchange="onGatewayModeChange()">
-              <option value="local">{{ t('gatewayPanel.local') }}</option>
-              <option value="remote">{{ t('gatewayPanel.remote') }}</option>
-            </select>
-          </div>
-          <div id="gatewayLocal">
-            <div class="status-grid" id="gatewayStatusContent">
-              <div class="status-item"><span class="label" data-i18n="gatewayPanel.running">{{ t('gatewayPanel.running') }}</span><span id="gRunning">-</span></div>
-              <div class="status-item"><span class="label" data-i18n="gatewayPanel.port">{{ t('gatewayPanel.port') }}</span><span id="gPort">-</span></div>
-              <div class="status-item"><span class="label" data-i18n="gatewayPanel.message">{{ t('gatewayPanel.message') }}</span><span id="gMessage">-</span></div>
-              <div class="status-item"><span class="label" data-i18n="gatewayPanel.openclawVersion">{{ t('gatewayPanel.openclawVersion') }}</span><span id="gOpenclawVersion">-</span></div>
-              <div class="status-item"><span class="label" data-i18n="gatewayPanel.managerVersion">{{ t('gatewayPanel.managerVersion') }}</span><span id="gManagerVersion">-</span></div>
+      <!-- OpenClaw controls (collapsible) -->
+      <div class="backend-controls">
+        <button class="backend-controls-toggle" id="openclawToggle" onclick="toggleOpenclawControls()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span>OpenClaw <span id="openclawToggleStatus"></span></span>
+        </button>
+        <div class="backend-controls-panel" id="openclawPanel">
+          <div class="panel-body">
+            <div class="control-row">
+              <label data-i18n="gatewayPanel.mode">{{ t('gatewayPanel.mode') }}</label>
+              <select id="gatewayMode" onchange="onGatewayModeChange()">
+                <option value="local">{{ t('gatewayPanel.local') }}</option>
+                <option value="remote">{{ t('gatewayPanel.remote') }}</option>
+              </select>
             </div>
-            <div id="versionWarning" style="display:none" class="warn-banner">⚠️ <span id="versionWarningText"></span></div>
-            <div class="control-actions">
-              <button class="btn" onclick="refreshGatewayStatus()">
-                <svg width="14" height="14"><use href="#ico-refresh"/></svg>
-                <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
-              </button>
-              <button class="btn btn-warning" onclick="restartGateway()">
-                <svg width="14" height="14"><use href="#ico-refresh"/></svg>
-                <span data-i18n="gatewayPanel.restart">{{ t('gatewayPanel.restart') }}</span>
-              </button>
+            <div id="gatewayLocal">
+              <div class="status-grid" id="gatewayStatusContent">
+                <div class="status-item"><span class="label" data-i18n="gatewayPanel.running">{{ t('gatewayPanel.running') }}</span><span id="gRunning">-</span></div>
+                <div class="status-item"><span class="label" data-i18n="gatewayPanel.port">{{ t('gatewayPanel.port') }}</span><span id="gPort">-</span></div>
+                <div class="status-item"><span class="label" data-i18n="gatewayPanel.message">{{ t('gatewayPanel.message') }}</span><span id="gMessage">-</span></div>
+                <div class="status-item"><span class="label" data-i18n="gatewayPanel.openclawVersion">{{ t('gatewayPanel.openclawVersion') }}</span><span id="gOpenclawVersion">-</span></div>
+                <div class="status-item"><span class="label" data-i18n="gatewayPanel.managerVersion">{{ t('gatewayPanel.managerVersion') }}</span><span id="gManagerVersion">-</span></div>
+              </div>
+              <div id="versionWarning" style="display:none" class="warn-banner">⚠️ <span id="versionWarningText"></span></div>
+              <div class="control-actions">
+                <button class="btn" onclick="refreshGatewayStatus()">
+                  <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+                  <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+                </button>
+                <button class="btn btn-warning" onclick="restartGateway()">
+                  <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+                  <span data-i18n="gatewayPanel.restart">{{ t('gatewayPanel.restart') }}</span>
+                </button>
+              </div>
             </div>
-          </div>
-          <div id="gatewayRemote" style="display:none">
-            <div class="control-row"><label data-i18n="gatewayPanel.remoteType">{{ t('gatewayPanel.remoteType') }}</label><select id="remoteType" onchange="onRemoteTypeChange()"><option value="ssh">SSH</option><option value="gateway">Gateway API</option></select></div>
-            <div id="remoteSshFields">
-              <div class="control-row"><label data-i18n="connModal.host">{{ t('connModal.host') }}</label><input type="text" id="remoteHost" placeholder="192.168.1.100"></div>
-              <div class="control-row"><label data-i18n="connModal.port">{{ t('connModal.port') }}</label><input type="number" id="remotePort" value="22"></div>
-              <div class="control-row"><label data-i18n="connModal.user">{{ t('connModal.user') }}</label><input type="text" id="remoteUser" placeholder="root"></div>
-              <div class="control-row"><label data-i18n="connModal.keyFile">{{ t('connModal.keyFile') }}</label><input type="text" id="remoteKeyFile" placeholder="~/.ssh/id_rsa"></div>
-              <div class="control-row"><label data-i18n="connModal.configPath">{{ t('connModal.configPath') }}</label><input type="text" id="remoteConfigPath" value="~/.openclaw"></div>
+            <div id="gatewayRemote" style="display:none">
+              <div class="control-row"><label data-i18n="gatewayPanel.remoteType">{{ t('gatewayPanel.remoteType') }}</label><select id="remoteType" onchange="onRemoteTypeChange()"><option value="ssh">SSH</option><option value="gateway">Gateway API</option></select></div>
+              <div id="remoteSshFields">
+                <div class="control-row"><label data-i18n="connModal.host">{{ t('connModal.host') }}</label><input type="text" id="remoteHost" placeholder="192.168.1.100"></div>
+                <div class="control-row"><label data-i18n="connModal.port">{{ t('connModal.port') }}</label><input type="number" id="remotePort" value="22"></div>
+                <div class="control-row"><label data-i18n="connModal.user">{{ t('connModal.user') }}</label><input type="text" id="remoteUser" placeholder="root"></div>
+                <div class="control-row"><label data-i18n="connModal.keyFile">{{ t('connModal.keyFile') }}</label><input type="text" id="remoteKeyFile" placeholder="~/.ssh/id_rsa"></div>
+                <div class="control-row"><label data-i18n="connModal.configPath">{{ t('connModal.configPath') }}</label><input type="text" id="remoteConfigPath" value="~/.openclaw"></div>
+              </div>
+              <div id="remoteGatewayFields" style="display:none">
+                <div class="control-row"><label data-i18n="connModal.gatewayUrl">{{ t('connModal.gatewayUrl') }}</label><input type="text" id="remoteUrl" placeholder="ws://192.168.1.100:18789"></div>
+                <div class="control-row"><label data-i18n="connModal.token">{{ t('connModal.token') }}</label><input type="password" id="remoteToken" placeholder="Optional"></div>
+              </div>
+              <div class="control-actions">
+                <button class="btn" onclick="testRemoteGateway()" data-i18n="connAction.test">{{ t('connAction.test') }}</button>
+                <button class="btn btn-primary" onclick="saveRemoteGateway()" data-i18n="modal.save">{{ t('modal.save') }}</button>
+              </div>
+              <div id="remoteResult" style="display:none"></div>
             </div>
-            <div id="remoteGatewayFields" style="display:none">
-              <div class="control-row"><label data-i18n="connModal.gatewayUrl">{{ t('connModal.gatewayUrl') }}</label><input type="text" id="remoteUrl" placeholder="ws://192.168.1.100:18789"></div>
-              <div class="control-row"><label data-i18n="connModal.token">{{ t('connModal.token') }}</label><input type="password" id="remoteToken" placeholder="Optional"></div>
-            </div>
-            <div class="control-actions">
-              <button class="btn" onclick="testRemoteGateway()" data-i18n="connAction.test">{{ t('connAction.test') }}</button>
-              <button class="btn btn-primary" onclick="saveRemoteGateway()" data-i18n="modal.save">{{ t('modal.save') }}</button>
-            </div>
-            <div id="remoteResult" style="display:none" class="conn-result"></div>
           </div>
         </div>
       </div>
@@ -514,6 +518,36 @@ async function loadDashboard() {
 
 // ── Backend Cards (shared) ──────────────
 
+function getBackendIcon(name) {
+  var icons = {
+    'openclaw': 'O',
+    'opencode': 'OC',
+    'claude-code': 'CC',
+    'codex-cli': 'CD',
+    'cline': 'CL',
+    'aider': 'AI',
+    'continue': 'CD',
+    'hermes': 'H',
+    'qwencode': 'QW',
+    'goose': 'G',
+    'copilot-cli': 'GH',
+    'antigravity': 'AG',
+    'cursor-cli': 'CS',
+  };
+  return icons[name] || 'B';
+}
+
+function getIconClass(name) {
+  var map = {
+    'claude-code': 'icon-anthropic',
+    'goose': 'icon-goose',
+    'copilot-cli': 'icon-copilot',
+    'antigravity': 'icon-antigravity',
+    'cursor-cli': 'icon-cursor',
+  };
+  return map[name] || '';
+}
+
 function renderBackendCards(list, containerId) {
   var container = $(containerId);
   if (!container) return;
@@ -523,23 +557,46 @@ function renderBackendCards(list, containerId) {
     var running = s.running === true;
     var version = s.version || '';
     var msg = s.message || '';
+    var config = b.config || {};
+    var disabled = config.disabled;
+    var supportsByok = b.supports_byok !== false;
+
+    var badgeClass = 'badge-off';
+    var badgeText = _('gateway.stopped');
+    if (disabled) {
+      badgeClass = 'badge-disabled';
+      badgeText = _('backends.syncDisabled');
+    } else if (running) {
+      badgeClass = 'badge-ok';
+      badgeText = _('gateway.yes');
+    } else if (!supportsByok) {
+      badgeClass = 'badge-readonly';
+      badgeText = 'No BYOK';
+    }
+
+    var dotClass = running ? 'dot-healthy' : 'dot-off';
+    var icon = getBackendIcon(b.name);
+    var iconClass = getIconClass(b.name);
+
     var card = document.createElement('div');
     card.className = 'backend-card';
-    card.style.cursor = 'pointer';
     card.onclick = function() { showBackendDetail(b.name); };
     card.innerHTML = [
       '<div class="backend-card-head">',
-        '<div class="backend-icon ' + (running ? 'active' : '') + '">',
-          '<svg width="20" height="20"><use href="#ico-box"/></svg>',
+        '<div class="backend-icon ' + (running ? 'active' : '') + ' ' + iconClass + '">',
+          esc(icon),
         '</div>',
         '<div class="backend-info">',
           '<div class="backend-name">' + esc(b.display_name || b.name) + '</div>',
           '<div class="backend-version">' + esc(version) + '</div>',
         '</div>',
-        '<span class="backend-badge ' + (running ? 'badge-ok' : 'badge-off') + '">' + (running ? _('gateway.yes') : _('gateway.stopped')) + '</span>',
+        '<span class="backend-badge ' + badgeClass + '">' + badgeText + '</span>',
       '</div>',
       '<div class="backend-card-body">',
-        '<div class="backend-msg">' + esc(msg.slice(0, 120)) + '</div>',
+        '<div class="backend-msg">',
+          '<span class="msg-dot ' + dotClass + '"></span>',
+          esc(msg.slice(0, 120)),
+        '</div>',
       '</div>',
     ].join('');
     container.appendChild(card);
@@ -547,6 +604,33 @@ function renderBackendCards(list, containerId) {
   if (list.length === 0) {
     container.innerHTML = '<div class="empty-state" style="padding:40px"><p data-i18n="backends.none">{{ t("backends.none") }}</p></div>';
   }
+}
+
+function renderBackendSummary(list) {
+  var bar = $('backendSummaryBar');
+  if (!bar) return;
+  var total = list.length;
+  var running = list.filter(function(b) { return b.status && b.status.running; }).length;
+  var pct = total > 0 ? Math.round(running / total * 100) : 0;
+  bar.innerHTML = [
+    '<span class="summary-count">',
+      '<strong>' + running + '</strong> / ' + total + ' ' + _('gateway.yes').toLowerCase(),
+    '</span>',
+    '<div class="summary-bar-track"><div class="summary-bar-fill" style="width:' + pct + '%"></div></div>',
+    '<div class="summary-actions">',
+      '<button class="btn btn-sm" onclick="refreshBackendStatus()">',
+        '<svg width="14" height="14"><use href="#ico-refresh"/></svg> ' + _('gatewayPanel.refresh'),
+      '</button>',
+    '</div>',
+  ].join('');
+}
+
+function toggleOpenclawControls() {
+  var panel = $('openclawPanel');
+  var toggle = $('openclawToggle');
+  if (!panel || !toggle) return;
+  panel.classList.toggle('open');
+  toggle.classList.toggle('open');
 }
 
 // ── Backend Detail Modal ─────────────────
@@ -1239,6 +1323,7 @@ function syncAll() {
 async function loadBackends() {
   const data = await api('/api/backends');
   if (data.error) return;
+  renderBackendSummary(data.backends || []);
   renderBackendCards((data.backends || []), 'backendGrid');
   loadGatewayStatus();
 }
@@ -1246,6 +1331,7 @@ async function loadBackends() {
 async function refreshBackendStatus() {
   const data = await api('/api/backends');
   if (data.error) return;
+  renderBackendSummary(data.backends || []);
   renderBackendCards((data.backends || []), 'dashBackendCards');
   renderBackendCards((data.backends || []), 'backendGrid');
   showToast(_('toast.saved'), 'success');
@@ -1264,6 +1350,11 @@ async function loadGatewayStatus() {
   if (data.version_warning) {
     $('versionWarning').style.display = '';
     $('versionWarningText').textContent = data.version_warning;
+  }
+  var toggleStatus = $('openclawToggleStatus');
+  if (toggleStatus) {
+    toggleStatus.textContent = data.running ? '• Running' : '• Stopped';
+    toggleStatus.style.color = data.running ? 'var(--success)' : 'var(--text3)';
   }
 }
 

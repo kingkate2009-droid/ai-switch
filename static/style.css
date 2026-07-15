@@ -260,12 +260,58 @@ main {
   gap: 6px;
 }
 
+/* ── Backend Status Bar ────────── */
+
+.backend-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 32px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.backend-summary-bar .summary-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+}
+
+.backend-summary-bar .summary-count strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.backend-summary-bar .summary-bar-track {
+  flex: 1;
+  min-width: 120px;
+  height: 6px;
+  background: var(--bg3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.backend-summary-bar .summary-bar-fill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.backend-summary-bar .summary-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
 /* ── Backend Grid ──────────────── */
 
 .backend-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  padding: 20px 32px;
 }
 
 .backend-card {
@@ -273,12 +319,14 @@ main {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  cursor: pointer;
 }
 
 .backend-card:hover {
   border-color: var(--text3);
-  box-shadow: var(--shadow);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  transform: translateY(-1px);
 }
 
 .backend-card-head {
@@ -286,25 +334,33 @@ main {
   align-items: center;
   gap: 10px;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
 }
 
 .backend-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   background: var(--bg3);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text3);
   flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 700;
+  transition: background 0.15s, color 0.15s;
 }
 
 .backend-icon.active {
   background: var(--primary-dim);
   color: var(--primary);
 }
+
+.backend-icon.active.icon-anthropic { background: rgba(249, 115, 22, 0.15); color: #fb923c; }
+.backend-icon.active.icon-goose { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+.backend-icon.active.icon-copilot { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
+.backend-icon.active.icon-cursor { background: rgba(236, 72, 153, 0.15); color: #f472b6; }
+.backend-icon.active.icon-antigravity { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
 
 .backend-info {
   flex: 1;
@@ -314,6 +370,7 @@ main {
 .backend-name {
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.3;
 }
 
 .backend-version {
@@ -323,6 +380,7 @@ main {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-top: 1px;
 }
 
 .backend-badge {
@@ -331,6 +389,7 @@ main {
   padding: 3px 8px;
   border-radius: 100px;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .badge-ok {
@@ -343,14 +402,141 @@ main {
   color: var(--text3);
 }
 
+.badge-disabled {
+  background: var(--warning-dim);
+  color: var(--warning);
+}
+
+.badge-readonly {
+  background: var(--bg3);
+  color: var(--text3);
+  border: 1px dashed var(--border);
+}
+
 .backend-card-body {
-  padding: 12px 16px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
 }
 
 .backend-msg {
   font-size: 12px;
   color: var(--text2);
   line-height: 1.5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.backend-msg .msg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.backend-msg .msg-dot.dot-healthy { background: var(--success); }
+.backend-msg .msg-dot.dot-off { background: var(--text3); }
+.backend-msg .msg-dot.dot-warn { background: var(--warning); }
+
+/* ── Backend Controls (OpenClaw) ── */
+
+.backend-controls {
+  padding: 0 32px 24px;
+}
+
+.backend-controls-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  transition: all 0.15s;
+  width: 100%;
+}
+
+.backend-controls-toggle:hover {
+  border-color: var(--text3);
+  color: var(--text);
+}
+
+.backend-controls-toggle svg {
+  color: var(--primary);
+  transition: transform 0.2s;
+}
+
+.backend-controls-toggle.open svg {
+  transform: rotate(90deg);
+}
+
+.backend-controls-panel {
+  display: none;
+  margin-top: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.backend-controls-panel.open {
+  display: block;
+}
+
+.backend-controls-panel .panel-body {
+  padding: 20px;
+}
+
+.backend-controls-panel .control-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.backend-controls-panel .control-row:last-child { margin-bottom: 0; }
+
+.backend-controls-panel .control-row label {
+  width: 140px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
+.backend-controls-panel .status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.backend-controls-panel .control-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.backend-controls-panel .warn-banner {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--warning-dim);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--warning);
+}
+
+.backend-controls-panel .conn-result {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: var(--bg3);
 }
 
 /* ── Vendor Layout ─────────────── */
@@ -736,102 +922,6 @@ input[type="checkbox"] { accent-color: var(--primary); }
 .disabled-badge {
   background: var(--bg3);
   color: var(--text3);
-}
-
-/* ── Section Card ──────────────── */
-
-.section-card {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin: 0 32px 24px;
-}
-
-.section-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.section-card-head svg { color: var(--primary); }
-
-.section-card-body {
-  padding: 16px 20px;
-}
-
-.control-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.control-row label {
-  width: 100px;
-  font-size: 13px;
-  color: var(--text2);
-  flex-shrink: 0;
-}
-
-.control-row input,
-.control-row select {
-  flex: 1;
-  max-width: 300px;
-  padding: 6px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 13px;
-  outline: none;
-}
-
-.control-row input:focus,
-.control-row select:focus { border-color: var(--primary); }
-
-.control-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 16px;
-  align-items: start;
-}
-
-.status-item {
-  display: contents;
-  font-size: 13px;
-}
-
-.status-item .label {
-  color: var(--text2);
-  white-space: nowrap;
-}
-
-.warn-banner {
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: var(--warning-dim);
-  border: 1px solid var(--warning);
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  color: var(--warning);
-}
-
-.conn-result {
-  margin-top: 10px;
-  padding: 10px;
-  border-radius: var(--radius-sm);
-  background: var(--bg3);
-  font-size: 13px;
 }
 
 /* ── Modals ────────────────────── */
