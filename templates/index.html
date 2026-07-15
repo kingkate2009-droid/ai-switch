@@ -47,6 +47,10 @@
         <svg width="18" height="18"><use href="#ico-box"/></svg>
         <span data-i18n="nav.backends">{{ t('nav.backends') }}</span>
       </a>
+      <a href="#" class="nav-item" data-view="stats" onclick="switchView('stats');return false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span data-i18n="nav.stats">{{ t('nav.stats') }}</span>
+      </a>
     </nav>
 
     <div class="sidebar-footer">
@@ -266,6 +270,50 @@
               <div id="remoteResult" style="display:none"></div>
             </div>
           </div>
+        </div>
+      </div>
+    <!-- ═══ Statistics ═══ -->
+    <div class="view" id="view-stats">
+      <div class="page-head">
+        <h2 data-i18n="nav.stats">{{ t('nav.stats') }}</h2>
+        <p class="page-desc" data-i18n="stats.desc">{{ t('stats.desc') }}</p>
+        <div class="page-actions">
+          <input type="date" id="statsFrom" onchange="loadStats()">
+          <span style="color:var(--text3)">—</span>
+          <input type="date" id="statsTo" onchange="loadStats()">
+          <select id="statsGroupBy" onchange="loadStats()" style="padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none">
+            <option value="vendor" data-i18n="stats.groupVendor">{{ t('stats.groupVendor') }}</option>
+            <option value="key" data-i18n="stats.groupKey">{{ t('stats.groupKey') }}</option>
+            <option value="provider" data-i18n="stats.groupProvider">{{ t('stats.groupProvider') }}</option>
+          </select>
+          <button class="btn btn-sm" onclick="loadStats()">
+            <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+            <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="stats-row" id="statsTotals">
+        <div class="stat-card"><div class="stat-value" id="statTotalCount">-</div><div class="stat-label" data-i18n="stats.totalCalls">{{ t('stats.totalCalls') }}</div></div>
+        <div class="stat-card"><div class="stat-value" id="statTotalTokens">-</div><div class="stat-label" data-i18n="stats.totalTokens">{{ t('stats.totalTokens') }}</div></div>
+        <div class="stat-card success" id="statTotalCostCard"><div class="stat-value" id="statTotalCost">-</div><div class="stat-label" data-i18n="stats.totalCost">{{ t('stats.totalCost') }}</div></div>
+      </div>
+
+      <div class="dash-section">
+        <div class="table-wrap" style="padding:0 32px">
+          <table id="statsTable">
+            <thead>
+              <tr>
+                <th data-i18n="stats.dimension">{{ t('stats.dimension') }}</th>
+                <th data-i18n="stats.calls">{{ t('stats.calls') }}</th>
+                <th data-i18n="stats.totalTokens">{{ t('stats.totalTokens') }}</th>
+                <th data-i18n="stats.promptTokens">{{ t('stats.promptTokens') }}</th>
+                <th data-i18n="stats.completionTokens">{{ t('stats.completionTokens') }}</th>
+                <th data-i18n="stats.cost">{{ t('stats.cost') }}</th>
+              </tr>
+            </thead>
+            <tbody id="statsBody"></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -488,6 +536,7 @@ function switchView(name) {
   if (name === 'dashboard') loadDashboard();
   if (name === 'vendors') loadVendors();
   if (name === 'backends') loadBackends();
+  if (name === 'stats') loadStats();
 }
 
 // ── Dashboard ────────────────────────────
@@ -548,6 +597,50 @@ function getIconClass(name) {
   return map[name] || '';
 }
 
+function getBackendStatusInfo(s, config, supportsByok) {
+  var running = s && s.running === true;
+  var msg = (s && s.message) || '';
+  var msgLower = msg.toLowerCase();
+  var disabled = config && config.disabled;
+
+  var status, badgeClass, dotClass;
+  var notFoundKeywords = ['not found', 'not installed', 'no such file', 'command not found'];
+
+  if (disabled) {
+    status = _('backends.syncDisabled');
+    badgeClass = 'badge-disabled';
+    dotClass = 'dot-off';
+  } else if (!running) {
+    var isNotFound = notFoundKeywords.some(function(k) { return msgLower.indexOf(k) !== -1; });
+    if (isNotFound) {
+      status = _('backends.notInstalled');
+      badgeClass = 'badge-off';
+      dotClass = 'dot-off';
+    } else {
+      status = _('backends.stopped');
+      badgeClass = 'badge-off';
+      dotClass = 'dot-off';
+    }
+  } else if (running) {
+    var hasKey = msgLower.indexOf('key') !== -1 || msgLower.indexOf('configured') !== -1;
+    if (!supportsByok) {
+      status = _('backends.readonly');
+      badgeClass = 'badge-readonly';
+      dotClass = 'dot-healthy';
+    } else if (hasKey) {
+      status = _('backends.running');
+      badgeClass = 'badge-ok';
+      dotClass = 'dot-healthy';
+    } else {
+      status = _('backends.unconfigured');
+      badgeClass = 'badge-warn';
+      dotClass = 'dot-warn';
+    }
+  }
+
+  return { status: status, badgeClass: badgeClass, dotClass: dotClass };
+}
+
 function renderBackendCards(list, containerId) {
   var container = $(containerId);
   if (!container) return;
@@ -558,23 +651,9 @@ function renderBackendCards(list, containerId) {
     var version = s.version || '';
     var msg = s.message || '';
     var config = b.config || {};
-    var disabled = config.disabled;
     var supportsByok = b.supports_byok !== false;
 
-    var badgeClass = 'badge-off';
-    var badgeText = _('gateway.stopped');
-    if (disabled) {
-      badgeClass = 'badge-disabled';
-      badgeText = _('backends.syncDisabled');
-    } else if (running) {
-      badgeClass = 'badge-ok';
-      badgeText = _('gateway.yes');
-    } else if (!supportsByok) {
-      badgeClass = 'badge-readonly';
-      badgeText = 'No BYOK';
-    }
-
-    var dotClass = running ? 'dot-healthy' : 'dot-off';
+    var info = getBackendStatusInfo(s, config, supportsByok);
     var icon = getBackendIcon(b.name);
     var iconClass = getIconClass(b.name);
 
@@ -590,11 +669,11 @@ function renderBackendCards(list, containerId) {
           '<div class="backend-name">' + esc(b.display_name || b.name) + '</div>',
           '<div class="backend-version">' + esc(version) + '</div>',
         '</div>',
-        '<span class="backend-badge ' + badgeClass + '">' + badgeText + '</span>',
+        '<span class="backend-badge ' + info.badgeClass + '">' + info.status + '</span>',
       '</div>',
       '<div class="backend-card-body">',
         '<div class="backend-msg">',
-          '<span class="msg-dot ' + dotClass + '"></span>',
+          '<span class="msg-dot ' + info.dotClass + '"></span>',
           esc(msg.slice(0, 120)),
         '</div>',
       '</div>',
@@ -610,11 +689,13 @@ function renderBackendSummary(list) {
   var bar = $('backendSummaryBar');
   if (!bar) return;
   var total = list.length;
-  var running = list.filter(function(b) { return b.status && b.status.running; }).length;
+  var running = list.filter(function(b) {
+    return b.status && b.status.running === true;
+  }).length;
   var pct = total > 0 ? Math.round(running / total * 100) : 0;
   bar.innerHTML = [
     '<span class="summary-count">',
-      '<strong>' + running + '</strong> / ' + total + ' ' + _('gateway.yes').toLowerCase(),
+      '<strong>' + running + '</strong> / ' + total + ' ' + _('backends.running').toLowerCase(),
     '</span>',
     '<div class="summary-bar-track"><div class="summary-bar-fill" style="width:' + pct + '%"></div></div>',
     '<div class="summary-actions">',
@@ -1400,6 +1481,63 @@ function toggleTheme() {
   var next = current === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('opencaw_theme', next);
+}
+
+// ── Statistics ──────────────────────────
+
+function getDefaultDates() {
+  var now = new Date();
+  var to = now.toISOString().split('T')[0];
+  var from = new Date(now.getTime() - 30 * 86400000).toISOString().split('T')[0];
+  return {from: from, to: to};
+}
+
+function formatCost(cents) {
+  return '$' + (cents || 0).toFixed(4);
+}
+
+function fmtNum(n) {
+  if (!n) return '0';
+  return n.toLocaleString();
+}
+
+async function loadStats() {
+  var from = $('statsFrom').value;
+  var to = $('statsTo').value;
+  var groupBy = $('statsGroupBy').value;
+  if (!from || !to) {
+    var def = getDefaultDates();
+    if (!from) { $('statsFrom').value = def.from; from = def.from; }
+    if (!to) { $('statsTo').value = def.to; to = def.to; }
+  }
+  var q = '?from=' + from + 'T00:00:00Z&to=' + to + 'T23:59:59Z&group_by=' + groupBy;
+  var data = await api('/api/stats' + q);
+  if (data.error) { showToast(data.error, 'error'); return; }
+
+  var total = data.total || {};
+  $('statTotalCount').textContent = fmtNum(total.count);
+  $('statTotalTokens').textContent = fmtNum(total.total_tokens);
+  $('statTotalCost').textContent = formatCost(total.total_cost);
+
+  var tbody = $('statsBody');
+  tbody.innerHTML = '';
+  var summary = data.summary || [];
+  if (summary.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text3)">' + _('stats.noData') + '</td></tr>';
+    return;
+  }
+  summary.forEach(function(s) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = [
+      '<td><strong>' + esc(s.name) + '</strong></td>',
+      '<td>' + fmtNum(s.count) + '</td>',
+      '<td>' + fmtNum(s.total_tokens) + '</td>',
+      '<td>' + fmtNum(s.prompt_tokens) + '</td>',
+      '<td>' + fmtNum(s.completion_tokens) + '</td>',
+      '<td>' + formatCost(s.total_cost) + '</td>',
+    ].join('');
+    tbody.appendChild(tr);
+  });
 }
 
 (function() {

@@ -342,8 +342,17 @@ def probe_openai_chat_apikey(url: str, api_key: str, models_to_try: Optional[lis
     return _probe_chat_completions(url, headers, models_to_try)
 
 
+def _strip_version_path(url: str) -> str:
+    root = url.rstrip("/")
+    for v in ("/v4", "/v3", "/v2", "/v1"):
+        if root.endswith(v):
+            return root[:-len(v)]
+    return root
+
+
 def probe_anthropic(url: str, api_key: str) -> tuple:
-    chat_url = url.rstrip("/") + "/v1/messages"
+    root = _strip_version_path(url)
+    chat_url = root + "/v1/messages"
     headers = {
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",

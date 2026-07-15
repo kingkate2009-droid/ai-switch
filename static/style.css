@@ -413,6 +413,11 @@ main {
   border: 1px dashed var(--border);
 }
 
+.badge-warn {
+  background: var(--warning-dim);
+  color: var(--warning);
+}
+
 .backend-card-body {
   padding: 10px 16px 14px;
   border-top: 1px solid var(--border);
@@ -697,7 +702,16 @@ tr:hover td { background: var(--bg2); }
 .actions-cell {
   display: flex;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.actions-cell .btn { flex-shrink: 0; }
+
+th:last-child, td:last-child {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
 }
 
 /* ── Key Toolbar ───────────────── */

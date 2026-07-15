@@ -631,6 +631,52 @@ def api_set_lang():
     return resp
 
 
+# ── Usage Statistics ──────────────────────────────────────
+
+
+@app.route("/api/stats", methods=["GET"])
+def api_get_stats():
+    from core.data import get_usage_records, get_usage_summary
+    from_ts = request.args.get("from", "")
+    to_ts = request.args.get("to", "")
+    vendor_id = request.args.get("vendor_id", "")
+    provider = request.args.get("provider", "")
+    group_by = request.args.get("group_by", "vendor")  # vendor|key|provider
+    records = get_usage_records(from_ts=from_ts, to_ts=to_ts,
+                                vendor_id=vendor_id, provider=provider)
+    summary = get_usage_summary(from_ts=from_ts, to_ts=to_ts, group_by=group_by)
+    total_tokens = sum(r.get("total_tokens", 0) for r in records)
+    total_cost = sum(r.get("cost", 0) for r in records)
+    return jsonify({
+        "records": records,
+        "summary": summary,
+        "total": {
+            "count": len(records),
+            "total_tokens": total_tokens,
+            "total_cost": round(total_cost, 6),
+        },
+    })
+
+
+@app.route("/api/stats/record", methods=["POST"])
+def api_add_stat_record():
+    from core.data import add_usage_record
+    body = request.get_json() or {}
+    required = ("timestamp", "vendor_id", "key_id", "provider", "total_tokens")
+    for f in required:
+        if f not in body:
+            return jsonify({"error": f"missing field: {f}"}), 400
+    record = add_usage_record(body)
+    return jsonify({"success": True, "record": record})
+
+
+@app.route("/api/vendors/simple", methods=["GET"])
+def api_list_vendors_simple():
+    vendors = get_vendors()
+    return jsonify([{"id": v["id"], "name": v["name"], "provider": v["provider"]}
+                    for v in vendors])
+
+
 # ── Startup ────────────────────────────────────────────────
 
 if __name__ == "__main__":

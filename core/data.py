@@ -199,3 +199,62 @@ def save_backend_config(backend_name: str, config: dict) -> None:
     data.setdefault("backends", {})
     data["backends"][backend_name] = config
     _save_data(data)
+
+
+# ── Usage Statistics ────────────────────────
+
+
+def add_usage_record(record: dict) -> dict:
+    data = _load_data()
+    records = data.setdefault("usage", [])
+    record["id"] = _next_id(records)
+    records.append(record)
+    _save_data(data)
+    return record
+
+
+def get_usage_records(from_ts: str = "", to_ts: str = "",
+                      vendor_id: str = "", key_id: str = "",
+                      provider: str = "") -> list[dict]:
+    data = _load_data()
+    records = data.get("usage", [])
+    filtered = []
+    for r in records:
+        if from_ts and r.get("timestamp", "") < from_ts:
+            continue
+        if to_ts and r.get("timestamp", "") > to_ts:
+            continue
+        if vendor_id and r.get("vendor_id", "") != vendor_id:
+            continue
+        if key_id and r.get("key_id", "") != key_id:
+            continue
+        if provider and r.get("provider", "") != provider:
+            continue
+        filtered.append(r)
+    return filtered
+
+
+def get_usage_summary(from_ts: str = "", to_ts: str = "",
+                      group_by: str = "vendor") -> list[dict]:
+    """Summarize usage grouped by vendor, key, or backend dimension."""
+    records = get_usage_records(from_ts, to_ts)
+    groups = {}
+    for r in records:
+        if group_by == "vendor":
+            key = r.get("vendor_name", r.get("vendor_id", "unknown"))
+        elif group_by == "key":
+            key = r.get("key_name", r.get("key_id", "unknown"))
+        elif group_by == "provider":
+            key = r.get("provider", "unknown")
+        else:
+            key = r.get("vendor_name", "unknown")
+        if key not in groups:
+            groups[key] = {"name": key, "total_tokens": 0,
+                           "prompt_tokens": 0, "completion_tokens": 0,
+                           "total_cost": 0.0, "count": 0}
+        groups[key]["total_tokens"] += r.get("total_tokens", 0)
+        groups[key]["prompt_tokens"] += r.get("prompt_tokens", 0)
+        groups[key]["completion_tokens"] += r.get("completion_tokens", 0)
+        groups[key]["total_cost"] += r.get("cost", 0)
+        groups[key]["count"] += 1
+    return sorted(groups.values(), key=lambda x: x["total_tokens"], reverse=True)
