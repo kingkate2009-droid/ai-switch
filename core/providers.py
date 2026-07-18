@@ -350,40 +350,105 @@ def _strip_version_path(url: str) -> str:
     return root
 
 
-def probe_anthropic(url: str, api_key: str) -> tuple:
-    root = _strip_version_path(url)
-    chat_url = root + "/v1/messages"
+_ANTHROPIC_MODELS = [
+    "claude-sonnet-4-20250514",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
+    "claude-3-opus-20240229",
+    "claude-3-sonnet-20240229",
+    "claude-3-haiku-20240307",
+    "claude-opus-4-20250514",
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-haiku-latest",
+]
+
+
+def _anthropic_messages_url(url: str) -> str:
+    root = url.rstrip("/")
+    if root.endswith("/messages"):
+        return root
+    if root.endswith(("/v1", "/v2", "/v3", "/v4")):
+        return root + "/messages"
+    # Paths like .../anthropic or .../claude already imply the product root
+    return root + "/v1/messages"
+
+
+def probe_anthropic(url: str, api_key: str, models_to_try: Optional[list[str]] = None) -> tuple:
+    chat_url = _anthropic_messages_url(url)
     headers = {
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
+    # Prefer inventory → discovered (gateway-specific) → Claude defaults → common chat models
+    candidates = []
+    seen = set()
+    for m in (models_to_try or []):
+        if m and m not in seen:
+            seen.add(m)
+            candidates.append(m)
+    # Always try listing: /anthropic often has no /models but host root does
+    for m in _scan_models_anthropic(url, api_key):
+        if m and m not in seen:
+            seen.add(m)
+            candidates.append(m)
+    for m in list(_ANTHROPIC_MODELS) + ["mimo-v2.5-pro", "mimo-v2.5"] + [x for x in _MODEL_CANDIDATES if x]:
+        if m and m not in seen:
+            seen.add(m)
+            candidates.append(m)
     try:
-        r = _new_session().post(chat_url, json={
-            "model": "claude-3-5-sonnet-20241022",
-            "max_tokens": 10,
-            "messages": [{"role": "user", "content": "hi"}],
-        }, headers=headers, timeout=PROBE_TIMEOUT)
-        if r.status_code == 200:
-            try:
-                msg = r.json().get("content", [{}])[0].get("text", "")
-                if not msg:
+        last_body = ""
+        last_code = 0
+        all_model_errors = True
+        for model in candidates:
+            r = _new_session().post(chat_url, json={
+                "model": model,
+                "max_tokens": 10,
+                "messages": [{"role": "user", "content": "hi"}],
+            }, headers=headers, timeout=PROBE_TIMEOUT)
+            last_code = r.status_code
+            last_body = r.text[:300]
+            if r.status_code == 200:
+                try:
+                    content = r.json().get("content", [])
+                    msg = ""
+                    if isinstance(content, list):
+                        for block in content:
+                            if not isinstance(block, dict):
+                                continue
+                            if block.get("type") == "text" and block.get("text"):
+                                msg = block.get("text")
+                                break
+                            if block.get("text"):
+                                msg = block.get("text")
+                                break
+                            if block.get("thinking"):
+                                msg = block.get("thinking")
+                                break
+                    if not msg:
+                        msg = r.text[:200]
+                except Exception:
                     msg = r.text[:200]
-            except Exception:
-                msg = r.text[:200]
-            return True, f"[claude-3-5-sonnet-20241022] {msg[:200]}"
-        if r.status_code in (401, 403):
-            return False, f"Auth failed (HTTP {r.status_code})"
-        if r.status_code == 429:
-            body = r.text[:300]
-            body_lower = body.lower()
-            if "quota" in body_lower or "exhausted" in body_lower or "insufficient" in body_lower:
-                return False, f"Quota exhausted: {body}"
-            return True, f"Rate limited: {body}"
-        body = r.text[:300]
-        if _is_model_error(body):
+                return True, f"[{model}] {msg[:200]}"
+            if r.status_code in (401, 403):
+                body_lower = last_body.lower()
+                if r.status_code == 403 and _is_model_error(last_body):
+                    continue
+                if "blocked" in body_lower:
+                    return False, f"Access blocked: {last_body}"
+                return False, f"Auth failed (HTTP {r.status_code})"
+            if r.status_code == 429:
+                body_lower = last_body.lower()
+                if "quota" in body_lower or "exhausted" in body_lower or "insufficient" in body_lower:
+                    return False, f"Quota exhausted: {last_body}"
+                return True, f"Rate limited: {last_body}"
+            if _is_model_error(last_body):
+                continue
+            all_model_errors = False
+            return False, f"HTTP {r.status_code}: {last_body}"
+        if all_model_errors:
             return False, "No compatible model found"
-        return False, f"HTTP {r.status_code}: {body}"
+        return False, f"HTTP {last_code}: {last_body}" if last_body else "No compatible model found"
     except requests.exceptions.ConnectionError:
         return False, "Connection refused"
     except requests.exceptions.Timeout:
@@ -392,32 +457,43 @@ def probe_anthropic(url: str, api_key: str) -> tuple:
         return False, str(e)[:200]
 
 
-def probe_gemini(url: str, api_key: str) -> tuple:
-    chat_url = url.rstrip("/") + f"/models/gemini-2.0-flash:generateContent?key={api_key}"
+_GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
+
+
+def probe_gemini(url: str, api_key: str, models_to_try: Optional[list[str]] = None) -> tuple:
+    base = url.rstrip("/")
+    candidates = [m for m in (models_to_try or []) if m] or list(_GEMINI_MODELS)
     try:
-        r = _new_session().post(chat_url, json={
-            "contents": [{"parts": [{"text": "hi"}]}],
-        }, timeout=PROBE_TIMEOUT)
-        if r.status_code == 200:
-            try:
-                msg = r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                if not msg:
+        last_body = ""
+        last_code = 0
+        for model in candidates:
+            chat_url = base + f"/models/{model}:generateContent?key={api_key}"
+            r = _new_session().post(chat_url, json={
+                "contents": [{"parts": [{"text": "hi"}]}],
+            }, timeout=PROBE_TIMEOUT)
+            last_code = r.status_code
+            last_body = r.text[:300]
+            if r.status_code == 200:
+                try:
+                    msg = r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    if not msg:
+                        msg = r.text[:200]
+                except Exception:
                     msg = r.text[:200]
-            except Exception:
-                msg = r.text[:200]
-            return True, f"[gemini-2.0-flash] {msg[:200]}"
-        if r.status_code in (401, 403):
-            return False, f"Auth failed (HTTP {r.status_code})"
-        if r.status_code == 429:
-            body = r.text[:300]
-            body_lower = body.lower()
-            if "quota" in body_lower or "exhausted" in body_lower or "insufficient" in body_lower:
-                return False, f"Quota exhausted: {body}"
-            return True, f"Rate limited: {body}"
-        body = r.text[:300]
-        if _is_model_error(body):
-            return False, "No compatible model found"
-        return False, f"HTTP {r.status_code}: {body}"
+                return True, f"[{model}] {msg[:200]}"
+            if r.status_code in (401, 403):
+                if _is_model_error(last_body):
+                    continue
+                return False, f"Auth failed (HTTP {r.status_code})"
+            if r.status_code == 429:
+                body_lower = last_body.lower()
+                if "quota" in body_lower or "exhausted" in body_lower or "insufficient" in body_lower:
+                    return False, f"Quota exhausted: {last_body}"
+                return True, f"Rate limited: {last_body}"
+            if _is_model_error(last_body):
+                continue
+            return False, f"HTTP {r.status_code}: {last_body}"
+        return False, "No compatible model found" if not last_body else f"HTTP {last_code}: {last_body}"
     except requests.exceptions.ConnectionError:
         return False, "Connection refused"
     except requests.exceptions.Timeout:
@@ -437,6 +513,22 @@ _PROBE_FUNCS = {
 def probe_provider(check_type: str, url: str, api_key: str, models_to_try: Optional[list[str]] = None) -> tuple:
     func = _PROBE_FUNCS.get(check_type, probe_openai_chat)
     return func(url, api_key, models_to_try)
+
+
+def probe_single_model(check_type: str, url: str, api_key: str, model: str) -> tuple:
+    """Probe one specific model. Returns (healthy, message)."""
+    if not model:
+        return False, "Model id required"
+    if check_type == "anthropic":
+        return probe_anthropic(url, api_key, [model])
+    if check_type == "gemini":
+        return probe_gemini(url, api_key, [model])
+    headers = {"Content-Type": "application/json"}
+    if check_type == "openai_chat_apikey":
+        headers["api-key"] = api_key
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return _probe_chat_completions(url, headers, [model])
 
 
 # ── Model scanning ────────────────────────────────────────
@@ -478,6 +570,67 @@ def _scan_models_openai(url: str, headers: dict) -> list[str]:
     return []
 
 
+def _scan_models_anthropic(url: str, api_key: str) -> list[str]:
+    """List models for Anthropic-compatible gateways.
+
+    Some providers (e.g. Xiaomi Token Plan) expose Anthropic at ``.../anthropic``
+    but only serve ``/v1/models`` on the host root with OpenAI-style listing.
+    """
+    headers_variants = [
+        {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        },
+        {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    ]
+    root = url.rstrip("/")
+    candidates = []
+    if root.endswith(("/v1", "/v2", "/v3", "/v4")):
+        candidates.append(root + "/models")
+    else:
+        candidates.append(root + "/v1/models")
+        candidates.append(root + "/models")
+    # Strip trailing version once
+    stripped = _strip_version_path(root)
+    if stripped != root:
+        candidates.append(stripped + "/v1/models")
+        candidates.append(stripped + "/models")
+    # Strip product path (.../anthropic, .../claude) → host root /v1/models
+    product_root = stripped
+    for suffix in ("/anthropic", "/claude"):
+        if product_root.endswith(suffix):
+            product_root = product_root[: -len(suffix)]
+            break
+    if product_root and product_root != stripped:
+        candidates.append(product_root + "/v1/models")
+        candidates.append(product_root + "/models")
+
+    seen_urls = set()
+    for models_url in candidates:
+        if models_url in seen_urls:
+            continue
+        seen_urls.add(models_url)
+        for headers in headers_variants:
+            try:
+                r = _new_session().get(models_url, headers=headers, timeout=PROBE_TIMEOUT)
+                if r.status_code != 200:
+                    continue
+                data = r.json()
+                raw = data.get("data", []) if isinstance(data, dict) else data
+                if not isinstance(raw, list):
+                    continue
+                ids = [m.get("id", "") for m in raw if isinstance(m, dict) and m.get("id")]
+                if ids:
+                    return [m for m in ids if _is_chat_model(m)]
+            except Exception:
+                continue
+    return []
+
+
 def scan_models(check_type: str, url: str, api_key: str) -> list[str]:
     if check_type in ("openai_chat", "openai_chat_apikey"):
         headers = {"Content-Type": "application/json"}
@@ -487,24 +640,7 @@ def scan_models(check_type: str, url: str, api_key: str) -> list[str]:
             headers["Authorization"] = f"Bearer {api_key}"
         return _scan_models_openai(url, headers)
     if check_type == "anthropic":
-        models = _scan_models_openai(url, {
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        })
-        if not models:
-            models_url = url.rstrip("/") + "/v1/models"
-            try:
-                r = _new_session().get(models_url, headers={
-                    "x-api-key": api_key, "anthropic-version": "2023-06-01"
-                }, timeout=PROBE_TIMEOUT)
-                if r.status_code == 200:
-                    data = r.json()
-                    raw = data.get("data", []) if isinstance(data, dict) else data
-                    models = [m.get("id", "") for m in raw if isinstance(m, dict) and m.get("id")]
-            except Exception:
-                pass
-        return models
+        return _scan_models_anthropic(url, api_key)
     if check_type == "gemini":
         models_url = url.rstrip("/") + f"/models?key={api_key}"
         try:

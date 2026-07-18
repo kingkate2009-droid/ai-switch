@@ -27,3 +27,9 @@ release.sh
 
 # Local memory/notes
 memory/
+
+# Packaging / build
+build/
+dist/
+*.spec.bak
+packaging/dist/

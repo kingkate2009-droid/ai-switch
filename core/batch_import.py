@@ -6,16 +6,36 @@ from typing import Optional
 from core.providers import get_provider, recognize_provider
 
 URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+# API keys: sk-/tp- prefixes, UUIDs, or long tokens that may include _ and -
 KEY_RE = re.compile(
-    r"(?:sk-[a-zA-Z0-9_-]{20,}|tp-[a-zA-Z0-9]{20,}|"
+    r"(?:sk-[a-zA-Z0-9_-]{16,}|tp-[a-zA-Z0-9_-]{16,}|"
     r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|"
-    r"[a-zA-Z0-9]{30,})"
+    r"(?<![A-Za-z0-9_+/=-])[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_+/=-]))"
 )
+_BASE64_RE = re.compile(r"^[A-Za-z0-9+/]{16,}={0,2}$")
 _NAME_ONLY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_ .-]{1,30}$")
+_KEY_LABEL_RE = re.compile(
+    r"^(?:key|api[_-]?key|apikey|token|secret|bearer)\s*[:=]\s*",
+    re.IGNORECASE,
+)
 
 
 def _normalize_text(text: str) -> str:
     return text.replace("：", ":").replace("，", ",").replace("（", "(").replace("）", ")")
+
+
+def _looks_like_api_key(value: str) -> bool:
+    value = (value or "").strip()
+    if not value or len(value) < 16:
+        return False
+    if URL_RE.search(value):
+        return False
+    if KEY_RE.fullmatch(value) or KEY_RE.search(value):
+        return True
+    # g2a_xxx / xai-xxx style tokens
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{15,}", value):
+        return True
+    return False
 
 
 def _try_base64_decode(text: str) -> str:
@@ -23,51 +43,93 @@ def _try_base64_decode(text: str) -> str:
     text = text.strip()
     if not text or len(text) < 10:
         return text
-    
+
     # Check if it looks like Base64 (only alphanumeric + / + = padding)
-    if not re.match(r'^[A-Za-z0-9+/]+={0,2}$', text):
+    if not _BASE64_RE.match(text):
         return text
-    
+
     try:
-        # Add padding if needed
-        padding = 4 - len(text) % 4
+        raw = text
+        padding = 4 - len(raw) % 4
         if padding != 4:
-            text += '=' * padding
-        
-        decoded = base64.b64decode(text).decode('utf-8', errors='ignore')
-        
-        # Check if decoded result looks useful (contains URL or key pattern)
-        if URL_RE.search(decoded) or KEY_RE.search(decoded):
+            raw = raw + ("=" * padding)
+
+        decoded = base64.b64decode(raw).decode("utf-8", errors="strict")
+
+        # Prefer decoded value when it looks like a key/URL/token
+        if URL_RE.search(decoded) or _looks_like_api_key(decoded):
             return decoded
-        
+
         # Check if decoded result is printable and reasonable length
-        if decoded.isprintable() and 5 < len(decoded) < 500:
+        if decoded.isprintable() and 5 < len(decoded) < 500 and not decoded.isspace():
             return decoded
-        
+
         return text
     except Exception:
         return text
 
 
+def _extract_key_candidates(text: str) -> list[str]:
+    """Extract API key candidates from a line/snippet, decoding Base64 when needed."""
+    clean_text = (text or "").strip()
+    if not clean_text:
+        return []
+
+    # Strip labels: KEY: / API_KEY= / token：
+    clean_text = _KEY_LABEL_RE.sub("", clean_text)
+    # Strip trailing annotations: (Base64) / [base64]
+    clean_text = re.sub(r"\s*[\(\[][^)\]]*[Bb]ase64[^)\]]*[\)\]]\s*$", "", clean_text).strip()
+    clean_text = re.sub(r"\s*\([^)]*\)\s*$", "", clean_text).strip()
+
+    candidates: list[str] = []
+    seen = set()
+
+    def _add(val: str) -> None:
+        val = (val or "").strip().strip("\"'`")
+        if not val or val in seen:
+            return
+        if not _looks_like_api_key(val):
+            return
+        # Prefer decoded form over raw base64 blob
+        if _BASE64_RE.match(val):
+            decoded = _try_base64_decode(val)
+            if decoded != val and _looks_like_api_key(decoded):
+                if decoded not in seen:
+                    seen.add(decoded)
+                    candidates.append(decoded)
+                return
+        seen.add(val)
+        candidates.append(val)
+
+    # Whole line as one token (common: KEY:xxxx)
+    if clean_text and " " not in clean_text and "\t" not in clean_text:
+        _add(_try_base64_decode(clean_text))
+        _add(clean_text)
+
+    for word in re.split(r"[\s,;]+", clean_text):
+        word = word.strip().strip("\"'`")
+        if not word:
+            continue
+        word = _KEY_LABEL_RE.sub("", word)
+        decoded = _try_base64_decode(word)
+        _add(decoded)
+        if decoded != word:
+            _add(word)
+
+    # Fallback regex scan on decoded text
+    words = []
+    for word in re.split(r"[\s,;]+", clean_text):
+        words.append(_try_base64_decode(word))
+    decoded_text = " ".join(words)
+    for m in KEY_RE.findall(decoded_text):
+        _add(m)
+
+    return candidates
+
+
 def _find_api_keys(text: str) -> list[str]:
     """Find API keys in text, with Base64 auto-decode."""
-    # Strip key: prefix and parenthetical annotations from entire text first
-    clean_text = text
-    # Strip leading "key:" / "api_key:" / etc.
-    if ":" in clean_text and clean_text.index(":") < 20:
-        prefix = clean_text.split(":", 1)[0].lower()
-        if prefix in ("key", "api_key", "apikey", "api-key", "token"):
-            clean_text = clean_text.split(":", 1)[1]
-    # Strip trailing parenthetical annotations like (Base64)
-    clean_text = re.sub(r'\s*\([^)]*\)\s*$', '', clean_text).strip()
-    
-    words = clean_text.split()
-    decoded_parts = []
-    for word in words:
-        decoded_parts.append(_try_base64_decode(word))
-    decoded_text = ' '.join(decoded_parts)
-    
-    return KEY_RE.findall(decoded_text)
+    return _extract_key_candidates(text)
 
 
 def _find_urls(text: str) -> list[str]:
@@ -142,12 +204,19 @@ def _try_parse_json(text: str) -> Optional[list[dict]]:
                     key = key or v.get("key") or v.get("api_key") or ""
         if url or key:
             provider = item.get("provider") or item.get("model") or common_type or (_guess_provider_from_url(url) if url else "unknown")
+            ep = (item.get("endpoint_type") or item.get("endpoint") or "openai").lower()
+            if ep not in ("openai", "anthropic"):
+                # Heuristic from URL
+                low = (url or "").lower()
+                ep = "anthropic" if ("/anthropic" in low or "api.anthropic.com" in low) else "openai"
+            vendor_name = item.get("name") if not key else (item.get("vendor") or item.get("vendor_name") or "")
             entries.append({
-                "provider": provider,
+                "provider": str(provider),
+                "vendor_name": vendor_name or str(provider).replace("-", " ").title(),
                 "name": _make_key_name(key) if key else "(need key)",
-                "api_url": url.rstrip("/"),
+                "api_url": url.rstrip("/") if url else "",
                 "api_key": key,
-                "endpoint_type": "openai",
+                "endpoint_type": ep,
             })
     return entries if entries else None
 
@@ -202,27 +271,37 @@ def parse_batch_text(text: str) -> list[dict]:
     entries: list[dict] = []
     if urls_with_names and keys:
         for url, prov, ep_type in urls_with_names:
+            # Infer anthropic from URL if not set
+            ep = ep_type
+            if ep == "openai" and ("/anthropic" in url.lower() or "api.anthropic.com" in url.lower()):
+                ep = "anthropic"
             for k in keys:
                 entries.append({
                     "provider": prov,
+                    "vendor_name": str(prov).replace("-", " ").title(),
                     "name": _make_key_name(k),
                     "api_url": url,
                     "api_key": k,
-                    "endpoint_type": ep_type,
+                    "endpoint_type": ep,
                 })
     elif urls_with_names:
         for url, prov, ep_type in urls_with_names:
+            ep = ep_type
+            if ep == "openai" and ("/anthropic" in url.lower() or "api.anthropic.com" in url.lower()):
+                ep = "anthropic"
             entries.append({
                 "provider": prov,
+                "vendor_name": str(prov).replace("-", " ").title(),
                 "name": "(need key)",
                 "api_url": url,
                 "api_key": "",
-                "endpoint_type": ep_type,
+                "endpoint_type": ep,
             })
     elif keys:
         for k in keys:
             entries.append({
                 "provider": "unknown",
+                "vendor_name": "Unknown",
                 "name": _make_key_name(k),
                 "api_url": "",
                 "api_key": k,

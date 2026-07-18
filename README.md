@@ -114,6 +114,38 @@ Unknown providers default to `openai_chat` probe.
 | Hermes Agent | `config.yaml`, `.env` |
 | QwenCode | `settings.json`, `.env` |
 
+
+
+## Desktop Packages (Windows / macOS / Linux)
+
+Prebuilt binaries are published on [GitHub Releases](https://github.com/kingkate2009-droid/ai-switch/releases).
+
+### Download
+
+| Platform | Asset name pattern |
+|---|---|
+| Windows x64 | `ai-switch-<ver>-windows-amd64.zip` |
+| macOS Intel | `ai-switch-<ver>-macos-amd64.tar.gz` |
+| macOS Apple Silicon | `ai-switch-<ver>-macos-arm64.tar.gz` |
+| Linux x64 | `ai-switch-<ver>-linux-amd64.tar.gz` |
+
+Extract, then run `ai-switch` (or `start.sh` / `start.bat`). UI opens at http://127.0.0.1:8787
+
+### Build locally
+
+```bash
+# Current platform
+bash scripts/build_package.sh
+# Output: dist/packages/ai-switch-*-*.tar.gz (or .zip on Windows)
+```
+
+### Release (CI builds all platforms)
+
+```bash
+./release.sh v1.3.0
+# GitHub Actions builds Win/macOS/Linux and attaches packages to the release
+```
+
 ## Configuration
 
 | Item | Path |

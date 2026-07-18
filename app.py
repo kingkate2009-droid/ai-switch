@@ -1,8 +1,10 @@
+import json
 import logging
 import os
 import sys
 import threading
 import traceback
+from datetime import datetime
 
 import requests as py_requests
 from flask import Flask, Response, jsonify, render_template, request, make_response
@@ -14,17 +16,25 @@ from core.data import (
     add_vendor,
     delete_key,
     delete_vendor,
+    get_enabled_models,
     get_key,
     get_keys,
     get_settings,
     get_vendor,
     get_vendors,
+    list_model_ids,
+    set_model_enabled,
     update_key,
     update_key_data,
     update_settings,
     update_vendor,
 )
-from core.health_checker import check_all_keys, check_key_health, get_all_health_status
+from core.health_checker import (
+    check_all_keys,
+    check_key_health,
+    check_key_models,
+    get_all_health_status,
+)
 from core.i18n import SUPPORTED_LANGS, get_translations, resolve_lang, t as _t
 from backends import init_backends, get as get_backend, get_all as get_all_backends, \
     on_key_added, on_key_updated, on_key_removed, on_vendor_removed, reconcile_all
@@ -32,7 +42,22 @@ from backends import init_backends, get as get_backend, get_all as get_all_backe
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="[ai-switch] %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-app = Flask(__name__)
+def _create_app() -> Flask:
+    """Create Flask app with correct template/static roots for frozen binaries."""
+    try:
+        from core.paths import resource_root
+        root = resource_root()
+        return Flask(
+            __name__,
+            template_folder=str(root / "templates"),
+            static_folder=str(root / "static"),
+            static_url_path="/static",
+        )
+    except Exception:
+        return Flask(__name__)
+
+
+app = _create_app()
 
 init_backends()
 
@@ -74,6 +99,19 @@ def index():
 @app.route("/favicon.ico")
 def favicon():
     return "", 204
+
+
+@app.route("/api/version", methods=["GET"])
+def api_version():
+    from core.version import get_version
+    import platform
+    import sys
+    return jsonify({
+        "version": get_version(),
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "frozen": bool(getattr(sys, "frozen", False)),
+    })
 
 
 # ── Providers ──────────────────────────────────────────────
@@ -267,14 +305,17 @@ def api_create_key(vendor_id):
         updates = {"enabled": True}
         if models:
             updates["models"] = models
+        elif default_model:
+            updates["models"] = [default_model]
         if default_model:
             updates["default_model"] = default_model
-        updated_key = update_key_data(vendor_id, k["id"], **updates)
-        on_key_added(v, updated_key or k)
+        updated_key = update_key_data(vendor_id, k["id"], **updates) or k
+        on_key_added(v, updated_key)
     else:
         update_key_data(vendor_id, k["id"], enabled=False)
         on_key_removed(v, k)
         k["enabled"] = False
+    reconcile_all()
 
     return jsonify({"key": k, "health": health}), 201
 
@@ -309,22 +350,59 @@ def api_check_key_health(vendor_id, key_id):
     k = get_key(vendor_id, key_id)
     if v and k and health.get("healthy"):
         models = health.get("models", [])
-        default_model = health.get("default_model", "")
+        default_model = health.get("default_model", "") or k.get("default_model", "")
         updates = {"enabled": True}
+        # Keep previous models if scan returned empty
         if models:
             updates["models"] = models
+        elif not k.get("models") and default_model:
+            updates["models"] = [default_model]
         if default_model:
             updates["default_model"] = default_model
-        updated_key = update_key_data(vendor_id, key_id, **updates)
-        if updated_key and updated_key.get("models"):
-            on_key_updated(v, updated_key)
-        else:
-            on_key_added(v, k)
+        updated_key = update_key_data(vendor_id, key_id, **updates) or k
+        # Always re-sync full config to backends after successful probe
+        on_key_updated(v, updated_key)
     elif v and k and not health.get("healthy"):
         update_key_data(vendor_id, key_id, enabled=False)
         on_key_removed(v, k)
     reconcile_all()
     return jsonify(health)
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/check-models", methods=["POST"])
+def api_check_key_models(vendor_id, key_id):
+    """Per-model health check. Failed models are disabled for backends but kept in system."""
+    result = check_key_models(vendor_id, key_id)
+    if result.get("error"):
+        return jsonify(result), 404
+    return jsonify(result)
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/models/<path:model_id>", methods=["PUT"])
+def api_toggle_key_model(vendor_id, key_id, model_id):
+    """Enable/disable a model for backend sync. System always keeps the model in inventory."""
+    data = request.get_json() or {}
+    if "enabled" not in data:
+        return jsonify({"error": "enabled required"}), 400
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+    known = set(list_model_ids(k))
+    if model_id not in known:
+        return jsonify({"error": "model not found on key"}), 404
+    updated = set_model_enabled(vendor_id, key_id, model_id, bool(data["enabled"]))
+    if not updated:
+        return jsonify({"error": "not found"}), 404
+    on_key_updated(v, updated)
+    reconcile_all()
+    return jsonify({
+        "key": updated,
+        "model": model_id,
+        "enabled": model_id not in set(updated.get("disabled_models") or []),
+        "enabled_models": get_enabled_models(updated),
+        "disabled_models": updated.get("disabled_models") or [],
+    })
 
 
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>/enable", methods=["POST"])
@@ -393,7 +471,7 @@ def api_health_check_all():
 
 # ── Batch Import ───────────────────────────────────────────
 
-@app.route("/api/batch-import/parse", methods=["POST"])
+@app.route("/api/batch/parse", methods=["POST"])
 def api_batch_parse():
     data = request.get_json() or {}
     text = data.get("text", "")
@@ -403,47 +481,82 @@ def api_batch_parse():
     return jsonify({"entries": entries, "count": len(entries)})
 
 
-@app.route("/api/batch-import/apply", methods=["POST"])
+@app.route("/api/batch/import", methods=["POST"])
 def api_batch_apply():
     data = request.get_json() or {}
     entries = data.get("entries", [])
     if not entries:
-        return jsonify({"error": "entries are required"}), 400
+        entries = parse_batch_text(data.get("text", ""))
+    if not entries:
+        return jsonify({"error": "no entries to import"}), 400
     created = []
     errors = []
+    used_names = {(v.get("name") or "").lower() for v in get_vendors()}
     for entry in entries:
-        provider = entry.get("provider", "unknown")
-        api_url = entry.get("api_url", "").rstrip("/")
-        api_key = entry.get("api_key", "")
-        name = entry.get("name", api_key[:12])
-        endpoint_type = entry.get("endpoint_type", "openai")
+        provider = (entry.get("provider") or "custom").strip() or "custom"
+        api_url = (entry.get("api_url") or "").strip().rstrip("/")
+        api_key = (entry.get("api_key") or "").strip()
+        name = (entry.get("name") or "").strip() or (
+            f"key-{(api_key[-4:] if len(api_key) >= 4 else api_key)}" if api_key else "key"
+        )
+        endpoint_type = (entry.get("endpoint_type") or "openai").strip().lower() or "openai"
+        if endpoint_type not in ("openai", "anthropic"):
+            endpoint_type = "anthropic" if (
+                "/anthropic" in api_url.lower() or "api.anthropic.com" in api_url.lower()
+            ) else "openai"
+        vendor_name = (entry.get("vendor_name") or entry.get("vendor") or "").strip()
 
         if not api_key or not api_url:
+            errors.append({
+                "entry": vendor_name or name or provider,
+                "error": "api_url and api_key are required",
+            })
             continue
 
         try:
             vendor = None
+            # Match only by URL (unique). Never reuse a different URL with same provider name.
             for v in get_vendors():
-                existing_url = v.get("api_url", "").rstrip("/")
-                if existing_url == api_url:
+                existing_url = (v.get("api_url") or "").rstrip("/")
+                if existing_url and existing_url == api_url:
                     vendor = v
                     break
-            if not vendor:
-                for v in get_vendors():
-                    existing_url = v.get("api_url", "").rstrip("/")
-                    if v["provider"] == provider and (not api_url or not existing_url):
-                        vendor = v
-                        break
 
             if not vendor:
+                base_name = vendor_name or provider.replace("-", " ").title() or "Provider"
+                final_name = base_name
+                n = 2
+                while final_name.lower() in used_names:
+                    final_name = f"{base_name}-{n}"
+                    n += 1
+                used_names.add(final_name.lower())
                 vendor = add_vendor(
-                    name=provider.replace("-", " ").title(),
+                    name=final_name,
                     provider=provider,
                     api_url=api_url,
                     endpoint_type=endpoint_type,
                 )
+            else:
+                # Optional renames / provider / endpoint updates from editable import
+                from core.data import update_vendor
+                updates = {}
+                if vendor_name and vendor_name != vendor.get("name"):
+                    if vendor_name.lower() not in used_names or vendor_name.lower() == (vendor.get("name") or "").lower():
+                        updates["name"] = vendor_name
+                        used_names.discard((vendor.get("name") or "").lower())
+                        used_names.add(vendor_name.lower())
+                if provider and provider != vendor.get("provider"):
+                    updates["provider"] = provider
+                if endpoint_type and endpoint_type != vendor.get("endpoint_type"):
+                    updates["endpoint_type"] = endpoint_type
+                if updates:
+                    update_vendor(vendor["id"], **updates)
+                    vendor = get_vendor(vendor["id"]) or vendor
 
-            key_exists = any(k["name"] == name or k["api_key"] == api_key for k in vendor.get("keys", []))
+            key_exists = any(
+                k.get("api_key") == api_key or k.get("name") == name
+                for k in vendor.get("keys", [])
+            )
             if not key_exists:
                 k = add_key(vendor["id"], name, api_key)
                 if k:
@@ -461,9 +574,19 @@ def api_batch_apply():
                     else:
                         update_key_data(vendor["id"], k["id"], enabled=False)
                         on_key_removed(vendor, k)
-                    created.append({"vendor": vendor["name"], "key": name, "api_key": api_key[:8] + "...", "healthy": health.get("healthy")})
+                    created.append({
+                        "vendor": vendor["name"],
+                        "key": name,
+                        "api_key": api_key[:8] + "...",
+                        "healthy": health.get("healthy"),
+                    })
             else:
-                created.append({"vendor": vendor["name"], "key": name, "api_key": api_key[:8] + "...", "skipped": True})
+                created.append({
+                    "vendor": vendor["name"],
+                    "key": name,
+                    "api_key": api_key[:8] + "...",
+                    "skipped": True,
+                })
         except Exception as e:
             log.error("Batch import entry failed: %s", e)
             errors.append({"entry": name, "error": str(e)})
@@ -561,50 +684,214 @@ def api_test_remote_gateway():
 
 # ── Proxy ──────────────────────────────────────────────────
 
+def _match_vendor_key(auth):
+    """Find (vendor, key) matching the Authorization header."""
+    for v in get_vendors():
+        for k in v.get("keys", []):
+            if k.get("api_key") and ("Bearer " + k["api_key"] == auth or k["api_key"] == auth):
+                return v, k
+    return None, None
+
+
+def _record_proxy_usage(vendor, key, body_bytes, elapsed_ms, model="",
+                        status_code=200, success=None):
+    """Parse usage from response body and record stats (incl. failures)."""
+    model = model or ""
+    provider = vendor.get("provider", "unknown")
+    if success is None:
+        success = 200 <= int(status_code or 0) < 400
+
+    usage = {}
+    data = None
+    error_msg = ""
+    try:
+        body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
+        data = json.loads(body_text) if body_text else None
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        data = None
+
+    if isinstance(data, dict):
+        usage = data.get("usage") or {}
+        if not usage:
+            for c in data.get("choices", []):
+                msg = c.get("message", {}) or c.get("delta", {})
+                if isinstance(msg, dict) and msg.get("usage"):
+                    usage = msg["usage"]
+                    break
+        if not success:
+            err = data.get("error")
+            if isinstance(err, dict):
+                error_msg = err.get("message") or err.get("type") or str(err)
+            elif err:
+                error_msg = str(err)
+            else:
+                error_msg = data.get("message", "") or f"HTTP {status_code}"
+
+    # Support OpenAI + Anthropic usage field names
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    if usage:
+        prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+        completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+        total_tokens = usage.get("total_tokens") or 0
+        if not total_tokens:
+            total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+
+    resolved_model = model or (usage.get("model", "") if usage else "") or (
+        data.get("model", "") if isinstance(data, dict) else ""
+    )
+    if resolved_model and "/" in str(resolved_model):
+        # normalize "provider/model" for stats grouping when possible
+        try:
+            from core.data import _normalize_model_name
+            resolved_model = _normalize_model_name(str(resolved_model)) or resolved_model
+        except Exception:
+            pass
+
+    record = {
+        "timestamp": datetime.now().isoformat(),
+        "vendor_id": vendor["id"],
+        "vendor_name": vendor.get("name", ""),
+        "key_id": key.get("id", ""),
+        "key_name": key.get("name", ""),
+        "provider": provider,
+        "model": resolved_model,
+        "total_tokens": total_tokens or 0,
+        "prompt_tokens": prompt_tokens or 0,
+        "completion_tokens": completion_tokens or 0,
+        "cost": 0.0,
+        "elapsed_ms": elapsed_ms,
+        "success": bool(success),
+        "status_code": int(status_code or 0),
+        "error": error_msg if not success else "",
+        "source": "proxy",
+    }
+    try:
+        from core.pricing import resolve_record_cost
+        record["cost"] = resolve_record_cost(record)
+    except Exception:
+        pass
+
+    try:
+        from core.data import add_usage_record
+        add_usage_record(record)
+    except Exception:
+        pass
+
+
+def _parse_sse_last_chunk(body_bytes):
+    """Extract usage from last SSE data chunk of a streaming response."""
+    body_text = body_bytes.decode("utf-8", errors="replace")
+    for line in reversed(body_text.split("\n")):
+        line = line.strip()
+        if line.startswith("data: "):
+            payload = line[6:].strip()
+            if payload == "[DONE]":
+                continue
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
 @app.route("/api/proxy/<path:subpath>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 def api_proxy(subpath):
     auth = request.headers.get("Authorization", "")
-    target_url = ""
-    for v in get_vendors():
-        pt = v.get("proxy_target", "")
-        if not pt:
-            continue
-        for k in v.get("keys", []):
-            if k.get("api_key") and f"Bearer {k['api_key']}" == auth:
-                target_url = pt.rstrip("/")
-                break
-        if target_url:
-            break
+    matched_vendor, matched_key = _match_vendor_key(auth)
+
+    # Forward to the vendor's actual API URL, not the proxy_target
+    target_url = matched_vendor.get("api_url", "").rstrip("/") if matched_vendor else ""
     if not target_url:
+        # Fallback: find any vendor with proxy_target
         for v in get_vendors():
             pt = v.get("proxy_target", "")
             if pt:
-                target_url = pt.rstrip("/")
+                target_url = v.get("api_url", "").rstrip("/")
                 break
 
-    url = f"{target_url}/{subpath}"
+    if not target_url:
+        return jsonify({"error": "no matching vendor or api_url"}), 502
+
+    # Avoid duplicating version prefix: api_url may end with /v1 and subpath may start with v1/
+    url = target_url.rstrip("/")
+    sp = subpath.lstrip("/")
+    last_seg = url.split("/")[-1] if "/" in url else ""
+    if last_seg and sp.startswith(last_seg + "/"):
+        sp = sp[len(last_seg) + 1:]
+    url += "/" + sp
     headers = {k: v for k, v in request.headers if k.lower() not in ("host", "content-length")}
+    req_body = request.get_data()
     is_stream = request.headers.get("accept", "") == "text/event-stream" or \
                 (request.is_json and request.get_json(silent=True) or {}).get("stream")
 
+    model = ""
+    if request.is_json:
+        body_json = request.get_json(silent=True) or {}
+        model = body_json.get("model", "")
+
+    t0 = datetime.now()
     try:
         r = py_requests.request(
             method=request.method,
             url=url,
             headers=headers,
-            data=request.get_data(),
+            data=req_body,
             stream=is_stream,
             verify=False,
             timeout=120,
         )
+        elapsed_ms = int((datetime.now() - t0).total_seconds() * 1000)
+
+        if not matched_vendor or not matched_key:
+            if is_stream:
+                def _passthrough():
+                    for chunk in r.iter_content(chunk_size=None):
+                        if chunk:
+                            yield chunk
+                return Response(_passthrough(), status=r.status_code, headers=dict(r.headers))
+            return Response(r.content, status=r.status_code, headers=dict(r.headers))
+
+        ok = 200 <= r.status_code < 400
         if is_stream:
-            def generate():
+            chunks = []
+            def _recorded_stream():
                 for chunk in r.iter_content(chunk_size=None):
                     if chunk:
+                        chunks.append(chunk)
                         yield chunk
-            return Response(generate(), status=r.status_code, headers=dict(r.headers))
-        return Response(r.content, status=r.status_code, headers=dict(r.headers))
+            resp = Response(_recorded_stream(), status=r.status_code, headers=dict(r.headers))
+
+            @resp.call_on_close
+            def _on_stream_done():
+                full_body = b"".join(chunks)
+                last_chunk = _parse_sse_last_chunk(full_body)
+                if last_chunk:
+                    usage = last_chunk.get("usage") or last_chunk
+                    _record_proxy_usage(
+                        matched_vendor, matched_key, json.dumps(usage).encode(),
+                        elapsed_ms, model=model, status_code=r.status_code, success=ok,
+                    )
+                else:
+                    _record_proxy_usage(
+                        matched_vendor, matched_key, full_body or b"{}",
+                        elapsed_ms, model=model, status_code=r.status_code, success=ok,
+                    )
+            return resp
+
+        resp = Response(r.content, status=r.status_code, headers=dict(r.headers))
+        _record_proxy_usage(
+            matched_vendor, matched_key, r.content, elapsed_ms,
+            model=model, status_code=r.status_code, success=ok,
+        )
+        return resp
     except Exception as e:
+        if matched_vendor and matched_key:
+            _record_proxy_usage(
+                matched_vendor, matched_key, json.dumps({"error": str(e)}).encode(),
+                0, model=model, status_code=502, success=False,
+            )
         return jsonify({"error": str(e)}), 502
 
 
@@ -626,12 +913,145 @@ def api_update_settings():
 def api_set_lang():
     data = request.get_json() or {}
     lang = data.get("lang", "en")
-    resp = jsonify({"lang": lang})
+    if lang not in SUPPORTED_LANGS:
+        lang = "en"
+    # Return fresh locale pack so client can hot-update without full reload
+    from core.i18n import get_translations, clear_translation_cache
+    clear_translation_cache()
+    pack = get_translations(lang)
+    en = get_translations("en")
+    resp = jsonify({"lang": lang, "strings": {**en, **pack}, "locales": {l: get_translations(l) for l in SUPPORTED_LANGS}})
     resp.set_cookie("lang", lang, max_age=86400 * 365)
     return resp
 
 
 # ── Usage Statistics ──────────────────────────────────────
+
+
+@app.route("/api/stats/import", methods=["POST"])
+def api_import_stats():
+    """Force re-import usage from OpenClaw session transcripts."""
+    from core.usage_import import import_openclaw_usage, purge_synthetic_usage
+    purged = purge_synthetic_usage()
+    result = import_openclaw_usage()
+    result["purged"] = purged
+    return jsonify(result)
+
+
+def _stats_chart_payload(records: list) -> dict:
+    """Build lightweight chart series from usage records."""
+    from collections import defaultdict
+    from core.data import _normalize_model_name
+
+    daily = defaultdict(lambda: {"count": 0, "success": 0, "fail": 0, "tokens": 0})
+    by_model = defaultdict(lambda: {"count": 0, "tokens": 0})
+    by_vendor = defaultdict(lambda: {"count": 0, "tokens": 0, "name": ""})
+    by_source = defaultdict(lambda: {"count": 0, "tokens": 0})
+
+    for r in records:
+        ts = str(r.get("timestamp") or "")
+        day = ts[:10] if len(ts) >= 10 else "unknown"
+        ok = r.get("success", True)
+        tokens = r.get("total_tokens", 0) or 0
+        daily[day]["count"] += 1
+        daily[day]["tokens"] += tokens
+        if ok:
+            daily[day]["success"] += 1
+        else:
+            daily[day]["fail"] += 1
+
+        mid = _normalize_model_name(str(r.get("model") or "")) or (r.get("model") or "unknown")
+        by_model[mid]["count"] += 1
+        by_model[mid]["tokens"] += tokens
+
+        vid = str(r.get("vendor_id") or r.get("vendor_name") or "unknown")
+        by_vendor[vid]["count"] += 1
+        by_vendor[vid]["tokens"] += tokens
+        by_vendor[vid]["name"] = r.get("vendor_name") or vid
+
+        src = str(r.get("source") or "unknown")
+        by_source[src]["count"] += 1
+        by_source[src]["tokens"] += tokens
+
+    days = sorted(daily.keys())
+    models = sorted(by_model.items(), key=lambda x: x[1]["count"], reverse=True)[:12]
+    vendors = sorted(by_vendor.items(), key=lambda x: x[1]["count"], reverse=True)[:12]
+    sources = sorted(by_source.items(), key=lambda x: x[1]["count"], reverse=True)
+
+    src_labels = {"openclaw": "OpenClaw", "opencode": "OpenCode", "proxy": "Proxy (Manager)", "claude_code": "Claude Code", "codex_cli": "Codex CLI", "unknown": "Unknown"}
+    return {
+        "daily": {
+            "labels": days,
+            "count": [daily[d]["count"] for d in days],
+            "success": [daily[d]["success"] for d in days],
+            "fail": [daily[d]["fail"] for d in days],
+            "tokens": [daily[d]["tokens"] for d in days],
+        },
+        "models": {
+            "labels": [m for m, _ in models],
+            "count": [v["count"] for _, v in models],
+            "tokens": [v["tokens"] for _, v in models],
+        },
+        "vendors": {
+            "labels": [v["name"] or k for k, v in vendors],
+            "ids": [k for k, _ in vendors],
+            "count": [v["count"] for _, v in vendors],
+            "tokens": [v["tokens"] for _, v in vendors],
+        },
+        "sources": {
+            "labels": [src_labels.get(k, k) for k, _ in sources],
+            "ids": [k for k, _ in sources],
+            "count": [v["count"] for _, v in sources],
+            "tokens": [v["tokens"] for _, v in sources],
+        },
+    }
+
+
+def _stats_filter_meta(from_ts: str = "", to_ts: str = "") -> dict:
+    """Distinct filter options from all usage in range (unfiltered by vendor/model/source)."""
+    from core.data import get_usage_records, _normalize_model_name
+    records = get_usage_records(from_ts=from_ts, to_ts=to_ts, auto_import=False)
+    vendors = {}
+    models = set()
+    sources = set()
+    providers = set()
+    for r in records:
+        vid = str(r.get("vendor_id") or "")
+        vname = r.get("vendor_name") or vid
+        if vid or vname:
+            vendors[vid or vname] = vname or vid
+        mid = _normalize_model_name(str(r.get("model") or "")) or (r.get("model") or "")
+        if mid:
+            models.add(mid)
+        if r.get("source"):
+            sources.add(str(r.get("source")))
+        if r.get("provider"):
+            providers.add(str(r.get("provider")))
+    src_labels = {
+        "openclaw": "OpenClaw",
+        "opencode": "OpenCode",
+        "proxy": "Proxy (Manager)",
+        "claude_code": "Claude Code",
+        "codex_cli": "Codex CLI",
+        "unknown": "Unknown",
+    }
+    # Always expose known engines so filters are complete even with sparse data
+    known_sources = ["openclaw", "opencode", "proxy"]
+    for s in known_sources:
+        sources.add(s)
+    ordered = []
+    seen = set()
+    for s in known_sources + sorted(sources):
+        if s in seen:
+            continue
+        seen.add(s)
+        ordered.append(s)
+    return {
+        "vendors": [{"id": k, "name": v} for k, v in sorted(vendors.items(), key=lambda x: (x[1] or "").lower())],
+        "models": sorted(models, key=str.lower),
+        "providers": sorted(providers, key=str.lower),
+        "sources": [{"id": s, "name": src_labels.get(s, s)} for s in ordered],
+    }
 
 
 @app.route("/api/stats", methods=["GET"])
@@ -640,22 +1060,109 @@ def api_get_stats():
     from_ts = request.args.get("from", "")
     to_ts = request.args.get("to", "")
     vendor_id = request.args.get("vendor_id", "")
+    key_id = request.args.get("key_id", "")
     provider = request.args.get("provider", "")
-    group_by = request.args.get("group_by", "vendor")  # vendor|key|provider
-    records = get_usage_records(from_ts=from_ts, to_ts=to_ts,
-                                vendor_id=vendor_id, provider=provider)
-    summary = get_usage_summary(from_ts=from_ts, to_ts=to_ts, group_by=group_by)
-    total_tokens = sum(r.get("total_tokens", 0) for r in records)
-    total_cost = sum(r.get("cost", 0) for r in records)
-    return jsonify({
-        "records": records,
+    model = request.args.get("model", "")
+    source = request.args.get("source", "")  # openclaw|proxy|...
+    group_by = request.args.get("group_by", "vendor")  # vendor|key|provider|model|source|request
+    include_records = request.args.get("include_records", "0") == "1"
+    include_charts = request.args.get("include_charts", "1") != "0"
+    include_meta = request.args.get("include_meta", "1") != "0"
+    limit = min(int(request.args.get("limit", "100") or 100), 1000)
+
+    records = get_usage_records(
+        from_ts=from_ts, to_ts=to_ts,
+        vendor_id=vendor_id, key_id=key_id, provider=provider, model=model,
+        source=source, auto_import=True,
+    )
+    summary = []
+    if group_by != "request":
+        summary = get_usage_summary(
+            from_ts=from_ts, to_ts=to_ts, group_by=group_by,
+            vendor_id=vendor_id, key_id=key_id, provider=provider, model=model,
+            source=source,
+        )
+
+    success_count = sum(1 for r in records if r.get("success", True))
+    fail_count = len(records) - success_count
+    total_tokens = sum(r.get("total_tokens", 0) or 0 for r in records)
+    total_cost = sum(r.get("cost", 0) or 0 for r in records)
+
+    out = {
         "summary": summary,
         "total": {
             "count": len(records),
+            "success_count": success_count,
+            "fail_count": fail_count,
+            "success_rate": round(success_count / len(records) * 100, 1) if records else 0,
             "total_tokens": total_tokens,
             "total_cost": round(total_cost, 6),
         },
-    })
+        "filters": {
+            "from": from_ts,
+            "to": to_ts,
+            "vendor_id": vendor_id,
+            "key_id": key_id,
+            "provider": provider,
+            "model": model,
+            "source": source,
+            "group_by": group_by,
+        },
+    }
+    if include_charts:
+        out["charts"] = _stats_chart_payload(records)
+    if include_meta:
+        out["meta"] = _stats_filter_meta(from_ts, to_ts)
+    if include_records or group_by == "request":
+        out["records"] = records[:limit]
+    return jsonify(out)
+
+
+@app.route("/api/stats/export", methods=["GET"])
+def api_export_stats():
+    """Export filtered usage as CSV or JSON."""
+    import csv
+    import io
+    from core.data import get_usage_records
+
+    from_ts = request.args.get("from", "")
+    to_ts = request.args.get("to", "")
+    vendor_id = request.args.get("vendor_id", "")
+    key_id = request.args.get("key_id", "")
+    provider = request.args.get("provider", "")
+    model = request.args.get("model", "")
+    source = request.args.get("source", "")
+    fmt = (request.args.get("format") or "csv").lower()
+
+    records = get_usage_records(
+        from_ts=from_ts, to_ts=to_ts,
+        vendor_id=vendor_id, key_id=key_id, provider=provider, model=model,
+        source=source, auto_import=True,
+    )
+    fields = [
+        "timestamp", "vendor_id", "vendor_name", "key_id", "key_name",
+        "provider", "model", "source", "success", "status_code",
+        "total_tokens", "prompt_tokens", "completion_tokens", "cost",
+        "elapsed_ms", "error",
+    ]
+    if fmt == "json":
+        body = json.dumps({"count": len(records), "records": records}, ensure_ascii=False, indent=2)
+        resp = make_response(body)
+        resp.headers["Content-Type"] = "application/json; charset=utf-8"
+        resp.headers["Content-Disposition"] = "attachment; filename=usage-export.json"
+        return resp
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for r in records:
+        row = {f: r.get(f, "") for f in fields}
+        row["success"] = "1" if r.get("success", True) else "0"
+        writer.writerow(row)
+    resp = make_response(buf.getvalue())
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = "attachment; filename=usage-export.csv"
+    return resp
 
 
 @app.route("/api/stats/record", methods=["POST"])

@@ -108,6 +108,33 @@ deepseek https://api.deepseek.com/v1 sk-xxxx...
 | Hermes Agent | `config.yaml`、`.env` |
 | QwenCode | `settings.json`、`.env` |
 
+
+
+## 安裝包（Windows / macOS / Linux）
+
+預編譯安裝包發布在 [GitHub Releases](https://github.com/kingkate2009-droid/ai-switch/releases)。
+
+| 平台 | 檔名模式 |
+|---|---|
+| Windows x64 | `ai-switch-<ver>-windows-amd64.zip` |
+| macOS Intel | `ai-switch-<ver>-macos-amd64.tar.gz` |
+| macOS Apple Silicon | `ai-switch-<ver>-macos-arm64.tar.gz` |
+| Linux x64 | `ai-switch-<ver>-linux-amd64.tar.gz` |
+
+解壓後執行 `ai-switch`（或 `start.sh` / `start.bat`），開啟 http://127.0.0.1:8787
+
+### 本機打包
+
+```bash
+bash scripts/build_package.sh
+```
+
+### 發版（自動多平台）
+
+```bash
+./release.sh v1.3.0
+```
+
 ## 設定說明
 
 | 項目 | 路徑 |

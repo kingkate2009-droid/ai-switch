@@ -33,7 +33,8 @@ class BackendAdapter:
         pass
 
     def on_key_updated(self, vendor: dict, key: dict) -> None:
-        pass
+        """Default: re-add the key so backends that don't override still pick up value changes."""
+        self.on_key_added(vendor, key)
 
     def on_key_removed(self, vendor: dict, key: dict) -> None:
         pass

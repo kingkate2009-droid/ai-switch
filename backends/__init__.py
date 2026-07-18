@@ -90,8 +90,11 @@ def on_vendor_removed(vendor: dict) -> None:
 
 
 def reconcile_all() -> None:
+    from core.data import get_backend_config
     for adapter in _adapters.values():
         try:
+            if get_backend_config(adapter.name).get("disabled"):
+                continue
             adapter.reconcile()
         except Exception as e:
             import logging

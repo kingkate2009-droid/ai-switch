@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title data-i18n="app.title">{{ t('app.title') }}</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=batch-layout-4">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -60,8 +61,8 @@
       </div>
       <select class="lang-select" id="langSelect" onchange="switchLang(this.value)">
         <option value="en" {% if lang == 'en' %}selected{% endif %}>EN</option>
-        <option value="zh-CN" {% if lang == 'zh-CN' %}selected{% endif %}>简</option>
-        <option value="zh-TW" {% if lang == 'zh-TW' %}selected{% endif %}>繁</option>
+        <option value="zh-CN" {% if lang == 'zh-CN' %}selected{% endif %}>{{ t('lang.zhCNShort') }}</option>
+        <option value="zh-TW" {% if lang == 'zh-TW' %}selected{% endif %}>{{ t('lang.zhTWShort') }}</option>
       </select>
     </div>
   </aside>
@@ -150,7 +151,7 @@
               <div class="detail-head-left">
                 <h3 id="detailVendorName"></h3>
                 <code id="detailVendorUrl" class="detail-url"></code>
-                <button class="btn-icon" onclick="copyText(_currentVendor.api_url)" title="Copy URL"><svg width="14" height="14"><use href="#ico-copy"/></svg></button>
+                <button class="btn-icon" onclick="copyText(_currentVendor.api_url)" title="{{ t('common.copyUrl') }}" data-i18n-title="common.copyUrl"><svg width="14" height="14"><use href="#ico-copy"/></svg></button>
               </div>
               <div class="detail-head-actions">
                 <button id="addKeyBtn" class="btn btn-primary btn-sm" onclick="showAddKeyModal()" style="display:none">
@@ -179,7 +180,7 @@
                 </div>
               </div>
               <div class="table-wrap">
-                <table>
+                <table id="keysTable">
                   <thead>
                     <tr>
                       <th class="col-check"><input type="checkbox" id="selectAllCheck" onchange="toggleSelectAll()"></th>
@@ -219,7 +220,7 @@
       <div class="backend-controls">
         <button class="backend-controls-toggle" id="openclawToggle" onclick="toggleOpenclawControls()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-          <span>OpenClaw <span id="openclawToggleStatus"></span></span>
+          <span><span data-i18n="common.openclaw">{{ t('common.openclaw') }}</span> <span id="openclawToggleStatus"></span></span>
         </button>
         <div class="backend-controls-panel" id="openclawPanel">
           <div class="panel-body">
@@ -251,7 +252,7 @@
               </div>
             </div>
             <div id="gatewayRemote" style="display:none">
-              <div class="control-row"><label data-i18n="gatewayPanel.remoteType">{{ t('gatewayPanel.remoteType') }}</label><select id="remoteType" onchange="onRemoteTypeChange()"><option value="ssh">SSH</option><option value="gateway">Gateway API</option></select></div>
+              <div class="control-row"><label data-i18n="gatewayPanel.remoteType">{{ t('gatewayPanel.remoteType') }}</label><select id="remoteType" onchange="onRemoteTypeChange()"><option value="ssh" data-i18n="remote.typeSsh">{{ t('remote.typeSsh') }}</option><option value="gateway" data-i18n="remote.typeGateway">{{ t('remote.typeGateway') }}</option></select></div>
               <div id="remoteSshFields">
                 <div class="control-row"><label data-i18n="connModal.host">{{ t('connModal.host') }}</label><input type="text" id="remoteHost" placeholder="192.168.1.100"></div>
                 <div class="control-row"><label data-i18n="connModal.port">{{ t('connModal.port') }}</label><input type="number" id="remotePort" value="22"></div>
@@ -261,7 +262,7 @@
               </div>
               <div id="remoteGatewayFields" style="display:none">
                 <div class="control-row"><label data-i18n="connModal.gatewayUrl">{{ t('connModal.gatewayUrl') }}</label><input type="text" id="remoteUrl" placeholder="ws://192.168.1.100:18789"></div>
-                <div class="control-row"><label data-i18n="connModal.token">{{ t('connModal.token') }}</label><input type="password" id="remoteToken" placeholder="Optional"></div>
+                <div class="control-row"><label data-i18n="connModal.token">{{ t('connModal.token') }}</label><input type="password" id="remoteToken" placeholder="{{ t('common.optional') }}" data-i18n-placeholder="common.optional"></div>
               </div>
               <div class="control-actions">
                 <button class="btn" onclick="testRemoteGateway()" data-i18n="connAction.test">{{ t('connAction.test') }}</button>
@@ -272,48 +273,109 @@
           </div>
         </div>
       </div>
+    </div>
     <!-- ═══ Statistics ═══ -->
     <div class="view" id="view-stats">
       <div class="page-head">
         <h2 data-i18n="nav.stats">{{ t('nav.stats') }}</h2>
         <p class="page-desc" data-i18n="stats.desc">{{ t('stats.desc') }}</p>
         <div class="page-actions">
-          <input type="date" id="statsFrom" onchange="loadStats()">
-          <span style="color:var(--text3)">—</span>
-          <input type="date" id="statsTo" onchange="loadStats()">
-          <select id="statsGroupBy" onchange="loadStats()" style="padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none">
-            <option value="vendor" data-i18n="stats.groupVendor">{{ t('stats.groupVendor') }}</option>
-            <option value="key" data-i18n="stats.groupKey">{{ t('stats.groupKey') }}</option>
-            <option value="provider" data-i18n="stats.groupProvider">{{ t('stats.groupProvider') }}</option>
-          </select>
           <button class="btn btn-sm" onclick="loadStats()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
+          <button class="btn btn-sm" onclick="importStatsFromOpenClaw()">
+            <span data-i18n="stats.importOpenClaw">{{ t('stats.importOpenClaw') }}</span>
+          </button>
+          <button class="btn btn-sm" onclick="exportStats('csv')">
+            <span data-i18n="stats.exportCsv">{{ t('stats.exportCsv') }}</span>
+          </button>
+          <button class="btn btn-sm" onclick="exportStats('json')">
+            <span data-i18n="stats.exportJson">{{ t('stats.exportJson') }}</span>
+          </button>
         </div>
       </div>
 
-      <div class="stats-row" id="statsTotals">
+      <div class="stats-filters" id="statsFilters">
+        <div class="stats-filter-row">
+          <label class="stats-filter-item">
+            <span data-i18n="stats.from">{{ t('stats.from') }}</span>
+            <input type="date" id="statsFrom" onchange="loadStats()">
+          </label>
+          <label class="stats-filter-item">
+            <span data-i18n="stats.to">{{ t('stats.to') }}</span>
+            <input type="date" id="statsTo" onchange="loadStats()">
+          </label>
+          <label class="stats-filter-item">
+            <span data-i18n="stats.groupBy">{{ t('stats.groupBy') }}</span>
+            <select id="statsGroupBy" onchange="onStatsGroupByChange()">
+              <option value="vendor" data-i18n="stats.groupVendor">{{ t('stats.groupVendor') }}</option>
+              <option value="key" data-i18n="stats.groupKey">{{ t('stats.groupKey') }}</option>
+              <option value="provider" data-i18n="stats.groupProvider">{{ t('stats.groupProvider') }}</option>
+              <option value="model" data-i18n="stats.groupModel">{{ t('stats.groupModel') }}</option>
+              <option value="source" data-i18n="stats.groupSource">{{ t('stats.groupSource') }}</option>
+            </select>
+          </label>
+          <label class="stats-filter-item">
+            <span data-i18n="stats.filterVendor">{{ t('stats.filterVendor') }}</span>
+            <select id="statsFilterVendor" onchange="onStatsFilterChange()">
+              <option value="">{{ t('stats.all') }}</option>
+            </select>
+          </label>
+          <label class="stats-filter-item">
+            <span data-i18n="stats.filterModel">{{ t('stats.filterModel') }}</span>
+            <select id="statsFilterModel" onchange="onStatsFilterChange()">
+              <option value="">{{ t('stats.all') }}</option>
+            </select>
+          </label>
+          <label class="stats-filter-item">
+            <span data-i18n="stats.filterSource">{{ t('stats.filterSource') }}</span>
+            <select id="statsFilterSource" onchange="onStatsFilterChange()">
+              <option value="">{{ t('stats.all') }}</option>
+            </select>
+          </label>
+          <button class="btn btn-sm" onclick="clearStatsFilters()" data-i18n="stats.clearFilters">{{ t('stats.clearFilters') }}</button>
+        </div>
+      </div>
+
+      <nav class="stats-breadcrumb" id="statsBreadcrumb" style="display:none"></nav>
+
+      <div class="stats-row stats-row-rich" id="statsTotals">
         <div class="stat-card"><div class="stat-value" id="statTotalCount">-</div><div class="stat-label" data-i18n="stats.totalCalls">{{ t('stats.totalCalls') }}</div></div>
+        <div class="stat-card success"><div class="stat-value" id="statSuccessCount">-</div><div class="stat-label" data-i18n="stats.success">{{ t('stats.success') }}</div></div>
+        <div class="stat-card danger"><div class="stat-value" id="statFailCount">-</div><div class="stat-label" data-i18n="stats.fail">{{ t('stats.fail') }}</div></div>
+        <div class="stat-card"><div class="stat-value" id="statSuccessRate">-</div><div class="stat-label" data-i18n="stats.successRate">{{ t('stats.successRate') }}</div></div>
         <div class="stat-card"><div class="stat-value" id="statTotalTokens">-</div><div class="stat-label" data-i18n="stats.totalTokens">{{ t('stats.totalTokens') }}</div></div>
-        <div class="stat-card success" id="statTotalCostCard"><div class="stat-value" id="statTotalCost">-</div><div class="stat-label" data-i18n="stats.totalCost">{{ t('stats.totalCost') }}</div></div>
+        <div class="stat-card cost"><div class="stat-value" id="statTotalCost">-</div><div class="stat-label" data-i18n="stats.totalCost">{{ t('stats.totalCost') }}</div></div>
+      </div>
+
+      <div class="stats-charts" id="statsCharts">
+        <div class="stats-chart-card">
+          <div class="stats-chart-title" data-i18n="stats.chartDaily">{{ t('stats.chartDaily') }}</div>
+          <canvas id="chartDaily" height="160"></canvas>
+        </div>
+        <div class="stats-chart-card">
+          <div class="stats-chart-title" data-i18n="stats.chartModels">{{ t('stats.chartModels') }}</div>
+          <canvas id="chartModels" height="160"></canvas>
+        </div>
+        <div class="stats-chart-card">
+          <div class="stats-chart-title" data-i18n="stats.chartVendors">{{ t('stats.chartVendors') }}</div>
+          <canvas id="chartVendors" height="160"></canvas>
+        </div>
+        <div class="stats-chart-card">
+          <div class="stats-chart-title" data-i18n="stats.chartSources">{{ t('stats.chartSources') }}</div>
+          <canvas id="chartSources" height="160"></canvas>
+        </div>
       </div>
 
       <div class="dash-section">
-        <div class="table-wrap" style="padding:0 32px">
-          <table id="statsTable">
-            <thead>
-              <tr>
-                <th data-i18n="stats.dimension">{{ t('stats.dimension') }}</th>
-                <th data-i18n="stats.calls">{{ t('stats.calls') }}</th>
-                <th data-i18n="stats.totalTokens">{{ t('stats.totalTokens') }}</th>
-                <th data-i18n="stats.promptTokens">{{ t('stats.promptTokens') }}</th>
-                <th data-i18n="stats.completionTokens">{{ t('stats.completionTokens') }}</th>
-                <th data-i18n="stats.cost">{{ t('stats.cost') }}</th>
-              </tr>
-            </thead>
-            <tbody id="statsBody"></tbody>
-          </table>
+        <div class="stats-panel">
+          <div class="table-wrap">
+            <table id="statsTable" class="stats-table">
+              <thead id="statsHead"></thead>
+              <tbody id="statsBody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -341,16 +403,16 @@
         <select id="vendorProviderSelect" onchange="onProviderSelectChange()">
           <option value="" data-i18n="vendorModal.selectProvider">{{ t('vendorModal.selectProvider') }}</option>
         </select>
-        <input type="text" id="vendorProvider" placeholder="e.g. openai" style="display:none;margin-top:6px">
+        <input type="text" id="vendorProvider" placeholder="{{ t('vendorModal.placeholderProvider') }}" data-i18n-placeholder="vendorModal.placeholderProvider" style="display:none;margin-top:6px">
       </div>
       <div class="form-group">
         <label for="vendorApiUrl" data-i18n="vendorModal.apiUrl">{{ t('vendorModal.apiUrl') }}</label>
-        <input type="text" id="vendorApiUrl" placeholder="https://api.openai.com/v1">
+        <input type="text" id="vendorApiUrl" placeholder="{{ t('vendorModal.placeholderApiUrl') }}" data-i18n-placeholder="vendorModal.placeholderApiUrl">
       </div>
       <div class="form-group">
         <label for="vendorEndpointType" data-i18n="vendorModal.endpointType">{{ t('vendorModal.endpointType') }}</label>
         <select id="vendorEndpointType">
-          <option value="openai">OpenAI Compatible</option>
+          <option value="openai" data-i18n="endpoint.openai">{{ t('endpoint.openai') }}</option>
           <option value="anthropic">Anthropic Compatible</option>
         </select>
       </div>
@@ -401,8 +463,8 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="batchImportModal" onclick="closeBatchImportModal()">
-  <div class="modal modal-wide" onclick="event.stopPropagation()">
+<div class="modal-overlay" id="batchImportModal" onclick="if(event.target===this)closeBatchImportModal()">
+  <div class="modal modal-wide modal-batch" onclick="event.stopPropagation()">
     <div class="modal-header">
       <h3 data-i18n="batchImport.title">{{ t('batchImport.title') }}</h3>
       <button class="btn-close" onclick="closeBatchImportModal()">&times;</button>
@@ -410,17 +472,21 @@
     <div class="modal-body">
       <div class="form-group">
         <label for="batchImportText" data-i18n="batchImport.label">{{ t('batchImport.label') }}</label>
-        <textarea id="batchImportText" rows="8" data-i18n-placeholder="batchImport.placeholder" placeholder="{{ t('batchImport.placeholder') }}" oninput="debounceParseBatch()"></textarea>
+        <textarea id="batchImportText" rows="6" data-i18n-placeholder="batchImport.placeholder" placeholder="{{ t('batchImport.placeholder') }}" oninput="onBatchTextInput()"></textarea>
+        <p class="form-hint" data-i18n="batchImport.editHint">{{ t('batchImport.editHint') }}</p>
       </div>
       <div id="batchImportPreview" style="display:none">
-        <h4 data-i18n="batchImport.preview">{{ t('batchImport.preview') }}</h4>
+        <div class="batch-preview-head">
+          <h4 data-i18n="batchImport.preview">{{ t('batchImport.preview') }}</h4>
+          <button type="button" class="btn btn-sm" onclick="addBatchRow()">+ {{ t('batchImport.addRow') }}</button>
+        </div>
         <div id="batchImportTableWrap"></div>
       </div>
       <div id="batchImportError" class="error-message" style="display:none"></div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeBatchImportModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
-      <button class="btn" id="batchParseBtn" onclick="parseBatchImport()" data-i18n="batchImport.parse">{{ t('batchImport.parse') }}</button>
+      <button class="btn" id="batchParseBtn" onclick="parseBatchImport(true)" data-i18n="batchImport.parse">{{ t('batchImport.parse') }}</button>
       <button class="btn btn-primary" id="batchApplyBtn" onclick="applyBatchImport()" style="display:none" data-i18n="batchImport.import">{{ t('batchImport.import') }}</button>
     </div>
   </div>
@@ -433,6 +499,13 @@
       <button class="btn-close" onclick="closeModelsModal()">&times;</button>
     </div>
     <div class="modal-body">
+      <div class="models-modal-toolbar">
+        <button class="btn btn-sm" id="modelsCheckBtn" onclick="checkKeyModelsFromModal()">
+          <svg width="12" height="12"><use href="#ico-play"/></svg>
+          <span data-i18n="modelsModal.checkModels">{{ t('modelsModal.checkModels') }}</span>
+        </button>
+        <span class="models-modal-hint" data-i18n="modelsModal.hint">{{ t('modelsModal.hint') }}</span>
+      </div>
       <div id="modelsModalList"></div>
     </div>
     <div class="modal-footer">
@@ -462,7 +535,7 @@
 <script>
 let CURRENT_LANG = '{{ lang }}';
 let ALL_LOCALES = {{ all_locales | tojson }};
-let LOCALE_STRINGS = Object.assign({}, ALL_LOCALES['en'], ALL_LOCALES[CURRENT_LANG]);
+let LOCALE_STRINGS = Object.assign({}, (ALL_LOCALES && ALL_LOCALES['en']) || {}, (ALL_LOCALES && ALL_LOCALES[CURRENT_LANG]) || {});
 let selectedVendorId = null;
 let _knownProviders = [];
 let _allVendorsData = [];
@@ -478,6 +551,9 @@ function updateI18n() {
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) {
     el.placeholder = _(el.getAttribute('data-i18n-placeholder'));
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(function(el) {
+    el.title = _(el.getAttribute('data-i18n-title'));
   });
   document.title = _('app.title');
 }
@@ -526,17 +602,42 @@ function showToast(msg, type) {
 
 // ── View Switching ───────────────────────
 
-function switchView(name) {
+function switchView(name, opts) {
+  opts = opts || {};
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1 };
+  if (!allowed[name]) name = 'dashboard';
+
   document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
   document.querySelectorAll('.nav-item').forEach(function(el) { el.classList.remove('active'); });
   var v = $('view-' + name);
   if (v) v.classList.add('active');
   var n = document.querySelector('.nav-item[data-view="' + name + '"]');
   if (n) n.classList.add('active');
+
+  try { localStorage.setItem('aiswitch_view', name); } catch (e) {}
+  if (!opts.skipHash) {
+    try {
+      var h = '#' + name;
+      if (location.hash !== h) history.replaceState(null, '', h);
+    } catch (e) {}
+  }
+
   if (name === 'dashboard') loadDashboard();
   if (name === 'vendors') loadVendors();
   if (name === 'backends') loadBackends();
   if (name === 'stats') loadStats();
+}
+
+function getInitialView() {
+  var fromHash = '';
+  try {
+    fromHash = (location.hash || '').replace(/^#/, '').split(/[/?&]/)[0];
+  } catch (e) {}
+  var fromStore = '';
+  try { fromStore = localStorage.getItem('aiswitch_view') || ''; } catch (e) {}
+  var name = fromHash || fromStore || 'dashboard';
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1 };
+  return allowed[name] ? name : 'dashboard';
 }
 
 // ── Dashboard ────────────────────────────
@@ -570,6 +671,8 @@ async function loadDashboard() {
 function getBackendIcon(name) {
   var icons = {
     'openclaw': 'O',
+    'grok-cli': 'GX',
+    'devin': 'DV',
     'opencode': 'OC',
     'claude-code': 'CC',
     'codex-cli': 'CD',
@@ -880,7 +983,7 @@ async function saveSyncConfig(name) {
 
 async function loadBackendConfig(name, path) {
   _currentConfigPath = path;
-  $('backendConfigPane').innerHTML = '<p style="color:var(--text3);padding:20px">Loading...</p>';
+  $('backendConfigPane').innerHTML = '<p style="color:var(--text3);padding:20px">' + esc(_('common.loading') || 'Loading...') + '</p>';
   $('backendSaveConfigBtn').style.display = 'none';
   const data = await api('/api/backends/' + name + '/config?path=' + encodeURIComponent(path));
   if (data.error) {
@@ -923,7 +1026,7 @@ function closeBackendDetail() {
 
 async function loadVendors() {
   const data = await api('/api/vendors');
-  _allVendorsData = data.vendors || [];
+  _allVendorsData = (data.vendors || []).slice().reverse();
   _allHealthData = data.health || {};
 
   const list = $('vendorList');
@@ -1010,7 +1113,8 @@ function filterKeys() {
   const tbody = $('keysBody');
   tbody.innerHTML = '';
 
-  for (const k of _allKeysData) {
+  for (var idx = _allKeysData.length - 1; idx >= 0; idx--) {
+    const k = _allKeysData[idx];
     const ck = _currentVendor.id + ':' + k.id;
     const h = _allHealthData[ck] || {};
     const healthy = h.healthy;
@@ -1023,20 +1127,40 @@ function filterKeys() {
     if (!nameMatch || !statusMatch) continue;
 
     const statusClass = healthy === true ? 'healthy' : healthy === false ? 'unhealthy' : 'unknown';
-    var statusText;
+    var statusLabel;
+    var statusDetail = '';
     if (healthy === true) {
-      statusText = _('health.healthy');
-      if (h.message) statusText += ': ' + esc(h.message);
+      statusLabel = _('health.healthy');
+      if (h.message) statusDetail = h.message;
     } else if (healthy === false) {
-      statusText = _('health.unhealthy') + ': ' + esc(h.error || '');
+      statusLabel = _('health.unhealthy');
+      statusDetail = h.error || '';
     } else {
-      statusText = _('health.notChecked');
+      statusLabel = _('health.notChecked');
     }
+    var checkedAt = '';
+    if (h.checked_at) {
+      try {
+        var d = new Date(h.checked_at);
+        var now = new Date();
+        var diffMs = now - d;
+        var mins = Math.floor(diffMs / 60000);
+        if (mins < 1) checkedAt = ' now';
+        else if (mins < 60) checkedAt = ' ' + mins + 'm ago';
+        else checkedAt = ' ' + Math.floor(mins / 60) + 'h ago';
+      } catch(e) { checkedAt = ''; }
+    }
+    var fullStatus = statusLabel + (statusDetail ? ': ' + statusDetail : '') + checkedAt;
     const latency = h.latency_ms ? h.latency_ms + 'ms' : '-';
-    const models = h.models && h.models.length ? h.models : (k.models || []);
+    const models = k.models && k.models.length ? k.models : (h.models || []);
     const modelCount = models.length;
+    const disabledModels = k.disabled_models || [];
+    const enabledCount = models.filter(function(m) {
+      var mid = typeof m === 'string' ? m : (m.id || m.name || '');
+      return disabledModels.indexOf(mid) === -1;
+    }).length;
     const modelStr = modelCount > 0
-      ? '<a href="#" onclick="showKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\');return false">' + modelCount + '</a>'
+      ? '<a href="#" onclick="showKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\');return false">' + enabledCount + '/' + modelCount + '</a>'
       : '0';
 
     const tr = document.createElement('tr');
@@ -1045,13 +1169,14 @@ function filterKeys() {
     tr.innerHTML = [
       '<td class="col-check"><input type="checkbox" class="key-check" value="' + k.id + '" onchange="onCheckChange()"></td>',
       '<td><span class="key-name">' + esc(k.name) + '</span>' + (enabled ? '' : ' <span class="badge disabled-badge">' + _('badge.disabled') + '</span>') + '</td>',
-      '<td class="key-cell"><code>' + esc(k.api_key.slice(0,8)) + '...' + esc(k.api_key.slice(-4)) + '</code> <button class="btn-icon" onclick="copyText(\'' + esc(k.api_key) + '\')" title="Copy"><svg width="12" height="12"><use href="#ico-copy"/></svg></button></td>',
-      '<td class="status-cell"><span class="dot ' + statusClass + '"></span> ' + statusText + '</td>',
+      '<td class="key-cell"><code>' + esc(k.api_key.slice(0,8)) + '...' + esc(k.api_key.slice(-4)) + '</code> <button class="btn-icon" onclick="copyText(\'' + esc(k.api_key) + '\')" title="' + esc(_('common.copy') || 'Copy') + '"><svg width="12" height="12"><use href="#ico-copy"/></svg></button></td>',
+      '<td class="status-cell" title="' + esc(fullStatus) + '"><div class="status-inner"><span class="dot ' + statusClass + '"></span><span class="status-text">' + esc(statusLabel) + (statusDetail ? ': ' + esc(statusDetail) : '') + checkedAt + '</span></div></td>',
       '<td>' + latency + '</td>',
       '<td class="models-cell">' + modelStr + '</td>',
       '<td class="actions-cell">',
         (enabled ? '<button class="btn btn-sm btn-warning" onclick="disableKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')">' + _('action.disable') + '</button>' : '<button class="btn btn-sm" onclick="enableKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')">' + _('action.enable') + '</button>'),
         '<button class="btn btn-sm" onclick="checkKeyHealth(\'' + _currentVendor.id + '\',\'' + k.id + '\')">' + _('action.check') + '</button>',
+        '<button class="btn btn-sm" onclick="checkKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('modelsModal.checkModels')) + '">' + _('modelsModal.checkModels') + '</button>',
         '<button class="btn btn-sm" onclick="editKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')">' + _('action.edit') + '</button>',
         '<button class="btn btn-sm btn-danger" onclick="deleteKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')">' + _('action.delete') + '</button>',
       '</td>',
@@ -1200,7 +1325,7 @@ async function saveVendor() {
     thinking_disabled: $('vendorThinkingDisabled').checked,
     proxy_target: $('vendorProxyEnabled').checked ? $('vendorProxyTarget').value.trim() : '',
   };
-  if (!data.name) { alert('Name is required'); return; }
+  if (!data.name) { alert(_('validation.nameRequired') || 'Name is required'); return; }
   if (id) {
     await api('/api/vendors/' + id, { method: 'PUT', body: JSON.stringify(data) });
   } else {
@@ -1211,7 +1336,12 @@ async function saveVendor() {
   else { loadVendors(); }
 }
 
-function toggleProxyTarget() { $('proxyTargetGroup').style.display = $('vendorProxyEnabled').checked ? '' : 'none'; }
+function toggleProxyTarget() {
+  var checked = $('vendorProxyEnabled').checked;
+  var input = $('vendorProxyTarget');
+  $('proxyTargetGroup').style.display = checked ? '' : 'none';
+  if (checked && !input.value) input.value = window.location.origin + '/api/proxy';
+}
 
 // ── Key Modal ────────────────────────────
 
@@ -1241,7 +1371,7 @@ function toggleKeyVisibility() {
 async function saveKey() {
   const kid = $('editKeyId').value;
   const data = { name: $('keyName').value.trim(), api_key: $('keyApiKey').value.trim() };
-  if (!data.name || !data.api_key) { alert('Name and API Key are required'); return; }
+  if (!data.name || !data.api_key) { alert(_('validation.nameAndKeyRequired') || 'Name and API Key are required'); return; }
   if (kid) {
     await api('/api/vendors/' + selectedVendorId + '/keys/' + kid, { method: 'PUT', body: JSON.stringify(data) });
   } else {
@@ -1303,71 +1433,458 @@ async function checkAllHealth() {
 
 // ── Models Modal ─────────────────────────
 
+var _modelsModalCtx = { vendorId: '', keyId: '' };
+
+function _modelId(m) {
+  return typeof m === 'string' ? m : (m && (m.id || m.name) || '');
+}
+
+function renderModelsModalList(k) {
+  const models = k.models || [];
+  const disabled = new Set(k.disabled_models || []);
+  const healthMap = k.model_health || {};
+  const list = $('modelsModalList');
+  list.innerHTML = '';
+  if (models.length === 0) {
+    list.innerHTML = '<p style="color:var(--text2)">' + _('modelsModal.noModels') + '</p>';
+    return;
+  }
+  models.forEach(function(m) {
+    var mid = _modelId(m);
+    if (!mid) return;
+    var enabled = !disabled.has(mid);
+    var mh = healthMap[mid] || {};
+    var hClass = mh.healthy === true ? 'ok' : mh.healthy === false ? 'fail' : 'unknown';
+    var hText = mh.healthy === true ? _('health.healthy')
+      : mh.healthy === false ? (mh.error || _('health.unhealthy'))
+      : _('health.notChecked');
+    var latency = mh.latency_ms ? mh.latency_ms + 'ms' : '';
+    var row = document.createElement('div');
+    row.className = 'model-row' + (enabled ? '' : ' model-disabled');
+    row.innerHTML = [
+      '<div class="model-row-main">',
+        '<span class="dot ' + (mh.healthy === true ? 'healthy' : mh.healthy === false ? 'unhealthy' : 'unknown') + '"></span>',
+        '<code class="model-id">' + esc(mid) + '</code>',
+        '<span class="model-health ' + hClass + '" title="' + esc(hText) + '">' + esc(hText) + (latency ? ' · ' + latency : '') + '</span>',
+      '</div>',
+      '<div class="model-row-actions">',
+        '<label class="model-toggle" title="' + (enabled ? _('modelsModal.disableSync') : _('modelsModal.enableSync')) + '">',
+          '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' onchange="toggleModelSync(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\', this.checked)">',
+          '<span>' + (enabled ? _('modelsModal.synced') : _('modelsModal.notSynced')) + '</span>',
+        '</label>',
+        '<button class="btn btn-sm" onclick="checkSingleModel(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">' + _('action.check') + '</button>',
+      '</div>',
+    ].join('');
+    list.appendChild(row);
+  });
+}
+
 async function showKeyModels(vendorId, keyId) {
   const v = _allVendorsData.find(function(x) { return x.id === vendorId; });
   if (!v) return;
   const k = (v.keys || []).find(function(x) { return x.id === keyId; });
   if (!k) return;
-  const models = k.models || [];
-  const list = $('modelsModalList');
-  list.innerHTML = '';
-  if (models.length === 0) {
-    list.innerHTML = '<p style="color:var(--text2)">' + _('modelsModal.noModels') + '</p>';
-  } else {
-    models.forEach(function(m) {
-      var mid = typeof m === 'string' ? m : (m.id || m.name || '');
-      var div = document.createElement('div');
-      div.className = 'model-item';
-      div.textContent = mid;
-      list.appendChild(div);
-    });
-  }
+  _modelsModalCtx = { vendorId: vendorId, keyId: keyId };
+  renderModelsModalList(k);
   $('modelsModal').classList.add('open');
 }
 
-function closeModelsModal() { $('modelsModal').classList.remove('open'); }
+function closeModelsModal() {
+  $('modelsModal').classList.remove('open');
+  _modelsModalCtx = { vendorId: '', keyId: '' };
+}
+
+async function checkKeyModels(vendorId, keyId) {
+  showToast(_('action.checking'), 'info');
+  try {
+    var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/check-models', { method: 'POST' });
+    if (res.error) {
+      showToast(res.error, 'error');
+      return res;
+    }
+    showToast(_('toast.checkModelsDone')
+      .replace('{ok}', res.ok || 0)
+      .replace('{fail}', res.fail || 0), (res.fail || 0) > 0 ? 'error' : 'success');
+    await selectVendor(vendorId);
+    return res;
+  } catch (e) {
+    showToast(String(e), 'error');
+  }
+}
+
+async function checkKeyModelsFromModal() {
+  if (!_modelsModalCtx.vendorId || !_modelsModalCtx.keyId) return;
+  var btn = $('modelsCheckBtn');
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+  try {
+    await checkKeyModels(_modelsModalCtx.vendorId, _modelsModalCtx.keyId);
+    var v = _allVendorsData.find(function(x) { return x.id === _modelsModalCtx.vendorId; });
+    var k = v && (v.keys || []).find(function(x) { return x.id === _modelsModalCtx.keyId; });
+    if (k) renderModelsModalList(k);
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+  }
+}
+
+async function checkSingleModel(vendorId, keyId, modelId) {
+  // Re-run full per-model check for accuracy (backend removes failed from engines)
+  showToast(_('action.checking') + ': ' + modelId, 'info');
+  var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/check-models', { method: 'POST' });
+  if (res.error) showToast(res.error, 'error');
+  else {
+    var hit = (res.results || []).find(function(r) { return r.model === modelId; });
+    if (hit && hit.healthy) showToast(_('toast.checkOk') + ': ' + modelId, 'success');
+    else showToast(_('toast.checkFail') + ': ' + modelId + (hit && hit.error ? ' — ' + hit.error : ''), 'error');
+  }
+  await selectVendor(vendorId);
+  if (_modelsModalCtx.vendorId === vendorId && _modelsModalCtx.keyId === keyId) {
+    var v = _allVendorsData.find(function(x) { return x.id === vendorId; });
+    var k = v && (v.keys || []).find(function(x) { return x.id === keyId; });
+    if (k) renderModelsModalList(k);
+  }
+}
+
+async function toggleModelSync(vendorId, keyId, modelId, enabled) {
+  var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/models/' + encodeURIComponent(modelId), {
+    method: 'PUT',
+    body: JSON.stringify({ enabled: !!enabled }),
+  });
+  if (res.error) {
+    showToast(res.error, 'error');
+  } else {
+    showToast(enabled ? _('toast.modelEnabled') : _('toast.modelDisabled'), 'success');
+  }
+  await selectVendor(vendorId);
+  if (_modelsModalCtx.vendorId === vendorId && _modelsModalCtx.keyId === keyId) {
+    var v = _allVendorsData.find(function(x) { return x.id === vendorId; });
+    var k = v && (v.keys || []).find(function(x) { return x.id === keyId; });
+    if (k) renderModelsModalList(k);
+  }
+}
 
 // ── Batch Import ─────────────────────────
 
 var _debounceTimer = null;
+var _batchEntries = [];
+var _batchDirty = false;       // user edited preview rows
+var _batchAutoParse = true;    // auto-parse only before first manual edit
 
-function debounceParseBatch() {
+function onBatchTextInput() {
+  // After user edits preview, don't auto-overwrite their fixes
+  if (_batchDirty) return;
   if (_debounceTimer) clearTimeout(_debounceTimer);
-  _debounceTimer = setTimeout(parseBatchImport, 400);
+  _debounceTimer = setTimeout(function() { parseBatchImport(false); }, 450);
 }
 
-async function parseBatchImport() {
-  const text = $('batchImportText').value.trim();
-  if (!text) { $('batchImportPreview').style.display = 'none'; $('batchApplyBtn').style.display = 'none'; return; }
-  const res = await api('/api/batch/parse', { method: 'POST', body: JSON.stringify({text: text}) });
-  if (res.error) { $('batchImportError').textContent = res.error; $('batchImportError').style.display = ''; return; }
-  $('batchImportError').style.display = 'none';
-  const entries = res.entries || [];
-  if (entries.length === 0) { $('batchImportPreview').style.display = 'none'; $('batchApplyBtn').style.display = 'none'; return; }
-  $('batchImportPreview').style.display = '';
-  var html = '<table><thead><tr><th>Vendor</th><th>Provider</th><th>Key</th></tr></thead><tbody>';
-  entries.forEach(function(e) {
-    html += '<tr><td>' + esc(e.vendor) + '</td><td>' + esc(e.provider) + '</td><td><code>' + esc((e.api_key || '').slice(0, 8)) + '...</code></td></tr>';
+function toggleBatchAll(checked) {
+  document.querySelectorAll('#batchImportTableWrap .batch-check').forEach(function(cb) {
+    cb.checked = checked;
   });
-  html += '</tbody></table>';
-  $('batchImportTableWrap').innerHTML = html;
+}
+
+function _uniqueVendorName(base, used) {
+  var name = (base || 'Provider').trim() || 'Provider';
+  var n = 2;
+  var out = name;
+  while (used[(out || '').toLowerCase()]) {
+    out = name + '-' + n;
+    n++;
+  }
+  used[(out || '').toLowerCase()] = true;
+  return out;
+}
+
+function _defaultKeyName(apiKey) {
+  if (!apiKey) return 'key';
+  var s = String(apiKey);
+  return 'key-' + s.slice(-4);
+}
+
+function _normalizeBatchEntry(e, usedNames) {
+  e = e || {};
+  var provider = (e.provider || 'custom').trim() || 'custom';
+  var vendorName = (e.vendor_name || e.vendor || '').trim();
+  if (!vendorName) {
+    vendorName = provider.replace(/-/g, ' ');
+    vendorName = vendorName.charAt(0).toUpperCase() + vendorName.slice(1);
+  }
+  vendorName = _uniqueVendorName(vendorName, usedNames);
+  var apiKey = (e.api_key || '').trim();
+  var keyName = (e.name || e.key_name || '').trim();
+  if (!keyName || keyName === '(need key)') {
+    keyName = _defaultKeyName(apiKey);
+  }
+  var ep = (e.endpoint_type || 'openai').toLowerCase();
+  if (ep !== 'anthropic' && ep !== 'openai') ep = 'openai';
+  var url = (e.api_url || '').trim().replace(/\/+$/, '');
+  if (ep === 'openai' && url && (/\/anthropic\b/i.test(url) || /api\.anthropic\.com/i.test(url))) {
+    ep = 'anthropic';
+  }
+  return {
+    vendor_name: vendorName,
+    provider: provider,
+    api_url: url,
+    api_key: apiKey,
+    name: keyName,
+    endpoint_type: ep,
+    selected: e.selected !== false,
+  };
+}
+
+function _slugProvider(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'custom';
+}
+
+function _collectBatchEdits() {
+  var rows = document.querySelectorAll('#batchImportTableWrap tr[data-idx]');
+  rows.forEach(function(row) {
+    var idx = parseInt(row.getAttribute('data-idx'), 10);
+    if (isNaN(idx) || !_batchEntries[idx]) return;
+    var vName = row.querySelector('.batch-vendor-name');
+    var kName = row.querySelector('.batch-key-name');
+    var url = row.querySelector('.batch-url');
+    var key = row.querySelector('.batch-key');
+    var ep = row.querySelector('.batch-endpoint');
+    var check = row.querySelector('.batch-check');
+    if (vName) _batchEntries[idx].vendor_name = vName.value.trim();
+    if (kName) _batchEntries[idx].name = kName.value.trim();
+    // Merge provider with vendor name: keep recognized id, else derive from name
+    if (vName) {
+      var vn = vName.value.trim();
+      var prev = (_batchEntries[idx].provider || '').trim();
+      if (!prev || prev === 'custom' || prev === _slugProvider(_batchEntries[idx].vendor_name || '')) {
+        // Sync provider when name changes; keep recognized id if present
+        if (!prev || prev === 'custom') {
+          _batchEntries[idx].provider = _slugProvider(vn);
+        }
+      }
+      if (!(_batchEntries[idx].provider || '').trim()) {
+        _batchEntries[idx].provider = _slugProvider(vn);
+      }
+    }
+    if (url) _batchEntries[idx].api_url = url.value.trim().replace(/\/+$/, '');
+    if (key) _batchEntries[idx].api_key = key.value.trim();
+    if (ep) _batchEntries[idx].endpoint_type = ep.value || 'openai';
+    if (check) _batchEntries[idx].selected = !!check.checked;
+  });
+  _batchDirty = true;
+  _batchAutoParse = false;
+}
+
+function _markBatchDirty() {
+  _batchDirty = true;
+  _batchAutoParse = false;
+}
+
+function _rowInvalidReason(e) {
+  if (!(e.api_url || '').trim()) return _('batchImport.needUrl');
+  if (!(e.api_key || '').trim()) return _('batchImport.needKey');
+  if (!(e.vendor_name || '').trim()) return _('batchImport.needVendor');
+  if (!(e.provider || '').trim()) {
+    e.provider = _slugProvider(e.vendor_name);
+  }
+  return '';
+}
+
+function renderBatchPreview() {
+  if (!_batchEntries.length) {
+    $('batchImportPreview').style.display = 'none';
+    $('batchApplyBtn').style.display = 'none';
+    return;
+  }
+  $('batchImportPreview').style.display = '';
   $('batchApplyBtn').style.display = '';
   $('batchApplyBtn').disabled = false;
+
+  var html = '<div class="batch-toolbar">'
+    + '<label><input type="checkbox" id="batchSelectAll" onchange="toggleBatchAll(this.checked)" checked> '
+    + _('batchImport.selectAll') + '</label>'
+    + '<span class="batch-toolbar-hint">' + _('batchImport.editableHint') + '</span>'
+    + '</div>';
+  html += '<div class="batch-table-scroll"><table class="batch-edit-table"><thead><tr>'
+    + '<th class="col-check"></th>'
+    + '<th>' + _('vendorModal.name') + '</th>'
+    + '<th>' + _('keyModal.name') + '</th>'
+    + '<th>' + _('vendorModal.apiUrl') + '</th>'
+    + '<th>' + _('keyModal.apiKey') + '</th>'
+    + '<th>' + _('vendorModal.endpointType') + '</th>'
+    + '<th></th>'
+    + '</tr></thead><tbody>';
+
+  _batchEntries.forEach(function(e, i) {
+    var reason = _rowInvalidReason(e);
+    var cls = reason ? 'batch-row-warn' : '';
+    html += '<tr data-idx="' + i + '" class="' + cls + '" title="' + esc(reason || '') + '">'
+      + '<td class="col-check"><input type="checkbox" class="batch-check" data-idx="' + i + '" '
+      + (e.selected !== false ? 'checked' : '') + ' onchange="_markBatchDirty()"></td>'
+      + '<td><input class="batch-vendor-name" type="text" value="' + esc(e.vendor_name || '') + '" '
+      + 'placeholder="' + esc(_('vendorModal.name')) + '" oninput="_markBatchDirty()" title="' + esc(e.provider || '') + '"></td>'
+      + '<td><input class="batch-key-name" type="text" value="' + esc(e.name || '') + '" '
+      + 'placeholder="' + esc(_('keyModal.name')) + '" oninput="_markBatchDirty()"></td>'
+      + '<td class="col-url"><input class="batch-url" type="text" value="' + esc(e.api_url || '') + '" '
+      + 'placeholder="https://..." oninput="_markBatchDirty()" title="' + esc(e.api_url || '') + '"></td>'
+      + '<td class="col-key"><input class="batch-key" type="text" value="' + esc(e.api_key || '') + '" '
+      + 'placeholder="sk-..." oninput="_markBatchDirty()" spellcheck="false" autocomplete="off"></td>'
+      + '<td><select class="batch-endpoint" onchange="_markBatchDirty()">'
+      + '<option value="openai"' + (e.endpoint_type !== 'anthropic' ? ' selected' : '') + '>' + esc(_('endpoint.openaiShort') || 'OpenAI') + '</option>'
+      + '<option value="anthropic"' + (e.endpoint_type === 'anthropic' ? ' selected' : '') + '>' + esc(_('endpoint.anthropic') || 'Anthropic') + '</option>'
+      + '</select></td>'
+      + '<td class="batch-row-actions">'
+      + '<button type="button" class="btn btn-sm btn-danger" onclick="removeBatchRow(' + i + ')" title="' + esc(_('common.remove') || 'Remove') + '">×</button>'
+      + '</td>'
+      + '</tr>';
+  });
+  html += '</tbody></table></div>';
+  $('batchImportTableWrap').innerHTML = html;
+}
+
+function addBatchRow() {
+  _collectBatchEdits();
+  var used = {};
+  (_allVendorsData || []).forEach(function(v) { used[(v.name || '').toLowerCase()] = true; });
+  _batchEntries.forEach(function(e) { if (e.vendor_name) used[(e.vendor_name || '').toLowerCase()] = true; });
+  _batchEntries.push(_normalizeBatchEntry({
+    vendor_name: 'Provider',
+    provider: 'custom',
+    api_url: '',
+    api_key: '',
+    name: 'key',
+    endpoint_type: 'openai',
+    selected: true,
+  }, used));
+  _batchDirty = true;
+  _batchAutoParse = false;
+  renderBatchPreview();
+}
+
+function removeBatchRow(idx) {
+  _collectBatchEdits();
+  if (idx < 0 || idx >= _batchEntries.length) return;
+  _batchEntries.splice(idx, 1);
+  _batchDirty = true;
+  _batchAutoParse = false;
+  if (!_batchEntries.length) {
+    $('batchImportPreview').style.display = 'none';
+    $('batchApplyBtn').style.display = 'none';
+    return;
+  }
+  renderBatchPreview();
+}
+
+async function parseBatchImport(force) {
+  const text = $('batchImportText').value.trim();
+  if (!text) {
+    if (force) {
+      // Allow empty text + manual rows
+      if (!_batchEntries.length) {
+        _batchEntries = [];
+        addBatchRow();
+      }
+      return;
+    }
+    $('batchImportPreview').style.display = 'none';
+    $('batchApplyBtn').style.display = 'none';
+    return;
+  }
+  if (!force && _batchDirty) return;
+
+  const res = await api('/api/batch/parse', { method: 'POST', body: JSON.stringify({ text: text }) });
+  if (res.error) {
+    $('batchImportError').textContent = res.error;
+    $('batchImportError').style.display = '';
+    return;
+  }
+  $('batchImportError').style.display = 'none';
+
+  var usedNames = {};
+  (_allVendorsData || []).forEach(function(v) {
+    usedNames[(v.name || '').toLowerCase()] = true;
+  });
+  var parsed = (res.entries || []).map(function(e) {
+    return _normalizeBatchEntry(e, usedNames);
+  });
+
+  if (!parsed.length) {
+    if (force) {
+      showToast(_('batchImport.noEntries'), 'error');
+      // still show empty editable row for manual fill
+      _batchEntries = [];
+      _batchDirty = false;
+      addBatchRow();
+      return;
+    }
+    $('batchImportPreview').style.display = 'none';
+    $('batchApplyBtn').style.display = 'none';
+    return;
+  }
+
+  _batchEntries = parsed;
+  _batchDirty = false;
+  _batchAutoParse = true;
+  renderBatchPreview();
 }
 
 async function applyBatchImport() {
+  _collectBatchEdits();
+  var selected = _batchEntries.filter(function(e) { return e.selected !== false; });
+  if (!selected.length) {
+    showToast(_('batchImport.selectAtLeastOne'), 'error');
+    return;
+  }
+
+  var invalid = [];
+  selected.forEach(function(e, i) {
+    var r = _rowInvalidReason(e);
+    if (r) invalid.push((e.vendor_name || e.name || ('#' + (i + 1))) + ': ' + r);
+  });
+  if (invalid.length) {
+    $('batchImportError').textContent = invalid.join('；');
+    $('batchImportError').style.display = '';
+    renderBatchPreview();
+    showToast(_('batchImport.fixErrors'), 'error');
+    return;
+  }
+  $('batchImportError').style.display = 'none';
+
+  var payload = selected.map(function(e) {
+    return {
+      vendor_name: (e.vendor_name || '').trim(),
+      provider: ((e.provider || '').trim() || _slugProvider(e.vendor_name) || 'custom'),
+      api_url: (e.api_url || '').trim().replace(/\/+$/, ''),
+      api_key: (e.api_key || '').trim(),
+      name: (e.name || '').trim() || _defaultKeyName(e.api_key),
+      endpoint_type: e.endpoint_type === 'anthropic' ? 'anthropic' : 'openai',
+    };
+  });
+
   const btn = $('batchApplyBtn');
   btn.disabled = true;
   try {
-    const text = $('batchImportText').value.trim();
-    const res = await api('/api/batch/import', { method: 'POST', body: JSON.stringify({text: text}) });
+    const res = await api('/api/batch/import', { method: 'POST', body: JSON.stringify({ entries: payload }) });
     if (res.error) { showToast(res.error, 'error'); return; }
-    var imported = (res.created || []).length;
-    showToast('Imported ' + imported + ' key(s)', 'success');
-    closeBatchImportModal();
-    loadVendors();
-    // Run health check on imported keys
-    checkAllHealth();
+    var imported = (res.created || []).filter(function(c) { return !c.skipped; }).length;
+    var skipped = (res.created || []).filter(function(c) { return c.skipped; }).length;
+    var errN = (res.errors || []).length;
+    var msg = _('batchImport.importDone')
+      .replace('{ok}', imported)
+      .replace('{skip}', skipped)
+      .replace('{err}', errN);
+    showToast(msg, errN ? 'error' : 'success');
+    if (errN && res.errors) {
+      $('batchImportError').textContent = res.errors.map(function(x) {
+        return (x.entry || '') + ': ' + (x.error || '');
+      }).join('；');
+      $('batchImportError').style.display = '';
+    }
+    if (imported > 0) {
+      closeBatchImportModal();
+      loadVendors();
+      checkAllHealth();
+    }
   } finally {
     btn.disabled = false;
   }
@@ -1379,6 +1896,10 @@ function closeBatchImportModal() {
   $('batchImportPreview').style.display = 'none';
   $('batchApplyBtn').style.display = 'none';
   $('batchImportError').style.display = 'none';
+  _batchEntries = [];
+  _batchDirty = false;
+  _batchAutoParse = true;
+  if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null; }
   var btn = $('batchApplyBtn');
   if (btn) btn.disabled = false;
 }
@@ -1388,13 +1909,16 @@ function showBatchImportModal() {
   $('batchImportPreview').style.display = 'none';
   $('batchApplyBtn').style.display = 'none';
   $('batchImportError').style.display = 'none';
+  _batchEntries = [];
+  _batchDirty = false;
+  _batchAutoParse = true;
   $('batchImportModal').classList.add('open');
 }
 
 function syncAll() {
   api('/api/sync', { method: 'POST' }).then(function(res) {
     if (res.error) showToast(res.error, 'error');
-    else showToast('Synced: ' + (res.synced || 0) + ' key(s)', 'success');
+    else showToast((_('sync.done') || 'Synced: {count} key(s)').replace('{count}', res.synced || 0), 'success');
     loadVendors();
   });
 }
@@ -1469,11 +1993,36 @@ async function saveRemoteGateway() { /* stub */ }
 // ── Language & Theme ─────────────────────
 
 async function switchLang(lang) {
+  if (!lang) return;
+  var res = null;
+  try {
+    res = await api('/api/lang', { method: 'POST', body: JSON.stringify({ lang: lang }) });
+  } catch (e) {}
+
+  // Hot-update locale packs from server (avoids stale embedded ALL_LOCALES)
+  if (res && res.locales) {
+    ALL_LOCALES = res.locales;
+  }
+  if (res && res.lang) lang = res.lang;
+
   CURRENT_LANG = lang;
   document.documentElement.lang = lang;
-  LOCALE_STRINGS = Object.assign({}, ALL_LOCALES['en'], ALL_LOCALES[lang]);
+  var pack = (ALL_LOCALES && ALL_LOCALES[lang]) || {};
+  LOCALE_STRINGS = Object.assign({}, (ALL_LOCALES && ALL_LOCALES['en']) || {}, pack);
+  if (res && res.strings) {
+    LOCALE_STRINGS = res.strings;
+  }
+  if (document.getElementById('langSelect')) {
+    document.getElementById('langSelect').value = lang;
+  }
   updateI18n();
-  if (typeof loadVendors === 'function' && document.querySelector('#view-vendors.active')) loadVendors();
+
+  try {
+    if (document.querySelector('#view-dashboard.active') && typeof loadDashboard === 'function') loadDashboard();
+    if (document.querySelector('#view-vendors.active') && typeof loadVendors === 'function') loadVendors();
+    if (document.querySelector('#view-backends.active') && typeof loadBackends === 'function') loadBackends();
+    if (document.querySelector('#view-stats.active') && typeof loadStats === 'function') loadStats();
+  } catch (e) {}
 }
 
 function toggleTheme() {
@@ -1492,16 +2041,159 @@ function getDefaultDates() {
   return {from: from, to: to};
 }
 
+async function importStatsFromOpenClaw() {
+  showToast(_('action.checking') || 'Syncing...', 'info');
+  var res = await api('/api/stats/import', { method: 'POST' });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast((_('stats.importDone') || 'Synced: {added}').replace('{added}', res.added || 0), 'success');
+  loadStats();
+}
+
 function formatCost(cents) {
-  return '$' + (cents || 0).toFixed(4);
+  var n = Number(cents || 0);
+  if (!isFinite(n)) n = 0;
+  if (n === 0) return '$0.0000';
+  if (Math.abs(n) < 0.0001) return '$' + n.toFixed(6);
+  if (Math.abs(n) < 0.01) return '$' + n.toFixed(5);
+  return '$' + n.toFixed(4);
+}
+
+function sourceLabel(src) {
+  var s = String(src || '');
+  var map = {
+    openclaw: 'OpenClaw',
+    opencode: 'OpenCode',
+    proxy: 'Proxy (Manager)',
+    claude_code: 'Claude Code',
+    codex_cli: 'Codex CLI',
+    unknown: 'Unknown'
+  };
+  return map[s] || s || '-';
 }
 
 function fmtNum(n) {
   if (!n) return '0';
-  return n.toLocaleString();
+  return Number(n).toLocaleString();
 }
 
-async function loadStats() {
+function fmtRate(r) {
+  if (r === undefined || r === null) return '-';
+  return Number(r).toFixed(1) + '%';
+}
+
+function rateBar(rate) {
+  var cls = rate >= 95 ? 'ok' : rate >= 80 ? 'warn' : 'bad';
+  return '<div class="rate-cell"><div class="rate-bar"><span class="' + cls + '" style="width:' + Math.min(100, rate) + '%"></span></div><span class="rate-text">' + fmtRate(rate) + '</span></div>';
+}
+
+var _statsDrill = { level: 'summary', vendor_id: '', vendor_name: '', key_id: '', key_name: '', provider: '', model: '' };
+var _statsCharts = { daily: null, models: null, vendors: null, sources: null };
+var _statsMetaFilled = false;
+
+function _emptyDrill() {
+  return { level: 'summary', vendor_id: '', vendor_name: '', key_id: '', key_name: '', provider: '', model: '' };
+}
+
+function onStatsGroupByChange() {
+  _statsDrill = _emptyDrill();
+  loadStats();
+}
+
+function onStatsFilterChange() {
+  // Keep drill if still valid; filters always apply on top of drill
+  loadStats();
+}
+
+function clearStatsFilters() {
+  var v = $('statsFilterVendor');
+  var m = $('statsFilterModel');
+  var s = $('statsFilterSource');
+  if (v) v.value = '';
+  if (m) m.value = '';
+  if (s) s.value = '';
+  loadStats();
+}
+
+function statsResetDrill() {
+  _statsDrill = _emptyDrill();
+  loadStats();
+}
+
+function statsDrillVendor(id, name) {
+  _statsDrill = { level: 'keys', vendor_id: String(id), vendor_name: name || '', key_id: '', key_name: '', provider: '', model: '' };
+  loadStats();
+}
+
+function statsDrillKey(vendorId, vendorName, keyId, keyName) {
+  _statsDrill = {
+    level: 'requests',
+    vendor_id: String(vendorId || _statsDrill.vendor_id || ''),
+    vendor_name: vendorName || _statsDrill.vendor_name || '',
+    key_id: String(keyId),
+    key_name: keyName || '',
+    provider: '',
+    model: '',
+  };
+  loadStats();
+}
+
+function statsDrillProvider(provider) {
+  _statsDrill = { level: 'keys', vendor_id: '', vendor_name: '', key_id: '', key_name: '', provider: provider, model: '' };
+  loadStats();
+}
+
+function statsDrillModel(model) {
+  _statsDrill = {
+    level: 'requests',
+    vendor_id: '',
+    vendor_name: '',
+    key_id: '',
+    key_name: '',
+    provider: '',
+    model: String(model || ''),
+  };
+  loadStats();
+}
+
+function statsDrillSource(source, name) {
+  // Drill source → vendor breakdown under that engine
+  var f = $('statsFilterSource');
+  if (f) f.value = source || '';
+  _statsDrill = _emptyDrill();
+  var g = $('statsGroupBy');
+  if (g) g.value = 'vendor';
+  loadStats();
+}
+
+function statsDrillVendorFromRecord(vendorId, vendorName) {
+  if (!vendorId && !vendorName) return;
+  statsDrillVendor(vendorId || vendorName, vendorName || vendorId);
+}
+
+function getStatsFilterParams() {
+  var vendor = ($('statsFilterVendor') && $('statsFilterVendor').value) || '';
+  var model = ($('statsFilterModel') && $('statsFilterModel').value) || '';
+  var source = ($('statsFilterSource') && $('statsFilterSource').value) || '';
+  return { vendor_id: vendor, model: model, source: source };
+}
+
+function appendStatsFilters(q) {
+  var f = getStatsFilterParams();
+  // Drill takes precedence for the same dimension; otherwise apply UI filters
+  if (f.vendor_id && !_statsDrill.vendor_id) {
+    q += '&vendor_id=' + encodeURIComponent(f.vendor_id);
+  }
+  if (f.model && !_statsDrill.model) {
+    q += '&model=' + encodeURIComponent(f.model);
+  }
+  if (f.source) {
+    q += '&source=' + encodeURIComponent(f.source);
+  }
+  return q;
+}
+
+function buildStatsQuery(opts) {
+  opts = opts || {};
   var from = $('statsFrom').value;
   var to = $('statsTo').value;
   var groupBy = $('statsGroupBy').value;
@@ -1510,31 +2202,368 @@ async function loadStats() {
     if (!from) { $('statsFrom').value = def.from; from = def.from; }
     if (!to) { $('statsTo').value = def.to; to = def.to; }
   }
-  var q = '?from=' + from + 'T00:00:00Z&to=' + to + 'T23:59:59Z&group_by=' + groupBy;
+
+  var q = '?from=' + encodeURIComponent(from + 'T00:00:00') + '&to=' + encodeURIComponent(to + 'T23:59:59');
+
+  if (_statsDrill.level === 'keys') {
+    groupBy = 'key';
+    if (_statsDrill.vendor_id) q += '&vendor_id=' + encodeURIComponent(_statsDrill.vendor_id);
+    if (_statsDrill.provider) q += '&provider=' + encodeURIComponent(_statsDrill.provider);
+  } else if (_statsDrill.level === 'requests') {
+    groupBy = 'request';
+    if (_statsDrill.vendor_id) q += '&vendor_id=' + encodeURIComponent(_statsDrill.vendor_id);
+    if (_statsDrill.key_id) q += '&key_id=' + encodeURIComponent(_statsDrill.key_id);
+    if (_statsDrill.model) q += '&model=' + encodeURIComponent(_statsDrill.model);
+    if (opts.forExport) {
+      // export raw records only
+    } else {
+      q += '&include_records=1&limit=200';
+    }
+  }
+
+  q = appendStatsFilters(q);
+
+  if (!opts.forExport) {
+    q += '&group_by=' + encodeURIComponent(groupBy);
+    q += '&include_charts=1&include_meta=1';
+  }
+  return { q: q, groupBy: groupBy, from: from, to: to };
+}
+
+function exportStats(fmt) {
+  var built = buildStatsQuery({ forExport: true });
+  var q = built.q + '&format=' + encodeURIComponent(fmt || 'csv');
+  window.location.href = '/api/stats/export' + q;
+}
+
+function fillStatsFilterOptions(meta) {
+  if (!meta) return;
+  var allLabel = _('stats.all') || 'All';
+
+  function fillSelect(sel, items, valueKey, labelKey, current) {
+    if (!sel) return;
+    var cur = current !== undefined ? current : sel.value;
+    var html = '<option value="">' + allLabel + '</option>';
+    (items || []).forEach(function(it) {
+      var id, name;
+      if (typeof it === 'string') {
+        id = it; name = it;
+      } else {
+        id = it[valueKey]; name = it[labelKey] || it[valueKey];
+      }
+      html += '<option value="' + esc(String(id)) + '"' + (String(id) === String(cur) ? ' selected' : '') + '>' + esc(String(name)) + '</option>';
+    });
+    sel.innerHTML = html;
+    if (cur) sel.value = cur;
+  }
+
+  fillSelect($('statsFilterVendor'), meta.vendors || [], 'id', 'name');
+  fillSelect($('statsFilterModel'), meta.models || [], null, null);
+  fillSelect($('statsFilterSource'), meta.sources || [], 'id', 'name');
+  _statsMetaFilled = true;
+}
+
+function chartColors() {
+  var style = getComputedStyle(document.documentElement);
+  return {
+    primary: style.getPropertyValue('--primary').trim() || '#3b82f6',
+    success: style.getPropertyValue('--success').trim() || '#22c55e',
+    danger: style.getPropertyValue('--danger').trim() || '#ef4444',
+    warning: style.getPropertyValue('--warning').trim() || '#eab308',
+    text2: style.getPropertyValue('--text2').trim() || '#8ba1c4',
+    border: style.getPropertyValue('--border').trim() || '#1e2a3d',
+    bg3: style.getPropertyValue('--bg3').trim() || '#1a2332',
+  };
+}
+
+function destroyStatsCharts() {
+  Object.keys(_statsCharts).forEach(function(k) {
+    if (_statsCharts[k]) {
+      try { _statsCharts[k].destroy(); } catch (e) {}
+      _statsCharts[k] = null;
+    }
+  });
+}
+
+function renderStatsCharts(charts) {
+  var wrap = $('statsCharts');
+  if (typeof Chart === 'undefined') {
+    if (wrap) wrap.style.display = 'none';
+    return;
+  }
+  if (!charts) {
+    destroyStatsCharts();
+    if (wrap) wrap.style.display = 'none';
+    return;
+  }
+  if (wrap) wrap.style.display = '';
+
+  var c = chartColors();
+  var grid = { color: c.border };
+  var ticks = { color: c.text2, maxRotation: 45, minRotation: 0 };
+  var legend = { labels: { color: c.text2, boxWidth: 12 } };
+
+  function upsert(key, canvasId, cfg) {
+    var canvas = $(canvasId);
+    if (!canvas) return;
+    if (_statsCharts[key]) {
+      try { _statsCharts[key].destroy(); } catch (e) {}
+      _statsCharts[key] = null;
+    }
+    _statsCharts[key] = new Chart(canvas.getContext('2d'), cfg);
+  }
+
+  var daily = charts.daily || { labels: [], count: [], success: [], fail: [], tokens: [] };
+  upsert('daily', 'chartDaily', {
+    type: 'line',
+    data: {
+      labels: daily.labels || [],
+      datasets: [
+        { label: _('stats.calls') || 'Calls', data: daily.count || [], borderColor: c.primary, backgroundColor: c.primary + '33', tension: 0.25, fill: false, yAxisID: 'y' },
+        { label: _('stats.success') || 'Success', data: daily.success || [], borderColor: c.success, backgroundColor: c.success + '33', tension: 0.25, fill: false, yAxisID: 'y' },
+        { label: _('stats.fail') || 'Fail', data: daily.fail || [], borderColor: c.danger, backgroundColor: c.danger + '33', tension: 0.25, fill: false, yAxisID: 'y' },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: legend },
+      scales: {
+        x: { ticks: ticks, grid: grid },
+        y: { beginAtZero: true, ticks: ticks, grid: grid },
+      },
+    },
+  });
+
+  var models = charts.models || { labels: [], count: [] };
+  upsert('models', 'chartModels', {
+    type: 'bar',
+    data: {
+      labels: models.labels || [],
+      datasets: [{
+        label: _('stats.calls') || 'Calls',
+        data: models.count || [],
+        backgroundColor: c.primary + 'cc',
+        borderColor: c.primary,
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: ticks, grid: grid },
+        y: { ticks: ticks, grid: grid },
+      },
+    },
+  });
+
+  var vendors = charts.vendors || { labels: [], count: [] };
+  upsert('vendors', 'chartVendors', {
+    type: 'bar',
+    data: {
+      labels: vendors.labels || [],
+      datasets: [{
+        label: _('stats.calls') || 'Calls',
+        data: vendors.count || [],
+        backgroundColor: c.warning + 'cc',
+        borderColor: c.warning,
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: ticks, grid: grid },
+        y: { ticks: ticks, grid: grid },
+      },
+    },
+  });
+
+  var sources = charts.sources || { labels: [], count: [] };
+  var pieColors = [c.primary, c.success, c.warning, c.danger, '#a78bfa', '#38bdf8'];
+  upsert('sources', 'chartSources', {
+    type: 'doughnut',
+    data: {
+      labels: sources.labels || [],
+      datasets: [{
+        data: sources.count || [],
+        backgroundColor: (sources.labels || []).map(function(_, i) { return pieColors[i % pieColors.length]; }),
+        borderColor: c.bg3,
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: legend },
+    },
+  });
+}
+
+function renderStatsBreadcrumb() {
+  var el = $('statsBreadcrumb');
+  if (_statsDrill.level === 'summary') {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  el.style.display = '';
+  var parts = ['<a href="#" onclick="statsResetDrill();return false">' + _('stats.all') + '</a>'];
+  if (_statsDrill.vendor_name) {
+    if (_statsDrill.level === 'requests' && !_statsDrill.model) {
+      parts.push('<a href="#" onclick="statsDrillVendor(\'' + esc(_statsDrill.vendor_id) + '\',\'' + esc(_statsDrill.vendor_name).replace(/'/g, "\\'") + '\');return false">' + esc(_statsDrill.vendor_name) + '</a>');
+    } else {
+      parts.push('<span>' + esc(_statsDrill.vendor_name) + '</span>');
+    }
+  } else if (_statsDrill.provider) {
+    parts.push('<span>' + esc(_statsDrill.provider) + '</span>');
+  }
+  if (_statsDrill.key_name) {
+    parts.push('<span>' + esc(_statsDrill.key_name) + '</span>');
+  }
+  if (_statsDrill.model) {
+    parts.push('<span>' + esc(_statsDrill.model) + '</span>');
+  }
+  el.innerHTML = parts.join('<span class="bc-sep">/</span>');
+}
+
+function setStatsHead(cols) {
+  $('statsHead').innerHTML = '<tr>' + cols.map(function(c) {
+    return '<th' + (c.cls ? ' class="' + c.cls + '"' : '') + '>' + c.label + '</th>';
+  }).join('') + '</tr>';
+}
+
+async function loadStats() {
+  var built = buildStatsQuery();
+  var q = built.q;
+  var groupBy = built.groupBy;
+
   var data = await api('/api/stats' + q);
   if (data.error) { showToast(data.error, 'error'); return; }
 
   var total = data.total || {};
   $('statTotalCount').textContent = fmtNum(total.count);
+  $('statSuccessCount').textContent = fmtNum(total.success_count);
+  $('statFailCount').textContent = fmtNum(total.fail_count);
+  $('statSuccessRate').textContent = fmtRate(total.success_rate);
   $('statTotalTokens').textContent = fmtNum(total.total_tokens);
   $('statTotalCost').textContent = formatCost(total.total_cost);
 
+  if (data.meta) fillStatsFilterOptions(data.meta);
+  renderStatsCharts(data.charts);
+  renderStatsBreadcrumb();
+
   var tbody = $('statsBody');
   tbody.innerHTML = '';
-  var summary = data.summary || [];
-  if (summary.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text3)">' + _('stats.noData') + '</td></tr>';
+
+  if (_statsDrill.level === 'requests') {
+    var reqCols = [
+      { label: _('stats.time') },
+      { label: _('stats.status') },
+      { label: _('stats.totalTokens') },
+      { label: _('stats.cost') },
+      { label: _('stats.latency') },
+      { label: _('stats.error') },
+    ];
+    if (_statsDrill.model) {
+      reqCols.splice(1, 0, { label: _('stats.groupVendor') }, { label: _('keyModal.name') || 'Key' });
+    } else {
+      reqCols.splice(1, 0, { label: _('stats.model') });
+    }
+    // show source/vendor filters context in detail
+    reqCols.splice(reqCols.length - 1, 0, { label: _('stats.filterSource') || 'Source' });
+    setStatsHead(reqCols);
+    var records = data.records || [];
+    if (!records.length) {
+      tbody.innerHTML = '<tr><td colspan="' + reqCols.length + '" class="stats-empty">' + _('stats.noData') + '</td></tr>';
+      return;
+    }
+    records.forEach(function(r) {
+      var ok = r.success !== false;
+      var tr = document.createElement('tr');
+      tr.className = ok ? '' : 'row-fail';
+      var ts = r.timestamp ? r.timestamp.replace('T', ' ').slice(0, 19) : '-';
+      var cells = ['<td class="mono">' + esc(ts) + '</td>'];
+      if (_statsDrill.model) {
+        var vId = esc(String(r.vendor_id || ''));
+        var vName = esc(r.vendor_name || '-').replace(/'/g, "\\'");
+        var kId = esc(String(r.key_id || ''));
+        var kName = esc(r.key_name || '-').replace(/'/g, "\\'");
+        cells.push('<td><a href="#" class="stats-link" onclick="statsDrillVendor(\'' + vId + '\',\'' + vName + '\');return false">' + esc(r.vendor_name || '-') + '</a></td>');
+        cells.push('<td><a href="#" class="stats-link" onclick="statsDrillKey(\'' + vId + '\',\'' + vName + '\',\'' + kId + '\',\'' + kName + '\');return false">' + esc(r.key_name || '-') + '</a></td>');
+      } else {
+        var mid = String(r.model || '');
+        cells.push('<td><a href="#" class="stats-link" onclick="statsDrillModel(\'' + esc(mid).replace(/'/g, "\\'") + '\');return false">' + esc(mid || '-') + '</a></td>');
+      }
+      var srcLabel = sourceLabel(r.source);
+      var srcId = String(r.source || '');
+      cells = cells.concat([
+        '<td><span class="badge-status ' + (ok ? 'ok' : 'fail') + '">' + (ok ? _('stats.success') : (r.status_code || _('stats.fail'))) + '</span></td>',
+        '<td>' + fmtNum(r.total_tokens) + '</td>',
+        '<td class="cost-text">' + formatCost(r.cost || 0) + '</td>',
+        '<td>' + (r.elapsed_ms ? r.elapsed_ms + 'ms' : '-') + '</td>',
+        '<td><a href="#" class="stats-link" onclick="statsDrillSource(\'' + esc(srcId).replace(/'/g, "\\'") + '\');return false">' + esc(srcLabel) + '</a></td>',
+        '<td class="err-cell">' + esc(r.error || '') + '</td>',
+      ]);
+      tr.innerHTML = cells.join('');
+      tbody.appendChild(tr);
+    });
     return;
   }
+
+  setStatsHead([
+    { label: _('stats.dimension') },
+    { label: _('stats.calls') },
+    { label: _('stats.success') },
+    { label: _('stats.fail') },
+    { label: _('stats.successRate') },
+    { label: _('stats.totalTokens') },
+    { label: _('stats.cost') },
+  ]);
+
+  var summary = data.summary || [];
+  if (!summary.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="stats-empty">' + _('stats.noData') + '</td></tr>';
+    return;
+  }
+
   summary.forEach(function(s) {
     var tr = document.createElement('tr');
+    tr.className = 'stats-row-click';
+    var nameHtml;
+    if (_statsDrill.level === 'summary' && groupBy === 'vendor') {
+      nameHtml = '<a href="#" class="stats-link" onclick="statsDrillVendor(\'' + esc(String(s.vendor_id || s.id)) + '\',\'' + esc(s.name).replace(/'/g, "\\'") + '\');return false">' + esc(s.name) + '</a>';
+    } else if (_statsDrill.level === 'summary' && groupBy === 'provider') {
+      nameHtml = '<a href="#" class="stats-link" onclick="statsDrillProvider(\'' + esc(s.name).replace(/'/g, "\\'") + '\');return false">' + esc(s.name) + '</a>';
+    } else if (_statsDrill.level === 'summary' && groupBy === 'key') {
+      nameHtml = '<a href="#" class="stats-link" onclick="statsDrillKey(\'' + esc(String(s.vendor_id || '')) + '\',\'' + esc(s.vendor_name || '').replace(/'/g, "\\'") + '\',\'' + esc(String(s.key_id || s.id)) + '\',\'' + esc(s.name).replace(/'/g, "\\'") + '\');return false">' + esc(s.name) + '<span class="muted"> · ' + esc(s.vendor_name || '') + '</span></a>';
+    } else if (_statsDrill.level === 'summary' && groupBy === 'model') {
+      var mid = s.model || s.name || s.id;
+      nameHtml = '<a href="#" class="stats-link" onclick="statsDrillModel(\'' + esc(String(mid)).replace(/'/g, "\\'") + '\');return false">' + esc(s.name || mid) + '</a>';
+    } else if (_statsDrill.level === 'keys') {
+      nameHtml = '<a href="#" class="stats-link" onclick="statsDrillKey(\'' + esc(String(s.vendor_id || _statsDrill.vendor_id)) + '\',\'' + esc(s.vendor_name || _statsDrill.vendor_name || '').replace(/'/g, "\\'") + '\',\'' + esc(String(s.key_id || s.id)) + '\',\'' + esc(s.name).replace(/'/g, "\\'") + '\');return false">' + esc(s.name) + '</a>';
+    } else {
+      if (_statsDrill.level === 'summary' && groupBy === 'source') {
+        var sid = s.source || s.id || s.name || '';
+        nameHtml = '<a href="#" class="stats-link" onclick="statsDrillSource(\'' + esc(String(sid)).replace(/'/g, "\\'") + '\');return false">' + esc(s.name || sid) + '</a>';
+      } else {
+        nameHtml = '<strong>' + esc(s.name) + '</strong>';
+      }
+    }
     tr.innerHTML = [
-      '<td><strong>' + esc(s.name) + '</strong></td>',
+      '<td>' + nameHtml + '</td>',
       '<td>' + fmtNum(s.count) + '</td>',
+      '<td class="ok-text">' + fmtNum(s.success_count) + '</td>',
+      '<td class="fail-text">' + fmtNum(s.fail_count) + '</td>',
+      '<td>' + rateBar(s.success_rate || 0) + '</td>',
       '<td>' + fmtNum(s.total_tokens) + '</td>',
-      '<td>' + fmtNum(s.prompt_tokens) + '</td>',
-      '<td>' + fmtNum(s.completion_tokens) + '</td>',
-      '<td>' + formatCost(s.total_cost) + '</td>',
+      '<td class="cost-text">' + formatCost(s.total_cost) + '</td>',
     ].join('');
     tbody.appendChild(tr);
   });
@@ -1547,7 +2576,14 @@ async function loadStats() {
 
 // ── Init ─────────────────────────────────
 
-switchView('dashboard');
+switchView(getInitialView(), { skipHash: false });
+
+window.addEventListener('hashchange', function() {
+  var name = getInitialView();
+  var active = document.querySelector('.nav-item.active');
+  var cur = active ? active.getAttribute('data-view') : '';
+  if (name && name !== cur) switchView(name, { skipHash: true });
+});
 </script>
 
 </body>
