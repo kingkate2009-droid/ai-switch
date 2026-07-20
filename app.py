@@ -13,29 +13,41 @@ from core.batch_import import parse_batch_text
 from core.providers import get_providers, recognize_provider
 from core.data import (
     add_key,
+    # dedupe/snapshot helpers used below
     add_vendor,
     delete_key,
+    delete_profile,
     delete_vendor,
+    failover_primary,
     get_enabled_models,
     get_key,
     get_keys,
+    get_models_catalog,
     get_settings,
     get_vendor,
     get_vendors,
+    is_read_only,
+    list_all_tags,
     list_model_ids,
+    list_profiles,
+    promote_key,
+    save_profile,
     set_model_enabled,
+    switch_profile,
     update_key,
     update_key_data,
     update_settings,
     update_vendor,
 )
 from core.health_checker import (
+    apply_health_to_backends,
     check_all_keys,
     check_key_health,
     check_key_models,
     get_all_health_status,
 )
 from core.i18n import SUPPORTED_LANGS, get_translations, resolve_lang, t as _t
+from core.audit import log_event, list_events
 from backends import init_backends, get as get_backend, get_all as get_all_backends, \
     on_key_added, on_key_updated, on_key_removed, on_vendor_removed, reconcile_all
 
@@ -60,6 +72,88 @@ def _create_app() -> Flask:
 app = _create_app()
 
 init_backends()
+
+try:
+    from core.scheduler import start_scheduler
+    start_scheduler()
+except Exception as _e:
+    log.warning("Scheduler not started: %s", _e)
+
+# Optional local access token (empty = disabled)
+_AUTH_EXEMPT_PREFIXES = (
+    "/api/version",
+    "/api/auth/",
+    "/static/",
+    "/favicon.ico",
+)
+
+
+def _get_access_token() -> str:
+    try:
+        from core.data import get_settings
+        return str((get_settings() or {}).get("access_token") or "").strip()
+    except Exception:
+        return ""
+
+
+@app.before_request
+def _check_access_token():
+    token = _get_access_token()
+    if not token:
+        return None
+    path = request.path or ""
+    if path == "/" or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
+        return None
+    # cookie or header
+    provided = request.cookies.get("aiswitch_token") or request.headers.get("X-AI-Switch-Token") or ""
+    if provided == token:
+        return None
+    # also allow Authorization: Bearer <token>
+    auth = request.headers.get("Authorization") or ""
+    if auth.startswith("Bearer ") and auth[7:].strip() == token:
+        return None
+    if path.startswith("/api/"):
+        return jsonify({"error": "Unauthorized", "auth_required": True}), 401
+    # HTML: still serve shell so login UI can work; APIs stay protected
+    return None
+
+
+# Mutating methods blocked when read_only=true (except settings/auth/lang)
+_READ_ONLY_EXEMPT_PREFIXES = (
+    "/api/settings",
+    "/api/auth/",
+    "/api/lang",
+    "/api/version",
+    "/api/diagnostics",
+    "/api/audit",
+    "/api/pricing",  # GET only in practice; POST still blocked via method check below for pricing write? allow pricing write only via settings
+)
+
+
+@app.before_request
+def _check_read_only():
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    path = request.path or ""
+    if not path.startswith("/api/"):
+        return None
+    # always allow auth + settings (to turn off read_only) + lang + encrypted backup export
+    if (
+        path.startswith("/api/auth/")
+        or path.startswith("/api/settings")
+        or path.startswith("/api/lang")
+        or path == "/api/backup/export"
+    ):
+        return None
+    try:
+        if not is_read_only():
+            return None
+    except Exception:
+        return None
+    return jsonify({
+        "error": "Read-only mode is enabled. Disable it in Settings to make changes.",
+        "read_only": True,
+    }), 403
 
 
 @app.errorhandler(404)
@@ -106,12 +200,56 @@ def api_version():
     from core.version import get_version
     import platform
     import sys
+    token_set = bool(_get_access_token())
     return jsonify({
         "version": get_version(),
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "frozen": bool(getattr(sys, "frozen", False)),
+        "auth_required": token_set,
     })
+
+
+@app.route("/api/auth/status", methods=["GET"])
+def api_auth_status():
+    token = _get_access_token()
+    provided = request.cookies.get("aiswitch_token") or request.headers.get("X-AI-Switch-Token") or ""
+    ok = (not token) or (provided == token)
+    return jsonify({"auth_required": bool(token), "authenticated": ok})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_auth_login():
+    token = _get_access_token()
+    if not token:
+        return jsonify({"success": True, "auth_required": False})
+    data = request.get_json(silent=True) or {}
+    provided = str(data.get("token") or "").strip()
+    if provided != token:
+        return jsonify({"success": False, "error": "Invalid token"}), 401
+    resp = jsonify({"success": True, "auth_required": True})
+    resp.set_cookie("aiswitch_token", token, max_age=86400 * 30, httponly=True, samesite="Lax")
+    return resp
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_auth_logout():
+    resp = jsonify({"success": True})
+    resp.set_cookie("aiswitch_token", "", max_age=0)
+    return resp
+
+
+@app.route("/api/diagnostics", methods=["GET"])
+def api_diagnostics():
+    from core.diagnostics import collect_diagnostics
+    return jsonify(collect_diagnostics())
+
+
+@app.route("/api/audit", methods=["GET"])
+def api_audit_log():
+    limit = min(int(request.args.get("limit", "100") or 100), 500)
+    ev = list_events(limit=limit)
+    return jsonify({"events": ev, "count": len(ev)})
 
 
 # ── Providers ──────────────────────────────────────────────
@@ -236,6 +374,68 @@ def api_write_backend_config(name):
 
 # ── Vendors ────────────────────────────────────────────────
 
+
+
+@app.route("/api/vendors/export", methods=["GET"])
+def api_vendors_export_csv():
+    """Export all vendors and keys as CSV (secrets included — local tool)."""
+    import csv
+    import io
+    from core.data import get_vendors
+    from core.health_checker import get_all_health_status
+    from core.audit import log_event
+
+    fmt = (request.args.get("format") or "csv").lower()
+    vendors = get_vendors()
+    health = get_all_health_status()
+    rows = []
+    for v in vendors:
+        for k in v.get("keys") or []:
+            h = health.get(f"{v.get('id')}:{k.get('id')}") or {}
+            rows.append({
+                "vendor_id": v.get("id"),
+                "vendor_name": v.get("name"),
+                "provider": v.get("provider"),
+                "api_url": v.get("api_url"),
+                "endpoint_type": v.get("endpoint_type"),
+                "key_id": k.get("id"),
+                "key_name": k.get("name"),
+                "api_key": k.get("api_key"),
+                "enabled": "1" if k.get("enabled", True) else "0",
+                "default_model": k.get("default_model") or "",
+                "models": ",".join(
+                    (m.get("id") if isinstance(m, dict) else str(m))
+                    for m in (k.get("models") or [])
+                ),
+                "healthy": "" if h.get("healthy") is None else ("1" if h.get("healthy") else "0"),
+                "latency_ms": h.get("latency_ms") or "",
+                "error": (h.get("error") or "")[:300],
+                "checked_at": h.get("checked_at") or "",
+            })
+    log_event("vendors.export", format=fmt, rows=len(rows))
+    if fmt == "json":
+        body = json.dumps({"count": len(rows), "rows": rows}, ensure_ascii=False, indent=2)
+        resp = make_response(body)
+        resp.headers["Content-Type"] = "application/json; charset=utf-8"
+        resp.headers["Content-Disposition"] = "attachment; filename=vendors-keys.json"
+        return resp
+
+    fields = [
+        "vendor_id", "vendor_name", "provider", "api_url", "endpoint_type",
+        "key_id", "key_name", "api_key", "enabled", "default_model", "models",
+        "healthy", "latency_ms", "error", "checked_at",
+    ]
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        w.writerow(r)
+    resp = make_response(buf.getvalue())
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = "attachment; filename=vendors-keys.csv"
+    return resp
+
+
 @app.route("/api/vendors", methods=["GET"])
 def api_list_vendors():
     vendors = get_vendors()
@@ -255,17 +455,34 @@ def api_create_vendor():
         endpoint_type=data.get("endpoint_type", "openai"),
         thinking_disabled=data.get("thinking_disabled", False),
         proxy_target=data.get("proxy_target", ""),
+        tags=data.get("tags"),
     )
+    log_event("vendor.add", vendor_id=v.get("id"), name=v.get("name"), provider=v.get("provider"))
     return jsonify(v), 201
 
 
 @app.route("/api/vendors/<vendor_id>", methods=["PUT"])
 def api_update_vendor(vendor_id):
     data = request.get_json() or {}
-    v = update_vendor(vendor_id, **data)
+    # only pass known fields
+    allowed = {k: data[k] for k in (
+        "name", "provider", "api_url", "endpoint_type",
+        "thinking_disabled", "proxy_target", "tags",
+    ) if k in data}
+    v = update_vendor(vendor_id, **allowed)
     if not v:
         return jsonify({"error": "not found"}), 404
     return jsonify(v)
+
+
+@app.route("/api/tags", methods=["GET"])
+def api_list_tags():
+    return jsonify({"tags": list_all_tags()})
+
+
+@app.route("/api/models/catalog", methods=["GET"])
+def api_models_catalog():
+    return jsonify(get_models_catalog())
 
 
 @app.route("/api/vendors/<vendor_id>", methods=["DELETE"])
@@ -273,9 +490,30 @@ def api_delete_vendor(vendor_id):
     v = get_vendor(vendor_id)
     if v:
         on_vendor_removed(v)
-    if delete_vendor(vendor_id):
-        return jsonify({"success": True})
-    return jsonify({"error": "not found"}), 404
+    if not delete_vendor(vendor_id):
+        return jsonify({"error": "not found"}), 404
+    log_event("vendor.delete", vendor_id=vendor_id, name=(v or {}).get("name"))
+    return jsonify({"success": True})
+
+
+
+
+@app.route("/api/vendors/empty", methods=["GET"])
+def api_empty_vendors_preview():
+    from core.data import find_empty_vendors
+    items = find_empty_vendors()
+    return jsonify({"count": len(items), "items": items})
+
+
+@app.route("/api/vendors/empty", methods=["POST"])
+def api_empty_vendors_delete():
+    from core.data import delete_empty_vendors
+    body = request.get_json(silent=True) or {}
+    dry = body.get("dry_run", False)
+    result = delete_empty_vendors(dry_run=bool(dry))
+    if not dry:
+        log_event("vendors.clean_empty", count=result.get("count", 0))
+    return jsonify(result)
 
 
 # ── Keys ───────────────────────────────────────────────────
@@ -293,9 +531,11 @@ def api_create_key(vendor_id):
     data = request.get_json()
     if not data or not data.get("name") or not data.get("api_key"):
         return jsonify({"error": "name and api_key are required"}), 400
-    k = add_key(vendor_id, data["name"], data["api_key"])
+    k = add_key(vendor_id, data["name"], data["api_key"], notes=str(data.get("notes") or ""))
     if not k:
         return jsonify({"error": "vendor not found"}), 404
+    if data.get("role") and not k.get("_existing"):
+        k = update_key(vendor_id, k["id"], role=data.get("role")) or k
 
     health = check_key_health(vendor_id, k["id"])
     v = get_vendor(vendor_id)
@@ -312,18 +552,29 @@ def api_create_key(vendor_id):
         updated_key = update_key_data(vendor_id, k["id"], **updates) or k
         on_key_added(v, updated_key)
     else:
-        update_key_data(vendor_id, k["id"], enabled=False)
-        on_key_removed(v, k)
-        k["enabled"] = False
+        if bool((get_settings() or {}).get("health_auto_disable")):
+            update_key_data(vendor_id, k["id"], enabled=False)
+            on_key_removed(v, k)
+            k["enabled"] = False
     reconcile_all()
-
+    log_event(
+        "key.add",
+        vendor_id=vendor_id,
+        key_id=(k or {}).get("id"),
+        name=(k or {}).get("name"),
+        healthy=bool(health.get("healthy")),
+    )
     return jsonify({"key": k, "health": health}), 201
 
 
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>", methods=["PUT"])
 def api_update_key(vendor_id, key_id):
     data = request.get_json() or {}
-    k = update_key(vendor_id, key_id, **data)
+    allowed = {k: data[k] for k in (
+        "name", "api_key", "enabled", "models", "default_model",
+        "disabled_models", "model_health", "notes", "role",
+    ) if k in data}
+    k = update_key(vendor_id, key_id, **allowed)
     if not k:
         return jsonify({"error": "not found"}), 404
     v = get_vendor(vendor_id)
@@ -338,34 +589,45 @@ def api_delete_key(vendor_id, key_id):
     k = get_key(vendor_id, key_id)
     if v and k:
         on_key_removed(v, k)
-    if delete_key(vendor_id, key_id):
-        return jsonify({"success": True})
-    return jsonify({"error": "not found"}), 404
+    if not delete_key(vendor_id, key_id):
+        return jsonify({"error": "not found"}), 404
+    log_event("key.delete", vendor_id=vendor_id, key_id=key_id, name=(k or {}).get("name"))
+    return jsonify({"success": True})
 
 
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>/health", methods=["GET"])
 def api_check_key_health(vendor_id, key_id):
     health = check_key_health(vendor_id, key_id)
+    log_event("health.check", vendor_id=vendor_id, key_id=key_id, healthy=bool(health.get("healthy")), error=(health.get("error") or "")[:200])
     v = get_vendor(vendor_id)
     k = get_key(vendor_id, key_id)
-    if v and k and health.get("healthy"):
-        models = health.get("models", [])
-        default_model = health.get("default_model", "") or k.get("default_model", "")
-        updates = {"enabled": True}
-        # Keep previous models if scan returned empty
-        if models:
-            updates["models"] = models
-        elif not k.get("models") and default_model:
-            updates["models"] = [default_model]
-        if default_model:
-            updates["default_model"] = default_model
-        updated_key = update_key_data(vendor_id, key_id, **updates) or k
-        # Always re-sync full config to backends after successful probe
-        on_key_updated(v, updated_key)
-    elif v and k and not health.get("healthy"):
-        update_key_data(vendor_id, key_id, enabled=False)
-        on_key_removed(v, k)
-    reconcile_all()
+    if v and k:
+        # Healthy → push backends; unhealthy → strip from backends (keep in system)
+        apply_health_to_backends(v, k, health)
+        if not health.get("healthy"):
+            settings = get_settings() or {}
+            # optional: promote backup when primary fails
+            if bool(settings.get("health_auto_failover")):
+                promoted = failover_primary(vendor_id, key_id)
+                if promoted:
+                    v2 = get_vendor(vendor_id)
+                    if v2:
+                        failed = get_key(vendor_id, key_id) or k
+                        on_key_removed(v2, failed)
+                        on_key_added(v2, promoted)
+                    health["failover"] = {
+                        "promoted_key_id": promoted.get("id"),
+                        "promoted_name": promoted.get("name"),
+                    }
+                    log_event(
+                        "key.failover",
+                        vendor_id=vendor_id,
+                        failed_key_id=key_id,
+                        promoted_key_id=promoted.get("id"),
+                    )
+    # Progressive full-check skips per-key reconcile (client does one final /api/sync/push)
+    if request.args.get("reconcile", "1") != "0":
+        reconcile_all()
     return jsonify(health)
 
 
@@ -417,6 +679,29 @@ def api_enable_key(vendor_id, key_id):
     return jsonify(k)
 
 
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/promote", methods=["POST"])
+def api_promote_key(vendor_id, key_id):
+    """Mark key as primary; demote other primaries on vendor to backup."""
+    body = request.get_json(silent=True) or {}
+    demote = body.get("demote_others", True)
+    v = get_vendor(vendor_id)
+    if not v or not get_key(vendor_id, key_id):
+        return jsonify({"error": "not found"}), 404
+    k = promote_key(vendor_id, key_id, demote_others=bool(demote))
+    if not k:
+        return jsonify({"error": "not found"}), 404
+    # re-sync: primary enabled, others may have been demoted
+    v = get_vendor(vendor_id)
+    for kk in (v or {}).get("keys") or []:
+        if kk.get("enabled") is False:
+            on_key_removed(v, kk)
+        else:
+            on_key_updated(v, kk)
+    reconcile_all()
+    log_event("key.promote", vendor_id=vendor_id, key_id=key_id, name=k.get("name"))
+    return jsonify({"key": k, "vendor": v})
+
+
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>/disable", methods=["POST"])
 def api_disable_key(vendor_id, key_id):
     v = get_vendor(vendor_id)
@@ -462,11 +747,203 @@ def api_batch_keys(vendor_id):
 
 # ── Health ─────────────────────────────────────────────────
 
+@app.route("/api/health/check-targets", methods=["GET"])
+def api_health_check_targets():
+    """List vendor/key pairs for progressive health checks.
+
+    Default: all keys (including disabled) so full check covers every vendor.
+    Pass include_disabled=0 to only enabled keys.
+    """
+    include_disabled = request.args.get("include_disabled", "1") != "0"
+    targets = []
+    for v in get_vendors():
+        for k in v.get("keys") or []:
+            if not include_disabled and k.get("enabled") is False:
+                continue
+            targets.append({
+                "vendor_id": v["id"],
+                "vendor_name": v.get("name") or "",
+                "key_id": k["id"],
+                "key_name": k.get("name") or "",
+                "enabled": k.get("enabled", True) is not False,
+            })
+    return jsonify({"targets": targets, "count": len(targets)})
+
+
 @app.route("/api/health/check-all", methods=["POST"])
 def api_health_check_all():
-    results = check_all_keys()
-    reconcile_all()
-    return jsonify({"results": results})
+    """Bulk check (blocking). Prefer progressive client checks for UI progress."""
+    from core.scheduler import run_health_check
+    body = request.get_json(silent=True) or {}
+    include_disabled = body.get("include_disabled", True)
+    # record history via scheduler helper
+    out = run_health_check(source="manual", include_disabled=bool(include_disabled))
+    if out.get("busy"):
+        return jsonify({"success": False, "busy": True, "error": out.get("error")}), 409
+    results = out.get("results") or []
+    if body.get("reconcile", True) and not out.get("error"):
+        reconcile_all()
+    log_event(
+        "health.check_all",
+        ok=(out.get("summary") or {}).get("ok"),
+        fail=(out.get("summary") or {}).get("fail"),
+        total=len(results),
+    )
+    return jsonify({
+        "results": results,
+        "count": len(results),
+        "run_id": out.get("run_id"),
+        "summary": out.get("summary"),
+        "success": bool(out.get("ok")),
+        "error": out.get("error"),
+    })
+
+
+@app.route("/api/health/monitor/status", methods=["GET"])
+def api_health_monitor_status():
+    from core.scheduler import get_status
+    from core.health_checker import get_all_health_status
+    from core.data import get_vendors
+    status = get_status()
+    health = get_all_health_status()
+    keys = []
+    for v in get_vendors():
+        for k in v.get("keys") or []:
+            ck = f"{v['id']}:{k['id']}"
+            h = health.get(ck) or {}
+            keys.append({
+                "vendor_id": v.get("id"),
+                "vendor_name": v.get("name") or "",
+                "provider": v.get("provider") or "",
+                "key_id": k.get("id"),
+                "key_name": k.get("name") or "",
+                "enabled": k.get("enabled") is not False,
+                "role": k.get("role") or "",
+                "healthy": h.get("healthy"),
+                "latency_ms": h.get("latency_ms"),
+                "error": h.get("error"),
+                "checked_at": h.get("checked_at"),
+            })
+    ok = sum(1 for x in keys if x.get("healthy") is True)
+    fail = sum(1 for x in keys if x.get("healthy") is False)
+    unchecked = sum(1 for x in keys if x.get("healthy") is None)
+    status["current"] = {
+        "total_keys": len(keys),
+        "healthy": ok,
+        "unhealthy": fail,
+        "unchecked": unchecked,
+        "keys": keys,
+    }
+    return jsonify(status)
+
+
+@app.route("/api/health/monitor/start", methods=["POST"])
+def api_health_monitor_start():
+    from core.scheduler import enable_monitoring, resume_scheduler
+    body = request.get_json(silent=True) or {}
+    interval = body.get("interval") or body.get("check_interval_seconds")
+    try:
+        interval_i = int(interval) if interval is not None else None
+    except Exception:
+        interval_i = None
+    status = enable_monitoring(interval=interval_i)
+    # if only resume requested
+    if body.get("resume_only"):
+        status = resume_scheduler()
+    log_event("health.monitor_start", interval=status.get("interval_seconds"))
+    return jsonify({"ok": True, **status})
+
+
+@app.route("/api/health/monitor/stop", methods=["POST"])
+def api_health_monitor_stop():
+    from core.scheduler import disable_monitoring
+    status = disable_monitoring()
+    log_event("health.monitor_stop")
+    return jsonify({"ok": True, **status})
+
+
+@app.route("/api/health/monitor/pause", methods=["POST"])
+def api_health_monitor_pause():
+    from core.scheduler import pause_scheduler
+    status = pause_scheduler()
+    log_event("health.monitor_pause")
+    return jsonify({"ok": True, **status})
+
+
+@app.route("/api/health/monitor/resume", methods=["POST"])
+def api_health_monitor_resume():
+    from core.scheduler import resume_scheduler, enable_monitoring, get_status
+    body = request.get_json(silent=True) or {}
+    if body.get("enable"):
+        status = enable_monitoring()
+    else:
+        status = resume_scheduler()
+        # if settings still off, report clearly
+        if not status.get("enabled"):
+            return jsonify({
+                "ok": True,
+                "warning": "monitoring still disabled in settings; pass enable=true to turn on",
+                **status,
+            })
+    log_event("health.monitor_resume", enabled=status.get("enabled"))
+    return jsonify({"ok": True, **status})
+
+
+@app.route("/api/health/monitor/run", methods=["POST"])
+def api_health_monitor_run_now():
+    """Trigger one immediate full check (records history)."""
+    from core.scheduler import run_health_check
+    body = request.get_json(silent=True) or {}
+    include_disabled = body.get("include_disabled", True)
+    out = run_health_check(source=str(body.get("source") or "manual"), include_disabled=bool(include_disabled))
+    if out.get("busy"):
+        return jsonify({"success": False, "busy": True, "error": out.get("error")}), 409
+    log_event(
+        "health.run_now",
+        ok=(out.get("summary") or {}).get("ok"),
+        fail=(out.get("summary") or {}).get("fail"),
+    )
+    return jsonify({
+        "success": bool(out.get("ok")),
+        "busy": False,
+        "run_id": out.get("run_id"),
+        "summary": out.get("summary"),
+        "error": out.get("error"),
+        "count": len(out.get("results") or []),
+    })
+
+
+@app.route("/api/health/history", methods=["GET"])
+def api_health_history():
+    from core.health_history import list_runs
+    limit = request.args.get("limit", 50)
+    offset = request.args.get("offset", 0)
+    try:
+        limit_i = int(limit)
+    except Exception:
+        limit_i = 50
+    try:
+        offset_i = int(offset)
+    except Exception:
+        offset_i = 0
+    return jsonify(list_runs(limit=limit_i, offset=offset_i))
+
+
+@app.route("/api/health/history/<run_id>", methods=["GET"])
+def api_health_history_detail(run_id):
+    from core.health_history import get_run
+    rec = get_run(run_id)
+    if not rec:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(rec)
+
+
+@app.route("/api/health/history", methods=["DELETE"])
+def api_health_history_clear():
+    from core.health_history import clear_history
+    n = clear_history()
+    log_event("health.history_clear", removed=n)
+    return jsonify({"ok": True, "removed": n})
 
 
 # ── Batch Import ───────────────────────────────────────────
@@ -489,6 +966,12 @@ def api_batch_apply():
         entries = parse_batch_text(data.get("text", ""))
     if not entries:
         return jsonify({"error": "no entries to import"}), 400
+    # Snapshot for undo
+    try:
+        from core.data import save_import_snapshot
+        save_import_snapshot({"source": "batch.import", "entries": len(entries)})
+    except Exception as e:
+        log.warning("import snapshot failed: %s", e)
     created = []
     errors = []
     used_names = {(v.get("name") or "").lower() for v in get_vendors()}
@@ -514,6 +997,23 @@ def api_batch_apply():
             continue
 
         try:
+            # Global secret check BEFORE creating vendors
+            from core.data import find_key_anywhere, _norm_secret
+            secret = _norm_secret(api_key)
+            existing_hit = find_key_anywhere(secret) if secret else None
+            if existing_hit:
+                ev, ek = existing_hit
+                created.append({
+                    "vendor": (ev or {}).get("name") or vendor_name or provider,
+                    "key": (ek or {}).get("name") or name,
+                    "api_key": api_key[:8] + "...",
+                    "skipped": True,
+                    "reason": "duplicate_secret",
+                    "existing_vendor": (ev or {}).get("name"),
+                    "existing_key": (ek or {}).get("name"),
+                })
+                continue
+
             vendor = None
             # Match only by URL (unique). Never reuse a different URL with same provider name.
             for v in get_vendors():
@@ -553,13 +1053,24 @@ def api_batch_apply():
                     update_vendor(vendor["id"], **updates)
                     vendor = get_vendor(vendor["id"]) or vendor
 
-            key_exists = any(
-                k.get("api_key") == api_key or k.get("name") == name
-                for k in vendor.get("keys", [])
-            )
-            if not key_exists:
+            # System-wide secret dedup (never import same API key twice)
+            from core.data import find_key_anywhere, _norm_secret
+            secret = _norm_secret(api_key)
+            existing_hit = find_key_anywhere(secret) if secret else None
+            if existing_hit:
+                ev, ek = existing_hit
+                created.append({
+                    "vendor": (ev.get("name") if ev else None) or vendor.get("name"),
+                    "key": (ek.get("name") if ek else None) or name,
+                    "api_key": api_key[:8] + "...",
+                    "skipped": True,
+                    "reason": "duplicate_secret",
+                    "existing_vendor": (ev or {}).get("name"),
+                    "existing_key": (ek or {}).get("name"),
+                })
+            else:
                 k = add_key(vendor["id"], name, api_key)
-                if k:
+                if k and not k.get("_existing"):
                     health = check_key_health(vendor["id"], k["id"])
                     if health.get("healthy"):
                         models = health.get("models", [])
@@ -572,58 +1083,407 @@ def api_batch_apply():
                         updated_key = update_key_data(vendor["id"], k["id"], **updates)
                         on_key_added(vendor, updated_key or k)
                     else:
-                        update_key_data(vendor["id"], k["id"], enabled=False)
-                        on_key_removed(vendor, k)
+                        if bool((get_settings() or {}).get("health_auto_disable")):
+                            update_key_data(vendor["id"], k["id"], enabled=False)
+                            on_key_removed(vendor, k)
                     created.append({
                         "vendor": vendor["name"],
                         "key": name,
                         "api_key": api_key[:8] + "...",
                         "healthy": health.get("healthy"),
                     })
-            else:
-                created.append({
-                    "vendor": vendor["name"],
-                    "key": name,
-                    "api_key": api_key[:8] + "...",
-                    "skipped": True,
-                })
+                else:
+                    created.append({
+                        "vendor": vendor["name"],
+                        "key": name,
+                        "api_key": api_key[:8] + "...",
+                        "skipped": True,
+                        "reason": "duplicate_or_add_failed",
+                    })
         except Exception as e:
             log.error("Batch import entry failed: %s", e)
             errors.append({"entry": name, "error": str(e)})
 
+    log_event(
+        "batch.import",
+        imported=sum(1 for c in created if not c.get("skipped")),
+        skipped=sum(1 for c in created if c.get("skipped")),
+        errors=len(errors),
+    )
     return jsonify({"created": created, "errors": errors, "count": len(created)})
+
+
+
+
+@app.route("/api/keys/dedupe", methods=["GET"])
+def api_keys_dedupe_preview():
+    from core.data import dedupe_keys
+    result = dedupe_keys(dry_run=True)
+    # strip any secrets if present
+    return jsonify(result)
+
+
+@app.route("/api/keys/dedupe", methods=["POST"])
+def api_keys_dedupe_apply():
+    from core.data import dedupe_keys
+    result = dedupe_keys(dry_run=False)
+    log_event("keys.dedupe", removed=result.get("removed", 0), groups=result.get("groups", 0))
+    return jsonify(result)
+
+
+@app.route("/api/import/undo", methods=["GET"])
+def api_import_undo_status():
+    from core.data import load_import_snapshot
+    snap = load_import_snapshot()
+    if not snap:
+        return jsonify({"available": False})
+    meta = snap.get("meta") or {}
+    bak = snap.get("backup") or {}
+    return jsonify({
+        "available": True,
+        "meta": meta,
+        "exported_at": (bak.get("exported_at") if isinstance(bak, dict) else None),
+    })
+
+
+@app.route("/api/import/undo", methods=["POST"])
+def api_import_undo_apply():
+    from core.data import undo_last_import
+    try:
+        result = undo_last_import()
+        log_event("import.undo", **{k: result.get(k) for k in ("restored",) if k in result})
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/vendors/<vendor_id>/export-text", methods=["GET"])
+def api_vendor_export_text(vendor_id):
+    """Export vendor keys as smart-import compatible text lines."""
+    v = get_vendor(vendor_id)
+    if not v:
+        return jsonify({"error": "not found"}), 404
+    lines = []
+    provider = v.get("provider") or "custom"
+    url = (v.get("api_url") or "").rstrip("/")
+    ep = (v.get("endpoint_type") or "openai").lower()
+    for k in v.get("keys") or []:
+        key = (k.get("api_key") or "").strip()
+        if not key:
+            continue
+        # format: provider url key  (+ endpoint for anthropic)
+        if ep == "anthropic":
+            lines.append(f"{provider} {url} {key} endpoint: anthropic")
+        else:
+            lines.append(f"{provider} {url} {key}")
+    text = "\n".join(lines)
+    return jsonify({
+        "vendor_id": vendor_id,
+        "vendor_name": v.get("name"),
+        "count": len(lines),
+        "text": text,
+    })
 
 
 # ── Sync ───────────────────────────────────────────────────
 
-@app.route("/api/sync", methods=["POST"])
-def api_sync():
+@app.route("/api/sync/preview", methods=["GET", "POST"])
+def api_sync_preview():
+    """Preview reverse-import from backends without writing.
+
+    Returns candidates with duplicate flags (system-wide secret match).
+    """
     from backends import get_all as get_all_backends
-    total = 0
-    results = {}
+    from core.data import find_key_anywhere, find_vendor_for_import, _norm_secret
+
+    items = []
+    totals = {"new": 0, "duplicate": 0, "backends": 0}
     for name, adapter in get_all_backends().items():
         try:
-            imported = adapter.sync_from_backend()
-            if imported:
-                from core.data import add_vendor, add_key
-                for v in imported:
-                    vendor_id = None
-                    for existing in get_vendors():
-                        if existing.get("provider", "").lower() == v.get("provider", "").lower():
-                            vendor_id = existing["id"]
-                            break
-                    if not vendor_id:
-                        created = add_vendor(v["name"], v["provider"], v.get("api_url", ""), v.get("endpoint_type", "openai"))
-                        if created:
-                            vendor_id = created["id"]
-                    if vendor_id:
-                        for k in v.get("keys", []):
-                            add_key(vendor_id, k["name"], k["api_key"])
-            total += len(imported)
-            results[name] = len(imported)
+            candidates = adapter.sync_from_backend() or []
         except Exception as e:
-            results[name] = f"error: {e}"
-    return jsonify({"synced": total, "results": results})
+            log.warning("sync preview %s failed: %s", name, e)
+            continue
+        totals["backends"] += 1
+        for v in candidates:
+            provider = (v.get("provider") or "custom").strip() or "custom"
+            api_url = v.get("api_url") or ""
+            vendor_name = v.get("name") or provider
+            matched = find_vendor_for_import(provider, api_url, vendor_name)
+            for k in v.get("keys") or []:
+                secret = _norm_secret(k.get("api_key") or "")
+                if not secret:
+                    continue
+                raw_name = (k.get("name") or "").strip() or f"from {name}"
+                hit = find_key_anywhere(secret)
+                is_dup = bool(hit)
+                if is_dup:
+                    totals["duplicate"] += 1
+                else:
+                    totals["new"] += 1
+                items.append({
+                    "backend": name,
+                    "provider": provider,
+                    "vendor_name": vendor_name,
+                    "api_url": api_url,
+                    "endpoint_type": v.get("endpoint_type") or "openai",
+                    "key_name": raw_name,
+                    "api_key_preview": (secret[:8] + "…" + secret[-4:]) if len(secret) > 14 else secret[:4] + "…",
+                    "api_key": secret,  # needed for selective apply; UI should not display full
+                    "duplicate": is_dup,
+                    "existing_vendor": (hit[0].get("name") if hit else None),
+                    "existing_key": (hit[1].get("name") if hit else None),
+                    "will_match_vendor": (matched.get("name") if matched else None),
+                    "selected": not is_dup,
+                })
+    return jsonify({"items": items, "totals": totals, "manual_only": True})
+
+
+@app.route("/api/sync", methods=["POST"])
+def api_sync():
+    """Apply reverse-import (manual only).
+
+    Body optional:
+      { "items": [ {provider, api_url, vendor_name, endpoint_type, key_name, api_key}, ... ] }
+    If items omitted, imports all non-duplicate candidates (legacy behavior).
+    """
+    from backends import get_all as get_all_backends
+    from core.data import (
+        add_vendor, add_key, find_vendor_for_import, find_key_anywhere,
+        _norm_secret, update_key_data, get_vendor,
+    )
+
+    body = request.get_json(silent=True) or {}
+    selected = body.get("items")
+
+    try:
+        from core.data import save_import_snapshot
+        save_import_snapshot({"source": "sync.import", "selective": isinstance(selected, list)})
+    except Exception as e:
+        log.warning("import snapshot failed: %s", e)
+
+    total_added = 0
+    total_skipped = 0
+    results = {}
+
+    def _import_one(src_backend: str, v: dict, k: dict) -> str:
+        """Return 'added' | 'skipped'."""
+        nonlocal total_added, total_skipped
+        secret = _norm_secret(k.get("api_key") or "")
+        if not secret:
+            total_skipped += 1
+            return "skipped"
+        if find_key_anywhere(secret):
+            total_skipped += 1
+            return "skipped"
+        provider = (v.get("provider") or "custom").strip() or "custom"
+        api_url = v.get("api_url") or ""
+        vendor = find_vendor_for_import(provider, api_url, v.get("name") or v.get("vendor_name") or "")
+        if not vendor:
+            vendor = add_vendor(
+                v.get("name") or v.get("vendor_name") or provider.replace("-", " ").title(),
+                provider,
+                api_url,
+                v.get("endpoint_type") or "openai",
+            )
+        if not vendor:
+            total_skipped += 1
+            return "skipped"
+        vendor_id = vendor["id"]
+        raw_name = (k.get("name") or k.get("key_name") or "").strip() or f"from {src_backend}"
+        entry = add_key(vendor_id, raw_name, secret)
+        if not entry or entry.get("_existing"):
+            total_skipped += 1
+            return "skipped"
+        total_added += 1
+        models = k.get("models")
+        if models:
+            try:
+                update_key_data(vendor_id, entry["id"], models=models)
+            except Exception:
+                pass
+        return "added"
+
+    if isinstance(selected, list):
+        # Selective apply from preview
+        by_backend = {}
+        for it in selected:
+            if not isinstance(it, dict):
+                continue
+            if it.get("selected") is False or it.get("duplicate"):
+                total_skipped += 1
+                continue
+            b = it.get("backend") or "import"
+            v = {
+                "provider": it.get("provider"),
+                "api_url": it.get("api_url"),
+                "name": it.get("vendor_name") or it.get("name"),
+                "endpoint_type": it.get("endpoint_type") or "openai",
+            }
+            k = {
+                "name": it.get("key_name") or it.get("name"),
+                "api_key": it.get("api_key"),
+                "models": it.get("models"),
+            }
+            status = _import_one(b, v, k)
+            by_backend.setdefault(b, {"added": 0, "skipped": 0})
+            by_backend[b][status if status in ("added", "skipped") else "skipped"] += 1
+        results = by_backend
+    else:
+        for name, adapter in get_all_backends().items():
+            try:
+                candidates = adapter.sync_from_backend() or []
+                added = skipped = 0
+                for v in candidates:
+                    for k in v.get("keys") or []:
+                        st = _import_one(name, v, k)
+                        if st == "added":
+                            added += 1
+                        else:
+                            skipped += 1
+                results[name] = {"added": added, "skipped": skipped, "candidates": len(candidates)}
+            except Exception as e:
+                log.exception("sync_from_backend failed for %s", name)
+                results[name] = {"error": str(e)}
+
+    log_event("sync.import", added=total_added, skipped=total_skipped)
+    return jsonify({
+        "synced": total_added,
+        "skipped": total_skipped,
+        "results": results,
+        "manual_only": True,
+    })
+
+
+@app.route("/api/sync/push", methods=["POST"])
+def api_sync_push():
+    """Push system keys to all backend engines (reconcile). Manual trigger."""
+    try:
+        results = reconcile_all()
+        log_event("sync.push", backends=len(results or {}))
+        ok = sum(1 for r in (results or {}).values() if r.get("ok"))
+        fail = sum(1 for r in (results or {}).values() if not r.get("ok") and not r.get("skipped"))
+        return jsonify({
+            "success": fail == 0,
+            "message": f"Pushed: {ok} ok, {fail} failed",
+            "results": results or {},
+            "ok": ok,
+            "fail": fail,
+        })
+    except Exception as e:
+        log.exception("push failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/sync/last-push", methods=["GET"])
+def api_last_push():
+    from core.data import get_settings
+    return jsonify(get_settings().get("last_push") or {})
+
+
+@app.route("/api/backup/export", methods=["GET", "POST"])
+def api_backup_export():
+    from core.data import export_backup
+    from core.crypto_backup import is_encrypted_backup
+    import json as _json
+    password = ""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        password = str(body.get("password") or "")
+    else:
+        password = str(request.args.get("password") or "")
+    payload = export_backup(password=password)
+    encrypted = is_encrypted_backup(payload)
+    if encrypted:
+        n_vendors = "?"
+        log_event("backup.export", encrypted=True)
+        fname = "ai-switch-backup.enc.json"
+    else:
+        n_vendors = len((payload.get("data") or {}).get("vendors") or [])
+        log_event("backup.export", encrypted=False, vendors=n_vendors)
+        fname = "ai-switch-backup.json"
+    body = _json.dumps(payload, ensure_ascii=False, indent=2)
+    resp = make_response(body)
+    resp.headers["Content-Type"] = "application/json; charset=utf-8"
+    resp.headers["Content-Disposition"] = f"attachment; filename={fname}"
+    return resp
+
+
+@app.route("/api/backup/import", methods=["POST"])
+def api_backup_import():
+    from core.data import import_backup
+    body = request.get_json(silent=True) or {}
+    mode = (body.get("mode") or request.args.get("mode") or "merge").lower()
+    password = str(body.get("password") or "")
+    # allow either full payload or {backup: {...}, mode}
+    payload = body.get("backup") if isinstance(body.get("backup"), dict) else body
+    try:
+        result = import_backup(payload, mode=mode, password=password)
+        log_event("backup.import", mode=mode, **{k: result.get(k) for k in result if k != "items"})
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/policies", methods=["GET"])
+def api_list_policies():
+    from core.data import list_policy_templates
+    return jsonify(list_policy_templates())
+
+
+@app.route("/api/policies", methods=["POST"])
+def api_save_policy():
+    from core.data import save_policy_template
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    try:
+        entry = save_policy_template(
+            name,
+            description=str(data.get("description") or ""),
+            settings=data.get("settings") if isinstance(data.get("settings"), dict) else None,
+        )
+        log_event("policy.save", id=entry.get("id"), name=entry.get("name"))
+        return jsonify(entry)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/policies/<template_id>/apply", methods=["POST"])
+def api_apply_policy(template_id):
+    from core.data import apply_policy_template
+    from core.scheduler import restart_scheduler
+    try:
+        settings = apply_policy_template(template_id)
+        try:
+            restart_scheduler()
+        except Exception:
+            pass
+        log_event("policy.apply", id=template_id)
+        # never echo access_token
+        out = dict(settings or {})
+        if "access_token" in out:
+            out["access_token_set"] = bool(out.pop("access_token"))
+        return jsonify({"ok": True, "settings": out})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/policies/<template_id>", methods=["DELETE"])
+def api_delete_policy(template_id):
+    from core.data import delete_policy_template
+    try:
+        if not delete_policy_template(template_id):
+            return jsonify({"error": "not found"}), 404
+        log_event("policy.delete", id=template_id)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 # ── Gateway ────────────────────────────────────────────────
@@ -676,10 +1536,88 @@ def api_test_remote_gateway():
     data = request.get_json() or {}
     conn_type = data.get("type", "")
     if conn_type == "ssh":
-        return jsonify(ssh_test_connection(data))
+        result = ssh_test_connection(data)
+        log_event("gateway.remote_test", type="ssh", success=bool(result.get("success")))
+        return jsonify(result)
     elif conn_type == "gateway":
-        return jsonify(gateway_test_connection(data))
+        result = gateway_test_connection(data)
+        log_event("gateway.remote_test", type="gateway", success=bool(result.get("success")))
+        return jsonify(result)
     return jsonify({"success": False, "message": "unknown type"})
+
+
+@app.route("/api/gateway/remote/save", methods=["POST"])
+def api_save_remote_gateway():
+    """Persist remote gateway connection into settings.gateway."""
+    data = request.get_json() or {}
+    conn_type = data.get("type", "ssh")
+    gateway = {
+        "mode": "remote",
+        "type": conn_type,
+    }
+    if conn_type == "ssh":
+        gateway.update({
+            "host": str(data.get("host") or "").strip(),
+            "port": int(data.get("port") or 22),
+            "user": str(data.get("user") or "").strip(),
+            "key_file": str(data.get("key_file") or "").strip(),
+            "config_path": str(data.get("config_path") or "~/.openclaw").strip(),
+        })
+        if not gateway["host"]:
+            return jsonify({"error": "host required"}), 400
+    else:
+        gateway.update({
+            "url": str(data.get("url") or "").strip(),
+            "token": str(data.get("token") or "").strip(),
+        })
+        if not gateway["url"]:
+            return jsonify({"error": "url required"}), 400
+    update_settings(gateway=gateway)
+    log_event("gateway.remote_save", type=conn_type, mode="remote")
+    # never echo secrets fully
+    out = dict(gateway)
+    if out.get("token"):
+        out["token"] = "***"
+    return jsonify({"ok": True, "gateway": out})
+
+
+@app.route("/api/profiles", methods=["GET"])
+def api_list_profiles():
+    return jsonify(list_profiles())
+
+
+@app.route("/api/profiles", methods=["POST"])
+def api_save_profile():
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    try:
+        result = save_profile(name, label=str(data.get("label") or ""))
+        log_event("profile.save", name=result.get("name"))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/profiles/<name>/switch", methods=["POST"])
+def api_switch_profile(name):
+    try:
+        result = switch_profile(name)
+        log_event("profile.switch", name=name)
+        return jsonify(result)
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/profiles/<name>", methods=["DELETE"])
+def api_delete_profile(name):
+    if not delete_profile(name):
+        return jsonify({"error": "not found"}), 404
+    log_event("profile.delete", name=name)
+    return jsonify({"ok": True})
 
 
 # ── Proxy ──────────────────────────────────────────────────
@@ -899,14 +1837,104 @@ def api_proxy(subpath):
 
 @app.route("/api/settings", methods=["GET"])
 def api_get_settings():
-    return jsonify(get_settings())
+    s = dict(get_settings() or {})
+    # never return raw access token; only whether set
+    token = str(s.pop("access_token", "") or "")
+    s["access_token_set"] = bool(token.strip())
+    s["access_token"] = ""  # client must not echo secrets
+    return jsonify(s)
 
 
 @app.route("/api/settings", methods=["POST"])
 def api_update_settings():
     data = request.get_json() or {}
+    # normalize types
+    if "health_check_enabled" in data:
+        data["health_check_enabled"] = bool(data["health_check_enabled"])
+    if "health_auto_disable" in data:
+        data["health_auto_disable"] = bool(data["health_auto_disable"])
+    if "check_interval_seconds" in data:
+        try:
+            data["check_interval_seconds"] = max(60, int(data["check_interval_seconds"]))
+        except Exception:
+            data["check_interval_seconds"] = 300
+    if "access_token" in data:
+        # empty string clears token
+        data["access_token"] = str(data.get("access_token") or "").strip()
+    if "onboarding_done" in data:
+        data["onboarding_done"] = bool(data["onboarding_done"])
+    if "read_only" in data:
+        data["read_only"] = bool(data["read_only"])
+    if "health_auto_failover" in data:
+        data["health_auto_failover"] = bool(data["health_auto_failover"])
+    for bk in ("budget_daily_cost", "budget_monthly_cost"):
+        if bk in data:
+            try: data[bk] = max(0.0, float(data[bk]))
+            except Exception: data[bk] = 0.0
+    for bk in ("budget_daily_tokens", "budget_monthly_tokens"):
+        if bk in data:
+            try: data[bk] = max(0, int(float(data[bk])))
+            except Exception: data[bk] = 0
     s = update_settings(**data)
-    return jsonify(s)
+    log_event("settings.update", keys=list(data.keys()))
+    out = dict(s)
+    tok = str(out.pop("access_token", "") or "")
+    out["access_token_set"] = bool(tok)
+    out["access_token"] = ""
+    return jsonify(out)
+
+
+@app.route("/api/pricing", methods=["GET"])
+def api_get_pricing():
+    from core.pricing import get_builtin_pricing, get_user_pricing, get_pricing_table
+    return jsonify({
+        "builtin": get_builtin_pricing(),
+        "user": get_user_pricing(),
+        "merged": get_pricing_table(),
+        "unit": "USD per 1M tokens",
+        "fields": ["input", "output"],
+    })
+
+
+@app.route("/api/pricing", methods=["POST"])
+def api_set_pricing():
+    """Replace user pricing overrides.
+
+    Body: { "pricing": { "model": {"input": 1.0, "output": 2.0}, ... } }
+    Empty pricing clears overrides.
+    """
+    from core.pricing import get_user_pricing, get_pricing_table
+    data = request.get_json(silent=True) or {}
+    pricing = data.get("pricing", data)
+    if pricing is None:
+        pricing = {}
+    if not isinstance(pricing, dict):
+        return jsonify({"error": "pricing must be an object"}), 400
+    cleaned = {}
+    for k, v in pricing.items():
+        if not k:
+            continue
+        try:
+            if isinstance(v, dict):
+                inp = float(v.get("input", v.get("prompt", 0)))
+                outp = float(v.get("output", v.get("completion", 0)))
+            elif isinstance(v, (list, tuple)) and len(v) >= 2:
+                inp, outp = float(v[0]), float(v[1])
+            else:
+                continue
+            cleaned[str(k).strip().lower()] = {"input": inp, "output": outp}
+        except Exception:
+            continue
+    update_settings(pricing=cleaned)
+    log_event("pricing.update", models=len(cleaned))
+    return jsonify({
+        "success": True,
+        "user": cleaned,
+        "merged": get_pricing_table(),
+    })
+
+
+
 
 
 @app.route("/api/lang", methods=["POST"])
@@ -928,13 +1956,124 @@ def api_set_lang():
 # ── Usage Statistics ──────────────────────────────────────
 
 
+
+
+@app.route("/api/dashboard/overview", methods=["GET"])
+def api_dashboard_overview():
+    """Today/month usage + budget status for dashboard."""
+    from datetime import datetime, timezone, timedelta
+    from core.data import get_usage_records, get_settings
+
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    month_start = now.strftime("%Y-%m-01")
+    tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+    # next month rough upper bound
+    if now.month == 12:
+        next_month = f"{now.year + 1}-01-01"
+    else:
+        next_month = f"{now.year}-{now.month + 1:02d}-01"
+
+    def _agg(from_ts: str, to_ts: str) -> dict:
+        recs = get_usage_records(from_ts=from_ts, to_ts=to_ts, auto_import=False)
+        cost = sum(float(r.get("cost") or 0) for r in recs)
+        tokens = sum(int(r.get("total_tokens") or 0) for r in recs)
+        ok = sum(1 for r in recs if r.get("success", True))
+        return {
+            "count": len(recs),
+            "success_count": ok,
+            "fail_count": len(recs) - ok,
+            "total_tokens": tokens,
+            "total_cost": round(cost, 6),
+            "cost_estimated": any(r.get("_cost_estimated") for r in recs),
+        }
+
+    today_s = _agg(today + "T00:00:00", today + "T23:59:59")
+    month_s = _agg(month_start + "T00:00:00", tomorrow + "T23:59:59")
+
+    s = get_settings() or {}
+    def _f(key):
+        try:
+            return float(s.get(key) or 0)
+        except Exception:
+            return 0.0
+    def _i(key):
+        try:
+            return int(float(s.get(key) or 0))
+        except Exception:
+            return 0
+
+    budgets = {
+        "daily_cost": _f("budget_daily_cost"),
+        "monthly_cost": _f("budget_monthly_cost"),
+        "daily_tokens": _i("budget_daily_tokens"),
+        "monthly_tokens": _i("budget_monthly_tokens"),
+    }
+    alerts = []
+    if budgets["daily_cost"] > 0 and today_s["total_cost"] >= budgets["daily_cost"]:
+        alerts.append({"type": "daily_cost", "limit": budgets["daily_cost"], "used": today_s["total_cost"], "level": "crit" if today_s["total_cost"] >= budgets["daily_cost"] else "warn"})
+    elif budgets["daily_cost"] > 0 and today_s["total_cost"] >= budgets["daily_cost"] * 0.8:
+        alerts.append({"type": "daily_cost", "limit": budgets["daily_cost"], "used": today_s["total_cost"], "level": "warn"})
+    if budgets["monthly_cost"] > 0 and month_s["total_cost"] >= budgets["monthly_cost"]:
+        alerts.append({"type": "monthly_cost", "limit": budgets["monthly_cost"], "used": month_s["total_cost"], "level": "crit"})
+    elif budgets["monthly_cost"] > 0 and month_s["total_cost"] >= budgets["monthly_cost"] * 0.8:
+        alerts.append({"type": "monthly_cost", "limit": budgets["monthly_cost"], "used": month_s["total_cost"], "level": "warn"})
+    if budgets["daily_tokens"] > 0 and today_s["total_tokens"] >= budgets["daily_tokens"]:
+        alerts.append({"type": "daily_tokens", "limit": budgets["daily_tokens"], "used": today_s["total_tokens"], "level": "crit"})
+    elif budgets["daily_tokens"] > 0 and today_s["total_tokens"] >= budgets["daily_tokens"] * 0.8:
+        alerts.append({"type": "daily_tokens", "limit": budgets["daily_tokens"], "used": today_s["total_tokens"], "level": "warn"})
+    if budgets["monthly_tokens"] > 0 and month_s["total_tokens"] >= budgets["monthly_tokens"]:
+        alerts.append({"type": "monthly_tokens", "limit": budgets["monthly_tokens"], "used": month_s["total_tokens"], "level": "crit"})
+    elif budgets["monthly_tokens"] > 0 and month_s["total_tokens"] >= budgets["monthly_tokens"] * 0.8:
+        alerts.append({"type": "monthly_tokens", "limit": budgets["monthly_tokens"], "used": month_s["total_tokens"], "level": "warn"})
+
+    # last health-check summary from cache
+    from core.health_checker import get_all_health_status
+    from core.data import get_vendors
+    health = get_all_health_status() or {}
+    last_at = ""
+    h_ok = h_fail = h_unknown = 0
+    for v in get_vendors():
+        for k in v.get("keys") or []:
+            if k.get("enabled") is False:
+                continue
+            h = health.get(f"{v.get('id')}:{k.get('id')}") or {}
+            if h.get("healthy") is True:
+                h_ok += 1
+            elif h.get("healthy") is False:
+                h_fail += 1
+            else:
+                h_unknown += 1
+            ca = str(h.get("checked_at") or "")
+            if ca and ca > last_at:
+                last_at = ca
+
+    return jsonify({
+        "today": today_s,
+        "month": month_s,
+        "budgets": budgets,
+        "alerts": alerts,
+        "as_of": now.isoformat(),
+        "last_health": {
+            "checked_at": last_at,
+            "ok": h_ok,
+            "fail": h_fail,
+            "unknown": h_unknown,
+        },
+    })
+
+
 @app.route("/api/stats/import", methods=["POST"])
 def api_import_stats():
-    """Force re-import usage from OpenClaw session transcripts."""
-    from core.usage_import import import_openclaw_usage, purge_synthetic_usage
-    purged = purge_synthetic_usage()
-    result = import_openclaw_usage()
-    result["purged"] = purged
+    """Force re-import usage from all known backend engines (OpenClaw, OpenCode, …)."""
+    from core.usage_import import import_all_usage
+    result = import_all_usage()
+    log_event(
+        "stats.import",
+        added=result.get("added"),
+        openclaw=int((result.get("openclaw") or {}).get("added") or 0),
+        opencode=int((result.get("opencode") or {}).get("added") or 0),
+    )
     return jsonify(result)
 
 
@@ -1054,6 +2193,71 @@ def _stats_filter_meta(from_ts: str = "", to_ts: str = "") -> dict:
     }
 
 
+def _stats_filter_meta_from_records(records: list, from_ts: str = "", to_ts: str = "") -> dict:
+    """Build filter options. Prefer in-range filtered records; fill missing dimensions from range if needed."""
+    from core.data import get_usage_records, _normalize_model_name
+    vendors = {}
+    models = set()
+    sources = set()
+    providers = set()
+    for r in records or []:
+        vid = str(r.get("vendor_id") or "")
+        vname = r.get("vendor_name") or vid
+        if vid or vname:
+            vendors[vid or vname] = vname or vid
+        mid = _normalize_model_name(str(r.get("model") or "")) or (r.get("model") or "")
+        if mid:
+            models.add(mid)
+        if r.get("source"):
+            sources.add(str(r.get("source")))
+        if r.get("provider"):
+            providers.add(str(r.get("provider")))
+    # When filters narrow the view, still expose engines present in the date range
+    if from_ts or to_ts:
+        try:
+            all_in_range = get_usage_records(
+                from_ts=from_ts, to_ts=to_ts, auto_import=False, estimate_cost=False,
+            )
+            for r in all_in_range:
+                if r.get("source"):
+                    sources.add(str(r.get("source")))
+                vid = str(r.get("vendor_id") or "")
+                vname = r.get("vendor_name") or vid
+                if vid or vname:
+                    vendors.setdefault(vid or vname, vname or vid)
+                mid = _normalize_model_name(str(r.get("model") or "")) or (r.get("model") or "")
+                if mid:
+                    models.add(mid)
+                if r.get("provider"):
+                    providers.add(str(r.get("provider")))
+        except Exception:
+            pass
+    src_labels = {
+        "openclaw": "OpenClaw",
+        "opencode": "OpenCode",
+        "proxy": "Proxy (Manager)",
+        "claude_code": "Claude Code",
+        "codex_cli": "Codex CLI",
+        "unknown": "Unknown",
+    }
+    known_sources = ["openclaw", "opencode", "proxy"]
+    for s in known_sources:
+        sources.add(s)
+    ordered = []
+    seen = set()
+    for s in known_sources + sorted(sources):
+        if s in seen:
+            continue
+        seen.add(s)
+        ordered.append(s)
+    return {
+        "vendors": [{"id": k, "name": v} for k, v in sorted(vendors.items(), key=lambda x: (x[1] or "").lower())],
+        "models": sorted(models, key=str.lower),
+        "providers": sorted(providers, key=str.lower),
+        "sources": [{"id": s, "name": src_labels.get(s, s)} for s in ordered],
+    }
+
+
 @app.route("/api/stats", methods=["GET"])
 def api_get_stats():
     from core.data import get_usage_records, get_usage_summary
@@ -1069,7 +2273,9 @@ def api_get_stats():
     include_charts = request.args.get("include_charts", "1") != "0"
     include_meta = request.args.get("include_meta", "1") != "0"
     limit = min(int(request.args.get("limit", "100") or 100), 1000)
+    # offset applied when returning records
 
+    # Single pass: load + estimate once (summary/meta reuse this list)
     records = get_usage_records(
         from_ts=from_ts, to_ts=to_ts,
         vendor_id=vendor_id, key_id=key_id, provider=provider, model=model,
@@ -1080,13 +2286,15 @@ def api_get_stats():
         summary = get_usage_summary(
             from_ts=from_ts, to_ts=to_ts, group_by=group_by,
             vendor_id=vendor_id, key_id=key_id, provider=provider, model=model,
-            source=source,
+            source=source, records=records,
         )
 
     success_count = sum(1 for r in records if r.get("success", True))
     fail_count = len(records) - success_count
     total_tokens = sum(r.get("total_tokens", 0) or 0 for r in records)
     total_cost = sum(r.get("cost", 0) or 0 for r in records)
+    estimated_n = sum(1 for r in records if r.get("_cost_estimated"))
+    reported_n = sum(1 for r in records if (r.get("cost") or 0) > 0 and not r.get("_cost_estimated"))
 
     out = {
         "summary": summary,
@@ -1097,6 +2305,9 @@ def api_get_stats():
             "success_rate": round(success_count / len(records) * 100, 1) if records else 0,
             "total_tokens": total_tokens,
             "total_cost": round(total_cost, 6),
+            "cost_estimated": estimated_n > 0,
+            "cost_estimated_count": estimated_n,
+            "cost_reported_count": reported_n,
         },
         "filters": {
             "from": from_ts,
@@ -1112,9 +2323,37 @@ def api_get_stats():
     if include_charts:
         out["charts"] = _stats_chart_payload(records)
     if include_meta:
-        out["meta"] = _stats_filter_meta(from_ts, to_ts)
+        # Prefer fast path from already-loaded records; only rescan range without cost
+        if not vendor_id and not key_id and not provider and not model and not source:
+            out["meta"] = _stats_filter_meta_from_records(records, from_ts="", to_ts="")
+        else:
+            out["meta"] = _stats_filter_meta_from_records(records, from_ts, to_ts)
     if include_records or group_by == "request":
-        out["records"] = records[:limit]
+        q = (request.args.get("q") or request.args.get("search") or "").strip().lower()
+        filtered = records
+        if q:
+            def _match(r: dict) -> bool:
+                hay = " ".join([
+                    str(r.get("vendor_name") or ""),
+                    str(r.get("key_name") or ""),
+                    str(r.get("model") or ""),
+                    str(r.get("provider") or ""),
+                    str(r.get("source") or ""),
+                    str(r.get("error") or ""),
+                ]).lower()
+                return q in hay
+            filtered = [r for r in records if _match(r)]
+        offset = max(int(request.args.get("offset", "0") or 0), 0)
+        page = filtered[offset:offset + limit]
+        out["records"] = page
+        out["pagination"] = {
+            "offset": offset,
+            "limit": limit,
+            "total": len(filtered),
+            "total_unfiltered": len(records),
+            "has_more": offset + limit < len(filtered),
+            "q": q,
+        }
     return jsonify(out)
 
 

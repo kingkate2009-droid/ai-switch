@@ -81,13 +81,29 @@ def _ts_to_iso(ts) -> str:
     return s.replace("Z", "+00:00") if s.endswith("Z") else s
 
 
+def _slug_id(value: str) -> str:
+    """OpenCode-style provider id: lowercase, non-alnum -> hyphen."""
+    import re
+    s = re.sub(r"[^a-zA-Z0-9._-]+", "-", (value or "").strip()).strip("-").lower()
+    return s
+
+
 def _build_provider_index() -> dict:
-    """Map openclaw provider / ocp_key / vendor.provider -> (vendor, key)."""
+    """Map engine provider ids / ocp_key / vendor.provider / name -> (vendor, key)."""
     idx = {}
     for v in get_vendors():
         pname = (v.get("provider") or "").lower()
         if pname:
             idx[pname] = (v, None)
+            slug = _slug_id(pname)
+            if slug:
+                idx[slug] = (v, None)
+        vname = (v.get("name") or "").lower()
+        if vname and vname not in idx:
+            idx[vname] = (v, None)
+        vslug = _slug_id(v.get("name") or "")
+        if vslug and vslug not in idx:
+            idx[vslug] = (v, None)
         for k in v.get("keys") or []:
             ocp = f"{v.get('provider')}@{k.get('name')}".lower()
             idx[ocp] = (v, k)
@@ -95,10 +111,6 @@ def _build_provider_index() -> dict:
             idx[f"{pname}@{str(k.get('name') or '').lower()}"] = (v, k)
             if k.get("api_key"):
                 idx[f"key:{k['api_key']}"] = (v, k)
-        # vendor name as weak fallback
-        vname = (v.get("name") or "").lower()
-        if vname and vname not in idx:
-            idx[vname] = (v, None)
     return idx
 
 
@@ -109,13 +121,25 @@ def _match_vendor_key(provider: str, index: dict) -> tuple[Optional[dict], Optio
     low = p.lower()
     if low in index:
         return index[low]
+    slug = _slug_id(p)
+    if slug and slug in index:
+        return index[slug]
     # strip @suffix variants already full
     if "@" in low:
         base = low.split("@", 1)[0]
         if base in index:
             v, k = index[base]
-            # try exact ocp again with original casing key part
             return v, k
+        bslug = _slug_id(base)
+        if bslug and bslug in index:
+            return index[bslug]
+    # hyphen/underscore normalize
+    alt = low.replace("_", "-")
+    if alt in index:
+        return index[alt]
+    alt2 = low.replace("-", "_")
+    if alt2 in index:
+        return index[alt2]
     return None, None
 
 
@@ -285,3 +309,218 @@ def import_openclaw_usage(sessions_dir: Optional[Path] = None, max_files: int = 
         log.info("Imported %d OpenClaw usage records (scanned lines w/ usage: %d)", added, scanned)
 
     return {"added": added, "scanned": scanned, "files": len(files), "total": len(records)}
+
+
+# ── OpenCode (SQLite) ──────────────────────────────────────
+
+OPENCODE_DB_PATHS = (
+    Path.home() / ".local" / "share" / "opencode" / "opencode.db",
+    Path.home() / "Library" / "Application Support" / "opencode" / "opencode.db",
+)
+
+
+def _find_opencode_db() -> Optional[Path]:
+    for p in OPENCODE_DB_PATHS:
+        if p.exists() and p.is_file():
+            return p
+    return None
+
+
+def _attach_vendor_fields(rec: dict, index: dict) -> None:
+    v, k = _match_vendor_key(rec.get("provider") or "", index)
+    if v:
+        rec["vendor_id"] = v.get("id", "")
+        rec["vendor_name"] = v.get("name", "")
+        rec["provider"] = v.get("provider") or rec.get("provider") or ""
+    else:
+        rec["vendor_id"] = ""
+        rec["vendor_name"] = rec.get("provider") or rec.get("source") or "unknown"
+        # also try name-like provider id against vendor names in index keys
+    if k:
+        rec["key_id"] = k.get("id", "")
+        rec["key_name"] = k.get("name", "")
+    elif v:
+        keys = [x for x in (v.get("keys") or []) if x.get("enabled", True)]
+        if keys:
+            rec["key_id"] = keys[0].get("id", "")
+            rec["key_name"] = keys[0].get("name", "")
+        else:
+            rec["key_id"] = ""
+            rec["key_name"] = ""
+    else:
+        rec["key_id"] = ""
+        rec["key_name"] = ""
+
+
+def _extract_opencode_message(msg_id: str, data_obj: dict) -> Optional[dict]:
+    """Build a usage record from an OpenCode assistant message JSON blob."""
+    if not isinstance(data_obj, dict):
+        return None
+    if data_obj.get("role") and data_obj.get("role") != "assistant":
+        return None
+
+    tokens = data_obj.get("tokens") if isinstance(data_obj.get("tokens"), dict) else {}
+    prompt = int(tokens.get("input") or tokens.get("prompt") or 0)
+    completion = int(tokens.get("output") or tokens.get("completion") or 0)
+    reasoning = int(tokens.get("reasoning") or 0)
+    total = int(tokens.get("total") or 0)
+    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+    cache_read = int((cache or {}).get("read") or 0)
+    cache_write = int((cache or {}).get("write") or 0)
+    if not total:
+        total = prompt + completion + reasoning + cache_read + cache_write
+
+    # skip empty assistant shells (no tokens and no cost)
+    cost = data_obj.get("cost")
+    try:
+        cost_f = float(cost or 0)
+    except Exception:
+        cost_f = 0.0
+    if total <= 0 and cost_f <= 0:
+        # still keep errors as zero-token failures if present
+        if not data_obj.get("error"):
+            return None
+
+    model = (
+        data_obj.get("modelID")
+        or data_obj.get("modelId")
+        or (data_obj.get("model") or {}).get("modelID")
+        or data_obj.get("model")
+        or ""
+    )
+    if isinstance(model, dict):
+        model = model.get("id") or model.get("modelID") or model.get("name") or ""
+    provider = (
+        data_obj.get("providerID")
+        or data_obj.get("providerId")
+        or (data_obj.get("model") or {}).get("providerID")
+        or data_obj.get("provider")
+        or ""
+    )
+    if isinstance(provider, dict):
+        provider = provider.get("id") or provider.get("providerID") or ""
+
+    tinfo = data_obj.get("time") if isinstance(data_obj.get("time"), dict) else {}
+    created = tinfo.get("created") or tinfo.get("completed")
+    completed = tinfo.get("completed")
+    elapsed_ms = 0
+    try:
+        if created and completed:
+            elapsed_ms = max(0, int(completed) - int(created))
+    except Exception:
+        elapsed_ms = 0
+
+    err = data_obj.get("error")
+    success = not bool(err)
+    err_msg = ""
+    if isinstance(err, dict):
+        err_msg = str((err.get("data") or {}).get("message") or err.get("name") or err)[:300]
+    elif err:
+        err_msg = str(err)[:300]
+
+    if not cost_f and total > 0:
+        try:
+            from core.pricing import estimate_cost
+            cost_f = estimate_cost(str(model or ""), prompt, completion, total)
+        except Exception:
+            cost_f = 0.0
+
+    return {
+        "timestamp": _ts_to_iso(created or completed),
+        "provider": str(provider or ""),
+        "model": _normalize_model_name(str(model)) or str(model),
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+        "cost": float(cost_f or 0),
+        "success": success,
+        "status_code": 200 if success else 500,
+        "error": err_msg,
+        "source": "opencode",
+        "source_id": f"opencode:{msg_id}",
+        "elapsed_ms": elapsed_ms,
+    }
+
+
+def import_opencode_usage(db_path: Optional[Path] = None, max_messages: int = 20000) -> dict:
+    """Import usage from OpenCode local SQLite (message.data JSON)."""
+    import sqlite3
+
+    path = db_path or _find_opencode_db()
+    if not path:
+        return {"added": 0, "scanned": 0, "db": None, "total": 0, "skipped": "db_not_found"}
+
+    purge_synthetic_usage()
+    data = _load_data()
+    records = data.setdefault("usage", [])
+    seen = {str(r.get("source_id")) for r in records if r.get("source_id")}
+    for r in records:
+        if r.get("source") == "opencode" and r.get("source_id"):
+            continue
+        fp = f"opencode|{r.get('timestamp')}|{r.get('model')}|{r.get('total_tokens')}|{r.get('provider')}"
+        seen.add(fp)
+
+    index = _build_provider_index()
+    added = 0
+    scanned = 0
+    try:
+        uri = f"file:{path}?mode=ro"
+        con = sqlite3.connect(uri, uri=True)
+        con.row_factory = sqlite3.Row
+        # newest first; cap to avoid huge first import hangs
+        rows = con.execute(
+            "SELECT id, data FROM message ORDER BY time_created DESC LIMIT ?",
+            (int(max_messages),),
+        )
+        for row in rows:
+            scanned += 1
+            mid = str(row["id"] or "")
+            try:
+                blob = json.loads(row["data"] or "{}")
+            except Exception:
+                continue
+            rec = _extract_opencode_message(mid, blob)
+            if not rec:
+                continue
+            sid = rec["source_id"]
+            if sid in seen:
+                continue
+            fp = f"opencode|{rec['timestamp']}|{rec['model']}|{rec['total_tokens']}|{rec['provider']}"
+            if fp in seen:
+                continue
+            _attach_vendor_fields(rec, index)
+            rec["id"] = str(max((int(x.get("id", 0) or 0) for x in records), default=0) + 1)
+            records.append(rec)
+            seen.add(sid)
+            seen.add(fp)
+            added += 1
+        con.close()
+    except Exception as e:
+        log.warning("OpenCode usage import failed: %s", e)
+        return {"added": 0, "scanned": scanned, "db": str(path), "total": len(records), "error": str(e)}
+
+    if added:
+        data["usage"] = records
+        data.setdefault("settings", {})["usage_imported_at"] = datetime.now(timezone.utc).isoformat()
+        _save_data(data)
+        log.info("Imported %d OpenCode usage records (scanned %d messages from %s)", added, scanned, path)
+
+    return {
+        "added": added,
+        "scanned": scanned,
+        "db": str(path),
+        "total": len(records),
+    }
+
+
+def import_all_usage() -> dict:
+    """Import usage from all known backend engines."""
+    purged = purge_synthetic_usage()
+    oc = import_openclaw_usage()
+    opc = import_opencode_usage()
+    return {
+        "purged": purged,
+        "added": int(oc.get("added") or 0) + int(opc.get("added") or 0),
+        "openclaw": oc,
+        "opencode": opc,
+    }

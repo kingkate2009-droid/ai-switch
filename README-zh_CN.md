@@ -15,7 +15,7 @@
 
 ---
 
-统一管理 AI 供应商 API Key，自动同步到所有主流 AI 开发工具（OpenClaw、OpenCode、Claude Code、Codex CLI、Cline、Aider、Continue.dev、Hermes Agent、QwenCode 等）。
+统一管理 AI 供应商 API Key，自动同步到所有主流 AI 开发工具（OpenClaw、OpenCode、Claude Code、Codex CLI、Cline、Aider、Continue.dev、Hermes Agent、QwenCode、Kimi Code 等）。
 
 ## 功能特性
 
@@ -48,7 +48,7 @@ python3 run.py
 
 **要求**: Python 3.9+
 
-**兼容**: OpenClaw 2026.6.11+、OpenCode、Claude Code、Codex CLI、Cline 3.x+、Aider、Continue.dev、Hermes Agent、QwenCode
+**兼容**: OpenClaw 2026.6.11+、OpenCode、Claude Code、Codex CLI、Cline 3.x+、Aider、Continue.dev、Hermes Agent、QwenCode、Kimi Code
 
 ### Docker
 
@@ -107,6 +107,7 @@ deepseek https://api.deepseek.com/v1 sk-xxxx...
 | Continue.dev | `config.json`、`config.yaml`、`.continuerc.json` |
 | Hermes Agent | `config.yaml`、`.env` |
 | QwenCode | `settings.json`、`.env` |
+| Kimi Code | `~/.kimi-code/config.toml`、`tui.toml` |
 
 
 

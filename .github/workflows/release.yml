@@ -7,7 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version override (optional, without v)"
+        description: "Version override (optional, without v). For tags leave empty."
+        required: false
+        default: ""
+      upload_to_tag:
+        description: "Existing tag to upload packages to (e.g. v1.3.0). Optional."
         required: false
         default: ""
 
@@ -24,13 +28,15 @@ jobs:
             platform: linux
             arch: amd64
             artifact_ext: tar.gz
+          # Apple Silicon (current GitHub macos-latest)
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            artifact_ext: tar.gz
+          # Intel mac — use macos-13 only when available; keep fail-fast false
           - os: macos-13
             platform: macos
             arch: amd64
-            artifact_ext: tar.gz
-          - os: macos-14
-            platform: macos
-            arch: arm64
             artifact_ext: tar.gz
           - os: windows-latest
             platform: windows
@@ -38,6 +44,7 @@ jobs:
             artifact_ext: zip
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -64,6 +71,7 @@ jobs:
           else
             V="$(tr -d '[:space:]' < VERSION)"
           fi
+          V="${V#v}"
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "$V" > VERSION
           echo "Building version $V"
@@ -88,33 +96,72 @@ jobs:
           name: ai-switch-${{ steps.ver.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
           path: dist/packages/*
           if-no-files-found: error
+          retention-days: 14
 
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Run even if some matrix cells fail/cancel, as long as workflow isn't fully cancelled
+    # and at least we may have partial artifacts.
+    if: |
+      always()
+      && !cancelled()
+      && (
+        startsWith(github.ref, 'refs/tags/v')
+        || github.event.inputs.upload_to_tag != ''
+      )
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.upload_to_tag }}" ]; then
+            T="${{ github.event.inputs.upload_to_tag }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            T="${GITHUB_REF#refs/tags/}"
+          else
+            V="$(tr -d '[:space:]' < VERSION)"
+            T="v${V#v}"
+          fi
+          [[ "$T" == v* ]] || T="v$T"
+          echo "tag=$T" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $T"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
+        continue-on-error: true
 
       - name: Flatten assets
+        id: assets
         shell: bash
         run: |
           mkdir -p upload
-          find release-assets -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} upload/ \;
-          ls -lah upload/
+          if [ -d release-assets ]; then
+            find release-assets -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp -f {} upload/ \;
+          fi
+          echo "Packages to upload:"
+          ls -lah upload/ || true
+          count=$(find upload -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" = "0" ]; then
+            echo "::error::No package artifacts found to attach"
+            exit 1
+          fi
 
-      - name: Create GitHub Release
+      - name: Publish GitHub Release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
           files: upload/*
           generate_release_notes: true
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

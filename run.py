@@ -55,5 +55,12 @@ if __name__ == "__main__":
             app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
             break
         except OSError:
-            print(f"Port {port} in use, trying {port + 1}...")
+            print(f"Port {port} is already in use.")
+            print(f"  → Trying next port {port + 1}...")
+            print(f"  Tip: stop the other process, or start with AI_SWITCH_PORT={port + 1}")
             port += 1
+
+    print("")
+    print("Could not start: no free port found in range.")
+    print("Set a free port explicitly, e.g.:")
+    print("  AI_SWITCH_PORT=8790 python3 run.py")

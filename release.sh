@@ -67,18 +67,17 @@ echo "Creating tag $VERSION ..."
 git tag -a "$VERSION" -m "Release $VERSION"
 git push origin "$VERSION"
 
-if command -v gh >/dev/null 2>&1; then
-  echo "Creating GitHub Release (assets come from CI) ..."
-  gh release create "$VERSION" \
-    --title "$VERSION" \
-    --generate-notes \
-    --notes "Multi-platform packages (Windows / macOS / Linux) will appear here after CI finishes." \
-    || true
-else
-  echo "gh CLI not found — tag pushed; create release on GitHub UI if needed."
-fi
+# Do NOT create an empty release here — softprops/action-gh-release in CI
+# creates the Release and attaches Win/macOS/Linux packages in one step.
+# Creating an empty release first left users with source-only assets when CI failed.
 
 echo ""
-echo "Release $VERSION started"
-echo "CI builds: https://github.com/kingkate2009-droid/ai-switch/actions"
-echo "Packages:  https://github.com/kingkate2009-droid/ai-switch/releases/tag/$VERSION"
+echo "Tag $VERSION pushed"
+echo "CI will build packages and publish the GitHub Release with installers."
+echo "Watch: https://github.com/kingkate2009-droid/ai-switch/actions"
+echo "When green: https://github.com/kingkate2009-droid/ai-switch/releases/tag/$VERSION"
+if command -v gh >/dev/null 2>&1; then
+  echo ""
+  echo "Tip: re-attach packages to an existing tag without retagging:"
+  echo "  gh workflow run release.yml -f upload_to_tag=$VERSION"
+fi

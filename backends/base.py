@@ -20,10 +20,20 @@ class BackendAdapter:
         Consults per-backend config stored in data.backends.<name>.sync_vendors.
         - "all" or missing => sync all vendors
         - list => only sync vendors whose provider or id is in the list
+        Also skips disabled / known-unhealthy keys so failed system keys
+        never remain in engine configs.
         """
         config = get_backend_config(self.name)
         if config.get("disabled"):
             return False
+        if not key or not key.get("api_key") or key.get("enabled") is False:
+            return False
+        try:
+            from core.health_checker import is_key_backend_syncable
+            if not is_key_backend_syncable(str(vendor.get("id") or ""), key):
+                return False
+        except Exception:
+            pass
         sync = config.get("sync_vendors", "all")
         if not isinstance(sync, list):
             return True

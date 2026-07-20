@@ -21,7 +21,7 @@
 
 ---
 
-A unified management platform for AI provider API keys and development tool backends. Add, detect, and sync your API keys across OpenClaw, OpenCode, Claude Code, Codex CLI, Cline, Aider, Continue.dev, Hermes Agent, QwenCode — all from one place.
+A unified management platform for AI provider API keys and development tool backends. Add, detect, and sync your API keys across OpenClaw, OpenCode, Claude Code, Codex CLI, Cline, Aider, Continue.dev, Hermes Agent, QwenCode, Kimi Code — all from one place.
 
 ## Features
 
@@ -54,7 +54,7 @@ python3 run.py
 
 **Requirements**: Python 3.9+
 
-**Compatible with**: OpenClaw 2026.6.11+, OpenCode, Claude Code, Codex CLI, Cline 3.x+, Aider, Continue.dev, Hermes Agent, QwenCode
+**Compatible with**: OpenClaw 2026.6.11+, OpenCode, Claude Code, Codex CLI, Cline 3.x+, Aider, Continue.dev, Hermes Agent, QwenCode, Kimi Code
 
 ### Docker
 
@@ -113,6 +113,7 @@ Unknown providers default to `openai_chat` probe.
 | Continue.dev | `config.json`, `config.yaml`, `.continuerc.json` |
 | Hermes Agent | `config.yaml`, `.env` |
 | QwenCode | `settings.json`, `.env` |
+| Kimi Code | `~/.kimi-code/config.toml`, `tui.toml` |
 
 
 

@@ -90,6 +90,12 @@ PROVIDERS = [
         "check_type": "openai_chat",
     },
     {
+        "id": "kimi-code",
+        "name": "Kimi Code",
+        "base_url": "https://api.kimi.com/coding/v1",
+        "check_type": "openai_chat",
+    },
+    {
         "id": "zai",
         "name": "Z.AI (GLM / Zhipu)",
         "base_url": "https://open.bigmodel.cn/api/paas/v4",

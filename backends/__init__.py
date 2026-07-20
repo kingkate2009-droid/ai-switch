@@ -89,13 +89,37 @@ def on_vendor_removed(vendor: dict) -> None:
         on_key_removed(vendor, k)
 
 
-def reconcile_all() -> None:
-    from core.data import get_backend_config
+def reconcile_all() -> dict:
+    """Push system keys to backends. Returns per-backend result summary."""
+    from datetime import datetime, timezone
+    from core.data import get_backend_config, _load_data, _save_data
+    import logging
+    log = logging.getLogger(__name__)
+    results = {}
     for adapter in _adapters.values():
+        name = adapter.name
         try:
-            if get_backend_config(adapter.name).get("disabled"):
+            cfg = get_backend_config(name)
+            if cfg.get("disabled"):
+                results[name] = {"ok": False, "skipped": True, "error": "disabled"}
                 continue
             adapter.reconcile()
+            results[name] = {"ok": True, "skipped": False, "error": None}
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning("Backend %s reconcile failed: %s", adapter.name, e)
+            log.warning("Backend %s reconcile failed: %s", name, e)
+            results[name] = {"ok": False, "skipped": False, "error": str(e)[:300]}
+    # persist last push summary in settings
+    try:
+        data = _load_data()
+        settings = data.setdefault("settings", {})
+        settings["last_push"] = {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "results": results,
+            "ok": sum(1 for r in results.values() if r.get("ok")),
+            "fail": sum(1 for r in results.values() if not r.get("ok") and not r.get("skipped")),
+            "skipped": sum(1 for r in results.values() if r.get("skipped")),
+        }
+        _save_data(data)
+    except Exception as e:
+        log.warning("Failed to save last_push: %s", e)
+    return results

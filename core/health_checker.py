@@ -238,28 +238,77 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
     }
 
 
-def check_all_keys() -> list[dict]:
+def is_key_backend_syncable(vendor_id: str, key: dict) -> bool:
+    """Whether a key may be written into backend engine configs.
+
+    - disabled keys: never
+    - known unhealthy (health cache): never (system may still keep the key)
+    - healthy / not-yet-checked: yes (unchecked kept for first-push UX;
+      after full check, failures are removed via on_key_removed + reconcile)
+    """
+    if not key or not key.get("api_key"):
+        return False
+    if key.get("enabled") is False:
+        return False
+    kid = str(key.get("id") or "")
+    if not kid:
+        return False
+    with _lock:
+        cache = _load_cache()
+    h = cache.get(f"{vendor_id}:{kid}") or {}
+    if h.get("healthy") is False:
+        return False
+    return True
+
+
+def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
+    """Push healthy keys; strip unhealthy keys from backend engines (keep in system)."""
+    if not vendor or not key:
+        return
+    if health.get("healthy"):
+        models = health.get("models", [])
+        default_model = health.get("default_model", "") or key.get("default_model", "")
+        updates = {}
+        # Only re-enable when auto-managed success path wants it
+        if key.get("enabled") is False:
+            # leave disabled keys disabled in system, still don't push
+            on_key_removed(vendor, key)
+            return
+        updates["enabled"] = True
+        if models:
+            updates["models"] = models
+        elif not key.get("models") and default_model:
+            updates["models"] = [default_model]
+        if default_model:
+            updates["default_model"] = default_model
+        updated = update_key_data(vendor["id"], key["id"], **updates) or key
+        on_key_updated(vendor, updated)
+    else:
+        # Always remove failed keys from backends so engines match health
+        on_key_removed(vendor, key)
+        try:
+            from core.data import get_settings
+            if bool((get_settings() or {}).get("health_auto_disable")):
+                update_key_data(vendor["id"], key["id"], enabled=False)
+        except Exception:
+            pass
+
+
+def check_all_keys(include_disabled: bool = True) -> list[dict]:
+    """Probe every vendor key. By default includes disabled keys so UI won't stay '未检测'."""
     results = []
 
     for v in get_vendors():
         for k in v.get("keys", []):
+            if not include_disabled and k.get("enabled") is False:
+                continue
             health = check_key_health(v["id"], k["id"])
             results.append(health)
-            if health.get("healthy"):
-                models = health.get("models", [])
-                default_model = health.get("default_model", "") or k.get("default_model", "")
-                updates = {"enabled": True}
-                if models:
-                    updates["models"] = models
-                elif not k.get("models") and default_model:
-                    updates["models"] = [default_model]
-                if default_model:
-                    updates["default_model"] = default_model
-                updated = update_key_data(v["id"], k["id"], **updates) or k
-                on_key_updated(v, updated)
-            else:
-                update_key_data(v["id"], k["id"], enabled=False)
+            # Disabled keys: record health only; never push to backends
+            if k.get("enabled") is False:
                 on_key_removed(v, k)
+                continue
+            apply_health_to_backends(v, k, health)
 
     reconcile_all()
     return results

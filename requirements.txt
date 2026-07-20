@@ -2,3 +2,4 @@ flask>=3.0
 requests>=2.31
 json5>=0.9
 PyYAML>=6.0
+tomli>=2.0; python_version < "3.11"

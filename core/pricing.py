@@ -56,28 +56,106 @@ _PRICING = {
 _DEFAULT = (1.0, 3.0)  # generic fallback when model unknown
 
 
-def _lookup_rates(model: str) -> tuple[float, float]:
+def get_builtin_pricing() -> dict:
+    """Return builtin table as {model: {input, output}} USD / 1M tokens."""
+    return {k: {"input": float(v[0]), "output": float(v[1])} for k, v in _PRICING.items()}
+
+
+def get_user_pricing() -> dict:
+    """User overrides from settings.pricing: {model: {input, output}}."""
+    try:
+        from core.data import get_settings
+        raw = (get_settings() or {}).get("pricing") or {}
+        if not isinstance(raw, dict):
+            return {}
+        out = {}
+        for k, v in raw.items():
+            if not k:
+                continue
+            if isinstance(v, dict):
+                inp = v.get("input", v.get("prompt", v.get("in")))
+                outp = v.get("output", v.get("completion", v.get("out")))
+            elif isinstance(v, (list, tuple)) and len(v) >= 2:
+                inp, outp = v[0], v[1]
+            else:
+                continue
+            try:
+                out[str(k).strip().lower()] = {
+                    "input": float(inp),
+                    "output": float(outp),
+                }
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+def get_pricing_table() -> dict:
+    """Merged pricing: builtin + user overrides (user wins)."""
+    merged = get_builtin_pricing()
+    merged.update(get_user_pricing())
+    return merged
+
+
+_RATES_CACHE = None  # type: Optional[dict]
+_RATES_MODEL_CACHE = {}  # type: dict
+_RATES_CACHE_TS = 0.0
+
+
+def clear_pricing_cache() -> None:
+    global _RATES_CACHE, _RATES_MODEL_CACHE, _RATES_CACHE_TS
+    _RATES_CACHE = None
+    _RATES_MODEL_CACHE = {}
+    _RATES_CACHE_TS = 0.0
+
+
+def _rates_table(force: bool = False):
+    """Cached (input, output) USD/1M rates. Avoid re-reading data.json per record."""
+    global _RATES_CACHE, _RATES_MODEL_CACHE, _RATES_CACHE_TS
+    import time
+    now = time.time()
+    # TTL cache: settings rarely change; do not load multi-MB data.json every estimate
+    if not force and _RATES_CACHE is not None and (now - _RATES_CACHE_TS) < 30.0:
+        return _RATES_CACHE
+    table = {}
+    for k, v in get_pricing_table().items():
+        table[str(k).strip().lower()] = (float(v["input"]), float(v["output"]))
+    _RATES_CACHE = table
+    _RATES_MODEL_CACHE = {}
+    _RATES_CACHE_TS = now
+    return table
+
+
+def _lookup_rates(model: str):
     mid = (model or "").strip().lower()
     if not mid:
         return _DEFAULT
     # strip provider prefix
     if "/" in mid:
         mid = mid.rsplit("/", 1)[-1]
-    if mid in _PRICING:
-        return _PRICING[mid]
+
+    cached = _RATES_MODEL_CACHE.get(mid)
+    if cached is not None:
+        return cached
+
+    table = _rates_table()
+    if mid in table:
+        _RATES_MODEL_CACHE[mid] = table[mid]
+        return table[mid]
     # longest prefix match
     best = ""
     rates = _DEFAULT
-    for key, val in _PRICING.items():
+    for key, val in table.items():
         if mid.startswith(key) and len(key) > len(best):
             best = key
             rates = val
-    if best:
-        return rates
-    for key, val in _PRICING.items():
-        if key in mid and len(key) > len(best):
-            best = key
-            rates = val
+    if not best:
+        for key, val in table.items():
+            if key in mid and len(key) > len(best):
+                best = key
+                rates = val
+    _RATES_MODEL_CACHE[mid] = rates
     return rates
 
 
@@ -117,3 +195,23 @@ def resolve_record_cost(record: dict) -> float:
         int(record.get("completion_tokens") or 0),
         int(record.get("total_tokens") or 0),
     )
+
+
+def fill_missing_costs(records: list) -> int:
+    """Estimate cost for records with missing/zero cost. Returns number estimated."""
+    if not records:
+        return 0
+    _rates_table()  # warm cache once
+    n = 0
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        try:
+            if float(r.get("cost") or 0) > 0:
+                continue
+        except (TypeError, ValueError):
+            pass
+        r["cost"] = resolve_record_cost(r)
+        r["_cost_estimated"] = True
+        n += 1
+    return n

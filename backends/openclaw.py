@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from backends.base import BackendAdapter
-from core.data import get_vendor, get_vendors, add_vendor, add_key, update_key
+from core.data import get_vendor, get_vendors, add_vendor, add_key, update_key, suggest_key_name
 
 log = logging.getLogger(__name__)
 
@@ -512,11 +512,16 @@ class OpenClawAdapter(BackendAdapter):
         new_order = {}
         new_defaults = {}
 
+        from core.health_checker import is_key_backend_syncable
+
         for v in vendors:
             pname = v["provider"]
             api_type = self._get_api_type_for_vendor(v)
             for k in v.get("keys", []):
                 if not k.get("enabled", True) or not k.get("api_key"):
+                    continue
+                # Failed health checks must not remain in OpenClaw config
+                if not is_key_backend_syncable(v["id"], k):
                     continue
                 if not self.should_sync(v, k):
                     continue
@@ -657,19 +662,26 @@ class OpenClawAdapter(BackendAdapter):
         self._save_agent_models(mdata)
 
     def sync_from_backend(self) -> list[dict]:
+        """Return import candidates only — does not write to system data.
+
+        Actual import + dedup is handled by POST /api/sync.
+        """
         cfg = self._load_openclaw_config()
         providers = cfg.get("models", {}).get("providers", {})
         profiles = cfg.get("auth", {}).get("profiles", {})
-        imported = []
+        # Group by provider → vendor candidate
+        by_provider: dict = {}
 
         for ocp_key, entry in providers.items():
             if "@" not in ocp_key:
                 continue
             provider, key_name = ocp_key.split("@", 1)
-            profile = profiles.get(ocp_key, {})
+            profile = profiles.get(ocp_key, {}) if isinstance(profiles, dict) else {}
             api_key = entry.get("apiKey", profile.get("apiKey", ""))
             api_url = entry.get("baseUrl", profile.get("baseUrl", ""))
-            # Detect endpoint_type from provider or profile
+            if not api_key:
+                continue
+
             provider_lower = provider.lower()
             if any(x in provider_lower for x in ("anthropic", "claude")):
                 endpoint_type = "anthropic"
@@ -680,31 +692,33 @@ class OpenClawAdapter(BackendAdapter):
             else:
                 endpoint_type = "openai"
 
-            found_vendor = None
-            for v in get_vendors():
-                if v["provider"] == provider and (v["api_url"] == api_url or not api_url):
-                    found_vendor = v
-                    break
+            if provider not in by_provider:
+                by_provider[provider] = {
+                    "name": provider.replace("-", " ").title(),
+                    "provider": provider,
+                    "api_url": api_url or "",
+                    "endpoint_type": endpoint_type,
+                    "keys": [],
+                    "_seen_secrets": set(),
+                }
+            bucket = by_provider[provider]
+            if not bucket.get("api_url") and api_url:
+                bucket["api_url"] = api_url
+            secret = str(api_key).strip()
+            if secret in bucket["_seen_secrets"]:
+                continue
+            bucket["_seen_secrets"].add(secret)
+            bucket["keys"].append({
+                "name": key_name or f"from {self.name}",
+                "api_key": api_key,
+            })
 
-            if not found_vendor:
-                found_vendor = add_vendor(
-                    name=provider.replace("-", " ").title(),
-                    provider=provider,
-                    api_url=api_url,
-                    endpoint_type=endpoint_type,
-                )
-
-            if api_key and key_name:
-                key_exists = any(
-                    k["name"] == key_name or k["api_key"] == api_key
-                    for k in found_vendor.get("keys", [])
-                )
-                if not key_exists:
-                    k = add_key(found_vendor["id"], key_name, api_key)
-                    if k:
-                        imported.append(found_vendor)
-
-        return imported
+        out = []
+        for item in by_provider.values():
+            item.pop("_seen_secrets", None)
+            if item.get("keys"):
+                out.append(item)
+        return out
 
     def get_status(self) -> dict:
         try:

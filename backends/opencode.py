@@ -254,12 +254,15 @@ class OpenCodeAdapter(BackendAdapter):
         return block
 
     def _pick_best_key(self, vendor: dict) -> Optional[dict]:
-        """Prefer enabled key that has models list."""
+        """Prefer healthy, enabled key that has models list."""
         from core.data import get_enabled_models
+        from core.health_checker import is_key_backend_syncable
         best = None
         best_score = -1
         for k in vendor.get("keys", []):
             if not k.get("enabled", True) or not k.get("api_key"):
+                continue
+            if not is_key_backend_syncable(vendor.get("id") or "", k):
                 continue
             score = 0
             models = get_enabled_models(k)
