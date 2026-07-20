@@ -28,15 +28,10 @@ jobs:
             platform: linux
             arch: amd64
             artifact_ext: tar.gz
-          # Apple Silicon (current GitHub macos-latest)
+          # Apple Silicon (macos-latest). Avoid macos-13 — often stuck in queue for hours.
           - os: macos-latest
             platform: macos
             arch: arm64
-            artifact_ext: tar.gz
-          # Intel mac — use macos-13 only when available; keep fail-fast false
-          - os: macos-13
-            platform: macos
-            arch: amd64
             artifact_ext: tar.gz
           - os: windows-latest
             platform: windows
