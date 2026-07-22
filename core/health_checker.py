@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core.data import (
     get_enabled_models,
+    get_settings,
     get_vendor,
     get_vendors,
     list_model_ids,
@@ -24,6 +25,82 @@ from backends import reconcile_all, on_key_updated, on_key_removed
 DATA_DIR = Path.home() / ".ai-switch"
 HEALTH_CACHE_PATH = DATA_DIR / "health_cache.json"
 _lock = threading.Lock()
+
+# Default network retries (total attempts = 1 + retries, but we treat as max attempts)
+_DEFAULT_NETWORK_RETRIES = 3
+_RETRY_BACKOFF_BASE = 0.6  # seconds; attempt 1 wait 0.6, then 1.2, ...
+
+
+def _network_retry_attempts() -> int:
+    """Max attempts for network-ish probe failures. Default 3, clamped 1..10."""
+    try:
+        n = int((get_settings() or {}).get("health_network_retries", _DEFAULT_NETWORK_RETRIES))
+    except Exception:
+        n = _DEFAULT_NETWORK_RETRIES
+    return max(1, min(10, n))
+
+
+def _is_network_error(msg: str) -> bool:
+    """Whether a probe error looks transient/network (safe to retry)."""
+    s = (msg or "").lower()
+    if not s:
+        return False
+    # explicit auth / quota / model should not retry
+    if any(x in s for x in (
+        "auth failed", "http 401", "http 403", "unauthorized", "forbidden",
+        "invalid api", "quota", "billing", "insufficient", "payment",
+        "no compatible model", "model '", "not found",
+    )):
+        # 403 access blocked is not network; 403 sometimes transient but usually not
+        if "blocked" in s or "auth" in s or "401" in s or "403" in s:
+            return False
+    needles = (
+        "timeout", "timed out", "connection", "connect", "network", "dns",
+        "refused", "reset", "broken pipe", "temporarily unavailable",
+        "ssl", "tls", "certificate", "ssleof", "eof occurred",
+        "wrong version number", "unexpected_eof", "max retries",
+        "httpsconnectionpool", "connectionpool", "name resolution",
+        "nodename nor servname", "temporary failure", "proxy",
+        "remote end closed", "connection aborted", "read timed out",
+    )
+    return any(n in s for n in needles)
+
+
+def _probe_with_retry(check_type: str, api_url: str, api_key: str, models_to_try=None) -> tuple:
+    """Call probe_provider; retry only on network-ish failures."""
+    attempts = _network_retry_attempts()
+    last_err = ""
+    healthy, msg = False, ""
+    for i in range(attempts):
+        healthy, msg = probe_provider(check_type, api_url, api_key, models_to_try)
+        if healthy:
+            if i > 0:
+                # annotate success after retry for UI/debug
+                msg = (msg or "") + f" (retry {i + 1}/{attempts})"
+            return healthy, msg
+        last_err = msg or ""
+        if not _is_network_error(last_err):
+            return False, last_err
+        if i + 1 >= attempts:
+            break
+        time.sleep(_RETRY_BACKOFF_BASE * (i + 1))
+    return False, f"{last_err} (after {attempts} attempts)" if last_err else f"Network error (after {attempts} attempts)"
+
+
+def _probe_model_with_retry(check_type: str, api_url: str, api_key: str, model: str) -> tuple:
+    attempts = _network_retry_attempts()
+    last_err = ""
+    for i in range(attempts):
+        healthy, msg = probe_single_model(check_type, api_url, api_key, model)
+        if healthy:
+            return healthy, msg
+        last_err = msg or ""
+        if not _is_network_error(last_err):
+            return False, last_err
+        if i + 1 >= attempts:
+            break
+        time.sleep(_RETRY_BACKOFF_BASE * (i + 1))
+    return False, f"{last_err} (after {attempts} attempts)" if last_err else f"Network error (after {attempts} attempts)"
 
 
 def _load_cache() -> dict:
@@ -91,7 +168,7 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
         models_to_try = None
 
     start = time.time()
-    healthy, error_msg = probe_provider(check_type, api_url, api_key, models_to_try)
+    healthy, error_msg = _probe_with_retry(check_type, api_url, api_key, models_to_try)
     latency_ms = int((time.time() - start) * 1000)
 
     models = []
@@ -114,6 +191,17 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
             pass
 
     cache_key = f"{vendor_id}:{key_id}"
+    # When healthy and we scanned models, persist inventory immediately so
+    # models modal / vendor UI don't need a second round-trip to see them.
+    if healthy and models:
+        try:
+            updates = {"models": models}
+            if default_model:
+                updates["default_model"] = default_model
+            update_key_data(vendor_id, key_id, **updates)
+        except Exception:
+            pass
+
     result = {
         "key_id": key_id,
         "vendor_id": vendor_id,
@@ -171,7 +259,7 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
 
     for mid in models:
         start = time.time()
-        healthy, msg = probe_single_model(check_type, api_url, api_key, mid)
+        healthy, msg = _probe_model_with_retry(check_type, api_url, api_key, mid)
         latency_ms = int((time.time() - start) * 1000)
         entry = {
             "model": mid,
@@ -262,19 +350,13 @@ def is_key_backend_syncable(vendor_id: str, key: dict) -> bool:
 
 
 def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
-    """Push healthy keys; strip unhealthy keys from backend engines (keep in system)."""
+    """Push healthy keys (auto-enable + sync); strip unhealthy from backends (keep in system)."""
     if not vendor or not key:
         return
     if health.get("healthy"):
         models = health.get("models", [])
         default_model = health.get("default_model", "") or key.get("default_model", "")
-        updates = {}
-        # Only re-enable when auto-managed success path wants it
-        if key.get("enabled") is False:
-            # leave disabled keys disabled in system, still don't push
-            on_key_removed(vendor, key)
-            return
-        updates["enabled"] = True
+        updates = {"enabled": True}
         if models:
             updates["models"] = models
         elif not key.get("models") and default_model:
@@ -282,6 +364,15 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
         if default_model:
             updates["default_model"] = default_model
         updated = update_key_data(vendor["id"], key["id"], **updates) or key
+        # mark response for UI
+        try:
+            health["enabled"] = True
+            if updates.get("models") is not None:
+                health["models"] = updates["models"]
+            if updates.get("default_model"):
+                health["default_model"] = updates["default_model"]
+        except Exception:
+            pass
         on_key_updated(vendor, updated)
     else:
         # Always remove failed keys from backends so engines match health
@@ -290,12 +381,13 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
             from core.data import get_settings
             if bool((get_settings() or {}).get("health_auto_disable")):
                 update_key_data(vendor["id"], key["id"], enabled=False)
+                health["enabled"] = False
         except Exception:
             pass
 
 
 def check_all_keys(include_disabled: bool = True) -> list[dict]:
-    """Probe every vendor key. By default includes disabled keys so UI won't stay '未检测'."""
+    """Probe every vendor key. Healthy keys are auto-enabled and synced to backends."""
     results = []
 
     for v in get_vendors():
@@ -304,13 +396,15 @@ def check_all_keys(include_disabled: bool = True) -> list[dict]:
                 continue
             health = check_key_health(v["id"], k["id"])
             results.append(health)
-            # Disabled keys: record health only; never push to backends
-            if k.get("enabled") is False:
-                on_key_removed(v, k)
-                continue
+            # Always apply: healthy → enable + push; unhealthy → strip backends
             apply_health_to_backends(v, k, health)
 
     reconcile_all()
+    try:
+        from core.downstream import rebuild_all_downstream_routes
+        rebuild_all_downstream_routes()
+    except Exception:
+        pass
     return results
 
 

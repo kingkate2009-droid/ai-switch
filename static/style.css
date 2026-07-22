@@ -2333,7 +2333,22 @@ body.is-readonly .btn-warning { opacity: .85; }
   50% { transform: scale(1.15); opacity: .75; }
 }
 .hm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.hm-stat-grid { margin-bottom: 10px; }
+.hm-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.hm-stat-grid .stat-card {
+  padding: 12px 14px;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .hm-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .hm-stat-grid { grid-template-columns: 1fr 1fr; }
+}
 .hm-meta { font-size: 12px; color: var(--text2); padding: 0 2px 8px; }
 .hm-search {
   min-width: 180px;
@@ -2360,3 +2375,58 @@ body.is-readonly .btn-warning { opacity: .85; }
 }
 .badge-ok { background: var(--success-dim, rgba(34,197,94,.12)); color: var(--success, #16a34a); }
 .badge-fail { background: var(--danger-dim, rgba(239,68,68,.12)); color: var(--danger, #dc2626); }
+
+.ds-model-list {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ds-model-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.ds-model-item:hover { background: var(--bg2); }
+.ds-model-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
+  align-self: center;
+}
+.ds-model-name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.ds-model-item code {
+  min-width: 0;
+  word-break: break-all;
+  line-height: 1.35;
+}
+.ds-model-item .form-hint {
+  margin: 0;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.checkbox-row { display: flex; flex-direction: column; gap: 8px; }
+.checkbox-row .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.checkbox-row .checkbox-label input {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+}

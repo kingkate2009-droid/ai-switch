@@ -372,6 +372,54 @@ def api_write_backend_config(name):
         return jsonify({"error": str(e)}), 500
 
 
+# ── Codex CLI Provider Switch ─────────────────────────────
+
+@app.route("/api/backends/codex-cli/providers", methods=["GET"])
+def api_codex_list_providers():
+    """List all configured providers for Codex CLI."""
+    adapter = get_backend("codex-cli")
+    if not adapter:
+        return jsonify({"error": "codex-cli backend not available"}), 404
+    providers = adapter.list_providers()
+    active = adapter.get_active_provider()
+    return jsonify({
+        "providers": providers,
+        "active_provider": active.get("active_provider", ""),
+    })
+
+
+@app.route("/api/backends/codex-cli/switch-provider", methods=["POST"])
+def api_codex_switch_provider():
+    """Switch the active provider for Codex CLI.
+
+    Body: { "provider_id": "aiswitch-2" }
+    or:   { "vendor_id": "2", "key_id": "optional" }
+    """
+    adapter = get_backend("codex-cli")
+    if not adapter:
+        return jsonify({"error": "codex-cli backend not available"}), 404
+
+    body = request.get_json() or {}
+    provider_id = body.get("provider_id", "")
+    vendor_id = body.get("vendor_id", "")
+    key_id = body.get("key_id", "")
+
+    if not provider_id and not vendor_id:
+        return jsonify({"error": "provider_id or vendor_id required"}), 400
+
+    result = adapter.switch_provider(
+        provider_id=provider_id,
+        vendor_id=vendor_id,
+        key_id=key_id,
+    )
+
+    if result.get("success"):
+        log_event("codex.switch_provider", provider=result.get("active_provider"))
+        return jsonify(result)
+    else:
+        return jsonify(result), 400
+
+
 # ── Vendors ────────────────────────────────────────────────
 
 
@@ -602,8 +650,18 @@ def api_check_key_health(vendor_id, key_id):
     v = get_vendor(vendor_id)
     k = get_key(vendor_id, key_id)
     if v and k:
-        # Healthy → push backends; unhealthy → strip from backends (keep in system)
+        # Healthy → auto-enable + push backends; unhealthy → strip from backends (keep in system)
         apply_health_to_backends(v, k, health)
+        # reload key after enable/models update so response reflects persisted state
+        k = get_key(vendor_id, key_id) or k
+        if k:
+            health["key_enabled"] = k.get("enabled") is not False
+            if k.get("models") is not None:
+                health["models"] = k.get("models") or health.get("models") or []
+            if k.get("default_model"):
+                health["default_model"] = k.get("default_model")
+            if k.get("disabled_models") is not None:
+                health["disabled_models"] = k.get("disabled_models") or []
         if not health.get("healthy"):
             settings = get_settings() or {}
             # optional: promote backup when primary fails
@@ -628,6 +686,11 @@ def api_check_key_health(vendor_id, key_id):
     # Progressive full-check skips per-key reconcile (client does one final /api/sync/push)
     if request.args.get("reconcile", "1") != "0":
         reconcile_all()
+        try:
+            from core.downstream import rebuild_all_downstream_routes
+            rebuild_all_downstream_routes()
+        except Exception:
+            pass
     return jsonify(health)
 
 
@@ -929,6 +992,78 @@ def api_health_history():
     return jsonify(list_runs(limit=limit_i, offset=offset_i))
 
 
+@app.route("/api/health/history", methods=["POST"])
+def api_health_history_append():
+    """Record a progressive / UI-driven full check into history.
+
+    Body: { source?, started_at?, results?: [{vendor_id,key_id,healthy,latency_ms,error}] }
+    or { ok, fail, total, duration_ms, failures? }
+    """
+    from core.health_history import append_run, summarize_results
+    from datetime import datetime, timezone
+    body = request.get_json(silent=True) or {}
+    source = str(body.get("source") or "manual").strip() or "manual"
+    results = body.get("results") if isinstance(body.get("results"), list) else []
+    compact = []
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        compact.append({
+            "vendor_id": r.get("vendor_id"),
+            "key_id": r.get("key_id"),
+            "healthy": r.get("healthy"),
+            "latency_ms": r.get("latency_ms"),
+            "error": (r.get("error") or "")[:200] if r.get("healthy") is False else None,
+        })
+    if compact:
+        summary = summarize_results(compact)
+    else:
+        summary = {
+            "ok": int(body.get("ok") or 0),
+            "fail": int(body.get("fail") or 0),
+            "unknown": int(body.get("unknown") or 0),
+            "total": int(body.get("total") or 0),
+            "failures": body.get("failures") if isinstance(body.get("failures"), list) else [],
+        }
+    started = body.get("started_at") or datetime.now(timezone.utc).isoformat()
+    finished = body.get("finished_at") or datetime.now(timezone.utc).isoformat()
+    duration_ms = body.get("duration_ms")
+    try:
+        duration_ms = int(duration_ms) if duration_ms is not None else None
+    except Exception:
+        duration_ms = None
+    rec = append_run({
+        "source": source,
+        "started_at": started,
+        "finished_at": finished,
+        "duration_ms": duration_ms,
+        "ok": summary.get("ok", 0),
+        "fail": summary.get("fail", 0),
+        "unknown": summary.get("unknown", 0),
+        "total": summary.get("total", 0),
+        "failures": summary.get("failures") or [],
+        "results": compact,
+    })
+    # update in-memory scheduler summary so status page shows last run
+    try:
+        from core import scheduler as _sched
+        _sched._state["last_finished_at"] = rec.get("finished_at")
+        _sched._state["last_summary"] = {
+            "ok": summary.get("ok", 0),
+            "fail": summary.get("fail", 0),
+            "unknown": summary.get("unknown", 0),
+            "total": summary.get("total", 0),
+            "duration_ms": duration_ms,
+            "source": source,
+        }
+        _sched._state["last_run_id"] = rec.get("id")
+        _sched._state["runs_count"] = int(_sched._state.get("runs_count") or 0) + 1
+    except Exception:
+        pass
+    log_event("health.history_append", source=source, ok=summary.get("ok"), fail=summary.get("fail"))
+    return jsonify({"ok": True, "run_id": rec.get("id"), "summary": summary})
+
+
 @app.route("/api/health/history/<run_id>", methods=["GET"])
 def api_health_history_detail(run_id):
     from core.health_history import get_run
@@ -1006,6 +1141,8 @@ def api_batch_apply():
                 created.append({
                     "vendor": (ev or {}).get("name") or vendor_name or provider,
                     "key": (ek or {}).get("name") or name,
+                    "vendor_id": (ev or {}).get("id"),
+                    "key_id": (ek or {}).get("id"),
                     "api_key": api_key[:8] + "...",
                     "skipped": True,
                     "reason": "duplicate_secret",
@@ -1062,6 +1199,8 @@ def api_batch_apply():
                 created.append({
                     "vendor": (ev.get("name") if ev else None) or vendor.get("name"),
                     "key": (ek.get("name") if ek else None) or name,
+                    "vendor_id": (ev or {}).get("id") or vendor.get("id"),
+                    "key_id": (ek or {}).get("id"),
                     "api_key": api_key[:8] + "...",
                     "skipped": True,
                     "reason": "duplicate_secret",
@@ -1089,6 +1228,8 @@ def api_batch_apply():
                     created.append({
                         "vendor": vendor["name"],
                         "key": name,
+                        "vendor_id": vendor.get("id"),
+                        "key_id": k.get("id"),
                         "api_key": api_key[:8] + "...",
                         "healthy": health.get("healthy"),
                     })
@@ -1096,6 +1237,8 @@ def api_batch_apply():
                     created.append({
                         "vendor": vendor["name"],
                         "key": name,
+                        "vendor_id": vendor.get("id"),
+                        "key_id": (k or {}).get("id") if k else None,
                         "api_key": api_key[:8] + "...",
                         "skipped": True,
                         "reason": "duplicate_or_add_failed",
@@ -1104,13 +1247,31 @@ def api_batch_apply():
             log.error("Batch import entry failed: %s", e)
             errors.append({"entry": name, "error": str(e)})
 
+    focus_vendor_id = None
+    for c in reversed(created):
+        if c.get("skipped"):
+            continue
+        if c.get("vendor_id"):
+            focus_vendor_id = c["vendor_id"]
+            break
+    if not focus_vendor_id:
+        for c in reversed(created):
+            if c.get("vendor_id"):
+                focus_vendor_id = c["vendor_id"]
+                break
+
     log_event(
         "batch.import",
         imported=sum(1 for c in created if not c.get("skipped")),
         skipped=sum(1 for c in created if c.get("skipped")),
         errors=len(errors),
     )
-    return jsonify({"created": created, "errors": errors, "count": len(created)})
+    return jsonify({
+        "created": created,
+        "errors": errors,
+        "count": len(created),
+        "focus_vendor_id": focus_vendor_id,
+    })
 
 
 
@@ -1266,6 +1427,8 @@ def api_sync():
     total_skipped = 0
     results = {}
 
+    focus_vendor_ids = []
+
     def _import_one(src_backend: str, v: dict, k: dict) -> str:
         """Return 'added' | 'skipped'."""
         nonlocal total_added, total_skipped
@@ -1294,8 +1457,13 @@ def api_sync():
         entry = add_key(vendor_id, raw_name, secret)
         if not entry or entry.get("_existing"):
             total_skipped += 1
+            # Still track vendor_id for focus even when key already exists
+            if vendor_id and vendor_id not in focus_vendor_ids:
+                focus_vendor_ids.append(vendor_id)
             return "skipped"
         total_added += 1
+        if vendor_id and vendor_id not in focus_vendor_ids:
+            focus_vendor_ids.append(vendor_id)
         models = k.get("models")
         if models:
             try:
@@ -1347,11 +1515,14 @@ def api_sync():
                 results[name] = {"error": str(e)}
 
     log_event("sync.import", added=total_added, skipped=total_skipped)
+    focus_vendor_id = focus_vendor_ids[-1] if focus_vendor_ids else None
     return jsonify({
         "synced": total_added,
         "skipped": total_skipped,
         "results": results,
         "manual_only": True,
+        "focus_vendor_id": focus_vendor_id,
+        "focus_vendor_ids": focus_vendor_ids,
     })
 
 
@@ -1620,6 +1791,297 @@ def api_delete_profile(name):
     return jsonify({"ok": True})
 
 
+# ── Downstream keys (routing aggregate) ─────────────────────
+
+@app.route("/api/downstream", methods=["GET"])
+def api_list_downstream():
+    from core.downstream import list_downstream_keys
+    return jsonify({"keys": list_downstream_keys(include_secret=False)})
+
+
+@app.route("/api/downstream", methods=["POST"])
+def api_create_downstream():
+    from core.downstream import create_downstream_key
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    entry = create_downstream_key(
+        name,
+        endpoint_types=data.get("endpoint_types"),
+        selected_models=data.get("selected_models"),
+        auto_update=bool(data.get("auto_update", True)),
+        notes=str(data.get("notes") or ""),
+        enabled=bool(data.get("enabled", True)),
+    )
+    log_event("downstream.create", id=entry.get("id"), name=entry.get("name"))
+    # return secret once on create
+    return jsonify(entry), 201
+
+
+@app.route("/api/downstream/models", methods=["GET"])
+def api_downstream_available_models():
+    from core.downstream import available_models_catalog
+    return jsonify(available_models_catalog())
+
+
+@app.route("/api/downstream/<key_id>", methods=["GET"])
+def api_get_downstream(key_id):
+    from core.downstream import get_downstream_key
+    include = request.args.get("secret") == "1"
+    d = get_downstream_key(key_id, include_secret=include)
+    if not d:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(d)
+
+
+@app.route("/api/downstream/<key_id>", methods=["PUT"])
+def api_update_downstream(key_id):
+    from core.downstream import update_downstream_key
+    data = request.get_json(silent=True) or {}
+    entry = update_downstream_key(
+        key_id,
+        name=data.get("name"),
+        enabled=data.get("enabled") if "enabled" in data else None,
+        auto_update=data.get("auto_update") if "auto_update" in data else None,
+        notes=data.get("notes") if "notes" in data else None,
+        endpoint_types=data.get("endpoint_types") if "endpoint_types" in data else None,
+        selected_models=data.get("selected_models") if "selected_models" in data else None,
+        rotate_secret=bool(data.get("rotate_secret")),
+        rebuild=bool(data.get("rebuild", True)),
+    )
+    if not entry:
+        return jsonify({"error": "not found"}), 404
+    # strip None-only updates: update_downstream_key treats missing differently
+    # Re-call more carefully if only partial fields - already handled inside
+    log_event("downstream.update", id=key_id)
+    out = dict(entry)
+    if not data.get("rotate_secret") and "api_key" in out:
+        sec = out.get("api_key") or ""
+        out["api_key_preview"] = (sec[:12] + "…" + sec[-4:]) if len(sec) > 18 else (sec[:8] + "…")
+        out.pop("api_key", None)
+    return jsonify(out)
+
+
+@app.route("/api/downstream/<key_id>", methods=["DELETE"])
+def api_delete_downstream(key_id):
+    from core.downstream import delete_downstream_key
+    if not delete_downstream_key(key_id):
+        return jsonify({"error": "not found"}), 404
+    log_event("downstream.delete", id=key_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/downstream/<key_id>/rebuild", methods=["POST"])
+def api_rebuild_downstream(key_id):
+    from core.downstream import rebuild_downstream_routes
+    entry = rebuild_downstream_routes(key_id)
+    if not entry:
+        return jsonify({"error": "not found"}), 404
+    log_event("downstream.rebuild", id=key_id, routes=entry.get("route_source_count"))
+    out = dict(entry)
+    if "api_key" in out:
+        sec = out.pop("api_key") or ""
+        out["api_key_preview"] = (sec[:12] + "…" + sec[-4:]) if len(sec) > 18 else (sec[:8] + "…")
+    return jsonify(out)
+
+
+@app.route("/api/downstream/rebuild-all", methods=["POST"])
+def api_rebuild_all_downstream():
+    from core.downstream import rebuild_all_downstream_routes
+    result = rebuild_all_downstream_routes()
+    log_event("downstream.rebuild_all", **result)
+    return jsonify(result)
+
+
+# ── Public OpenAI / Anthropic compatible API ───────────────
+
+def _extract_bearer():
+    auth = request.headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    # Anthropic uses x-api-key
+    xk = request.headers.get("x-api-key") or request.headers.get("X-Api-Key") or ""
+    if xk:
+        return xk.strip()
+    return auth.strip()
+
+
+def _downstream_auth():
+    from core.downstream import find_downstream_by_secret
+    secret = _extract_bearer()
+    if not secret:
+        return None, (jsonify({"error": {"message": "Missing API key", "type": "auth_error"}}), 401)
+    d = find_downstream_by_secret(secret)
+    if not d:
+        return None, (jsonify({"error": {"message": "Invalid API key", "type": "auth_error"}}), 401)
+    if d.get("enabled") is False:
+        return None, (jsonify({"error": {"message": "API key disabled", "type": "auth_error"}}), 403)
+    return d, None
+
+
+def _join_url(base: str, *parts: str) -> str:
+    url = (base or "").rstrip("/")
+    for p in parts:
+        sp = (p or "").lstrip("/")
+        if not sp:
+            continue
+        last = url.split("/")[-1] if url else ""
+        if last and sp.startswith(last + "/"):
+            sp = sp[len(last) + 1:]
+        elif last == sp.split("/")[0] and "/" in sp:
+            # avoid /v1/v1/...
+            pass
+        url = url.rstrip("/") + "/" + sp
+    return url
+
+
+def _proxy_upstream(vendor: dict, key: dict, *, path: str, body: bytes, headers: dict, stream: bool):
+    api_url = (vendor.get("proxy_target") or vendor.get("api_url") or "").rstrip("/")
+    if not api_url:
+        raise ValueError("upstream has no api_url")
+    url = _join_url(api_url, path)
+    hdrs = {k: v for k, v in headers.items() if k.lower() not in ("host", "content-length", "authorization", "x-api-key")}
+    # inject upstream auth
+    ep = (vendor.get("endpoint_type") or "openai").lower()
+    if ep in ("anthropic", "claude"):
+        hdrs["x-api-key"] = key["api_key"]
+        hdrs.setdefault("anthropic-version", request.headers.get("anthropic-version") or "2023-06-01")
+        hdrs["content-type"] = "application/json"
+    else:
+        hdrs["Authorization"] = "Bearer " + key["api_key"]
+        hdrs["content-type"] = "application/json"
+    r = py_requests.request(
+        method=request.method if request.method != "GET" else "POST",
+        url=url,
+        headers=hdrs,
+        data=body,
+        stream=stream,
+        verify=False,
+        timeout=120,
+    )
+    return r, url
+
+
+@app.route("/v1/models", methods=["GET"])
+@app.route("/api/v1/models", methods=["GET"])
+def api_public_models():
+    d, err = _downstream_auth()
+    if err:
+        return err
+    from core.downstream import list_models_for_downstream
+    models = list_models_for_downstream(d)
+    return jsonify({"object": "list", "data": models})
+
+
+@app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
+@app.route("/api/v1/chat/completions", methods=["POST", "OPTIONS"])
+def api_public_chat_completions():
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    d, err = _downstream_auth()
+    if err:
+        return err
+    if "openai" not in (d.get("endpoint_types") or ["openai"]):
+        return jsonify({"error": {"message": "This key does not allow OpenAI endpoint", "type": "invalid_request_error"}}), 400
+    body_json = request.get_json(silent=True) or {}
+    model = (body_json.get("model") or "").strip()
+    if not model:
+        return jsonify({"error": {"message": "model is required", "type": "invalid_request_error"}}), 400
+    from core.downstream import resolve_route
+    hit = resolve_route(d, model, endpoint_type="openai")
+    if not hit:
+        return jsonify({"error": {"message": f"No healthy upstream for model '{model}'", "type": "model_not_found"}}), 404
+    stream = bool(body_json.get("stream"))
+    raw = request.get_data()
+    t0 = datetime.now()
+    try:
+        r, url = _proxy_upstream(
+            hit["vendor"], hit["key"],
+            path="chat/completions",
+            body=raw,
+            headers=dict(request.headers),
+            stream=stream,
+        )
+        elapsed_ms = int((datetime.now() - t0).total_seconds() * 1000)
+        ok = 200 <= r.status_code < 400
+        if stream:
+            chunks = []
+            def _gen():
+                for chunk in r.iter_content(chunk_size=None):
+                    if chunk:
+                        chunks.append(chunk)
+                        yield chunk
+            resp = Response(_gen(), status=r.status_code, content_type=r.headers.get("Content-Type", "text/event-stream"))
+            @resp.call_on_close
+            def _done():
+                full = b"".join(chunks)
+                last = _parse_sse_last_chunk(full)
+                if last:
+                    _record_proxy_usage(hit["vendor"], hit["key"], json.dumps(last).encode(), elapsed_ms, model=model, status_code=r.status_code, success=ok)
+                else:
+                    _record_proxy_usage(hit["vendor"], hit["key"], full or b"{}", elapsed_ms, model=model, status_code=r.status_code, success=ok)
+            return resp
+        _record_proxy_usage(hit["vendor"], hit["key"], r.content, elapsed_ms, model=model, status_code=r.status_code, success=ok)
+        return Response(r.content, status=r.status_code, content_type=r.headers.get("Content-Type", "application/json"))
+    except Exception as e:
+        _record_proxy_usage(hit["vendor"], hit["key"], json.dumps({"error": str(e)}).encode(), 0, model=model, status_code=502, success=False)
+        return jsonify({"error": {"message": str(e), "type": "api_error"}}), 502
+
+
+@app.route("/v1/messages", methods=["POST", "OPTIONS"])
+@app.route("/api/v1/messages", methods=["POST", "OPTIONS"])
+def api_public_messages():
+    """Anthropic Messages API compatible endpoint."""
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    d, err = _downstream_auth()
+    if err:
+        return err
+    if "anthropic" not in (d.get("endpoint_types") or []):
+        return jsonify({"type": "error", "error": {"type": "invalid_request_error", "message": "This key does not allow Anthropic endpoint"}}), 400
+    body_json = request.get_json(silent=True) or {}
+    model = (body_json.get("model") or "").strip()
+    if not model:
+        return jsonify({"type": "error", "error": {"type": "invalid_request_error", "message": "model is required"}}), 400
+    from core.downstream import resolve_route
+    hit = resolve_route(d, model, endpoint_type="anthropic")
+    if not hit:
+        return jsonify({"type": "error", "error": {"type": "not_found_error", "message": f"No healthy upstream for model '{model}'"}}), 404
+    stream = bool(body_json.get("stream"))
+    raw = request.get_data()
+    t0 = datetime.now()
+    try:
+        r, url = _proxy_upstream(
+            hit["vendor"], hit["key"],
+            path="messages" if "anthropic" in (hit.get("endpoint_type") or "") or (hit["vendor"].get("endpoint_type") or "") == "anthropic" else "v1/messages",
+            body=raw,
+            headers=dict(request.headers),
+            stream=stream,
+        )
+        # if upstream is openai-compatible only, rewrite path to chat/completions is not done here —
+        # user should pick models from anthropic-capable vendors
+        elapsed_ms = int((datetime.now() - t0).total_seconds() * 1000)
+        ok = 200 <= r.status_code < 400
+        if stream:
+            chunks = []
+            def _gen():
+                for chunk in r.iter_content(chunk_size=None):
+                    if chunk:
+                        chunks.append(chunk)
+                        yield chunk
+            resp = Response(_gen(), status=r.status_code, content_type=r.headers.get("Content-Type", "text/event-stream"))
+            @resp.call_on_close
+            def _done():
+                full = b"".join(chunks)
+                _record_proxy_usage(hit["vendor"], hit["key"], full or b"{}", elapsed_ms, model=model, status_code=r.status_code, success=ok)
+            return resp
+        _record_proxy_usage(hit["vendor"], hit["key"], r.content, elapsed_ms, model=model, status_code=r.status_code, success=ok)
+        return Response(r.content, status=r.status_code, content_type=r.headers.get("Content-Type", "application/json"))
+    except Exception as e:
+        return jsonify({"type": "error", "error": {"type": "api_error", "message": str(e)}}), 502
+
+
 # ── Proxy ──────────────────────────────────────────────────
 
 def _match_vendor_key(auth):
@@ -1858,6 +2320,11 @@ def api_update_settings():
             data["check_interval_seconds"] = max(60, int(data["check_interval_seconds"]))
         except Exception:
             data["check_interval_seconds"] = 300
+    if "health_network_retries" in data:
+        try:
+            data["health_network_retries"] = max(1, min(10, int(data["health_network_retries"])))
+        except Exception:
+            data["health_network_retries"] = 3
     if "access_token" in data:
         # empty string clears token
         data["access_token"] = str(data.get("access_token") or "").strip()

@@ -448,6 +448,7 @@ _SETTINGS_KEYS = (
     "check_interval_seconds",
     "health_check_enabled",  # bool, default False — optional scheduled health checks
     "health_auto_disable",   # bool, default False — auto-disable keys on failed health check
+    "health_network_retries",  # int, default 3 — max attempts on network/SSL/timeout failures
     "access_token",          # str, empty = no auth
     "onboarding_done",       # bool
     "read_only",             # bool, default False — block mutating APIs except settings/auth
@@ -1042,6 +1043,7 @@ _POLICY_FIELD_KEYS = (
     "health_check_enabled",
     "health_auto_disable",
     "health_auto_failover",
+    "health_network_retries",
     "read_only",
     "budget_daily_cost",
     "budget_monthly_cost",

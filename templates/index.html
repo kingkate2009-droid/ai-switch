@@ -57,6 +57,10 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="20" cy="18" r="2"/></svg>
         <span data-i18n="nav.models">{{ t('nav.models') }}</span>
       </a>
+      <a href="#" class="nav-item" data-view="routes" onclick="switchView('routes');return false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-7 6M12 11l7 6"/></svg>
+        <span data-i18n="nav.routes">{{ t('nav.routes') }}</span>
+      </a>
       <a href="#" class="nav-item" data-view="health" onclick="switchView('health');return false">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         <span data-i18n="nav.health">{{ t('nav.health') }}</span>
@@ -109,6 +113,18 @@
       <div id="budgetAlerts" class="budget-alerts" style="display:none"></div>
       <div id="lastHealthLine" class="last-health-line" style="display:none"></div>
 
+      <div class="dash-section" id="dashHealthSection">
+        <div class="dash-section-head">
+          <h3 data-i18n="nav.health">{{ t('nav.health') }}</h3>
+          <div>
+            <button class="btn btn-sm" onclick="switchView('health')" data-i18n="health.openPage">{{ t('health.openPage') }}</button>
+            <button class="btn btn-sm" onclick="checkAllHealth()">
+              <span data-i18n="dashboard.checkAll">{{ t('dashboard.checkAll') }}</span>
+            </button>
+          </div>
+        </div>
+        <div id="dashHealthSummary" class="hm-meta">—</div>
+      </div>
 
       <div class="dash-section" id="dashTodosSection">
         <div class="dash-section-head">
@@ -555,6 +571,79 @@
       </div>
     </div>
 
+    <!-- ═══ Downstream Routes ═══ -->
+    <div class="view" id="view-routes">
+      <div class="page-head">
+        <h2 data-i18n="nav.routes">{{ t('nav.routes') }}</h2>
+        <p class="page-desc" data-i18n="routes.pageDesc">{{ t('routes.pageDesc') }}</p>
+        <div class="page-actions">
+          <button class="btn btn-sm" onclick="loadRoutesPage()">
+            <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+            <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+          </button>
+          <button class="btn btn-sm" onclick="rebuildAllDownstream()">
+            <span data-i18n="routes.rebuildAll">{{ t('routes.rebuildAll') }}</span>
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="showCreateDownstream()">
+            <span data-i18n="routes.create">{{ t('routes.create') }}</span>
+          </button>
+        </div>
+      </div>
+      <div class="dash-section">
+        <div class="form-hint" id="routesEndpointHint" data-i18n="routes.endpointHint">{{ t('routes.endpointHint') }}</div>
+        <div id="routesList" class="profiles-list" style="margin-top:12px">
+          <div class="todo-empty" data-i18n="common.loading">{{ t('common.loading') }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="downstreamModal" onclick="closeDownstreamModal()">
+      <div class="modal modal-lg" onclick="event.stopPropagation()" style="max-width:720px">
+        <div class="modal-header">
+          <h3 id="downstreamModalTitle" data-i18n="routes.create">{{ t('routes.create') }}</h3>
+          <button class="btn-close" onclick="closeDownstreamModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="dsEditId">
+          <div class="form-group">
+            <label data-i18n="routes.name">{{ t('routes.name') }}</label>
+            <input type="text" id="dsName" data-i18n-placeholder="routes.namePh" placeholder="{{ t('routes.namePh') }}">
+          </div>
+          <div class="form-group">
+            <label data-i18n="routes.endpoints">{{ t('routes.endpoints') }}</label>
+            <div class="checkbox-row">
+              <label class="checkbox-label"><input type="checkbox" id="dsEpOpenai" checked> OpenAI <code>/v1/chat/completions</code></label>
+              <label class="checkbox-label"><input type="checkbox" id="dsEpAnthropic"> Anthropic <code>/v1/messages</code></label>
+            </div>
+          </div>
+          <label class="checkbox-label" style="margin:8px 0">
+            <input type="checkbox" id="dsAutoUpdate" checked>
+            <span data-i18n="routes.autoUpdate">{{ t('routes.autoUpdate') }}</span>
+          </label>
+          <p class="form-hint" data-i18n="routes.autoUpdateHint">{{ t('routes.autoUpdateHint') }}</p>
+          <div class="form-group">
+            <label data-i18n="routes.selectedModels">{{ t('routes.selectedModels') }}</label>
+            <p class="form-hint" data-i18n="routes.selectedModelsHint">{{ t('routes.selectedModelsHint') }}</p>
+            <input type="search" id="dsModelSearch" class="hm-search" style="width:100%;max-width:none;margin-bottom:8px" data-i18n-placeholder="routes.modelSearchPh" placeholder="{{ t('routes.modelSearchPh') }}" oninput="filterDsModels()">
+            <div id="dsModelList" class="ds-model-list"></div>
+            <div class="action-row" style="margin-top:8px">
+              <button class="btn btn-sm" type="button" onclick="dsSelectAllModels(true)" data-i18n="routes.selectAll">{{ t('routes.selectAll') }}</button>
+              <button class="btn btn-sm" type="button" onclick="dsSelectAllModels(false)" data-i18n="routes.selectNone">{{ t('routes.selectNone') }}</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label data-i18n="keyModal.notes">{{ t('keyModal.notes') }}</label>
+            <input type="text" id="dsNotes">
+          </div>
+          <div id="dsSecretBox" class="remote-result ok" style="display:none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="closeDownstreamModal()" data-i18n="common.cancel">{{ t('common.cancel') }}</button>
+          <button class="btn btn-primary" onclick="saveDownstream()" data-i18n="settings.save">{{ t('settings.save') }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ Health Monitor ═══ -->
     <div class="view" id="view-health">
       <div class="page-head">
@@ -709,6 +798,14 @@
               <input type="number" id="setHealthInterval" min="60" step="30" value="300" onchange="onSettingsDirty()" oninput="onSettingsDirty()">
               <span class="form-hint" style="margin:0;padding:8px" data-i18n="settings.seconds">{{ t('settings.seconds') }}</span>
             </div>
+          </div>
+          <div class="form-group">
+            <label data-i18n="settings.networkRetries">{{ t('settings.networkRetries') }}</label>
+            <div class="input-group">
+              <input type="number" id="setHealthNetworkRetries" min="1" max="10" step="1" value="3" onchange="onSettingsDirty()" oninput="onSettingsDirty()">
+              <span class="form-hint" style="margin:0;padding:8px" data-i18n="settings.attempts">{{ t('settings.attempts') }}</span>
+            </div>
+            <p class="form-hint" data-i18n="settings.networkRetriesHint">{{ t('settings.networkRetriesHint') }}</p>
           </div>
         </div>
         <div class="settings-card">
@@ -1228,7 +1325,7 @@ function showToast(msg, type) {
 
 function switchView(name, opts) {
   opts = opts || {};
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, health: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, routes: 1, health: 1, diagnostics: 1, settings: 1 };
   if (!allowed[name]) name = 'dashboard';
 
   document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
@@ -1251,6 +1348,7 @@ function switchView(name, opts) {
   if (name === 'backends') loadBackends();
   if (name === 'stats') loadStats();
   if (name === 'models') loadModelsCatalog();
+  if (name === 'routes') loadRoutesPage();
   if (name === 'health') loadHealthMonitor();
   if (name === 'diagnostics') loadDiagnostics();
   if (name === 'settings') loadSettingsPage();
@@ -1265,7 +1363,7 @@ function getInitialView() {
   var fromStore = '';
   try { fromStore = localStorage.getItem('aiswitch_view') || ''; } catch (e) {}
   var name = fromHash || fromStore || 'dashboard';
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, health: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, routes: 1, health: 1, diagnostics: 1, settings: 1 };
   return allowed[name] ? name : 'dashboard';
 }
 
@@ -1296,10 +1394,39 @@ async function loadDashboard() {
   if ($('statIssues')) $('statIssues').textContent = unhealthy;
   $('statBackends').textContent = (backends.backends || []).length;
   loadDashboardUsage();
+  loadDashHealthSummary();
 
   renderBackendCards((backends.backends || []), 'dashBackendCards');
   await renderDashboardTodos(backends.backends || []);
   loadDashboardRecent();
+}
+
+async function loadDashHealthSummary() {
+  var el = $('dashHealthSummary');
+  if (!el) return;
+  try {
+    var res = await api('/api/health/monitor/status');
+    if (!res || res.error) {
+      el.textContent = res && res.error ? res.error : '—';
+      return;
+    }
+    var state = res.state || 'idle';
+    var label = (typeof _hmStateLabel === 'function') ? _hmStateLabel(state) : state;
+    var cur = res.current || {};
+    var s = res.last_summary || {};
+    var parts = [label];
+    parts.push((cur.healthy || 0) + ' ok / ' + (cur.unhealthy || 0) + ' fail / ' + (cur.total_keys || 0) + ' keys');
+    if (s.total != null) {
+      parts.push((_('health.lastSummary') || 'Last run') + ': ' + (s.ok || 0) + '/' + (s.fail || 0) +
+        (s.source ? ' · ' + s.source : ''));
+    }
+    if (res.next_run_at) parts.push((_('health.nextRun') || 'Next') + ': ' + String(res.next_run_at).replace('T', ' ').slice(0, 19));
+    el.innerHTML = esc(parts.join(' · ')) +
+      ' <button class="btn btn-sm" style="margin-left:8px" onclick="switchView(\'health\')">' +
+      esc(_('health.openPage') || 'Open monitor') + '</button>';
+  } catch (e) {
+    el.textContent = '—';
+  }
 }
 
 async function loadDashboardUsage() {
@@ -1692,6 +1819,21 @@ async function showBackendDetail(name) {
     tabs.appendChild(syncBtn);
   }
 
+  // "Providers" tab (only for codex-cli)
+  if (name === 'codex-cli') {
+    var provBtn = document.createElement('button');
+    provBtn.textContent = '🔄 ' + _('backends.providers') || 'Providers';
+    provBtn.className = 'btn btn-sm';
+    provBtn.id = 'providersTabBtn';
+    provBtn.onclick = function() {
+      _currentSyncTabActive = false;
+      document.querySelectorAll('#backendConfigTabs .btn').forEach(function(b) { b.className = 'btn btn-sm'; });
+      provBtn.className = 'btn btn-sm btn-primary';
+      renderCodexProviders();
+    };
+    tabs.appendChild(provBtn);
+  }
+
   var files = data.config_files || [];
   files.forEach(function(f, i) {
     var btn = document.createElement('button');
@@ -1808,6 +1950,90 @@ async function saveSyncConfig(name) {
   }
 }
 
+// ── Codex CLI Provider Switch ─────────────────────────────
+
+async function renderCodexProviders() {
+  _currentConfigPath = null;
+  $('backendSaveConfigBtn').style.display = 'none';
+  $('backendConfigPane').innerHTML = '<p style="color:var(--text3);padding:20px">' + esc(_('common.loading') || 'Loading...') + '</p>';
+
+  var data = await api('/api/backends/codex-cli/providers');
+  if (data.error) {
+    $('backendConfigPane').innerHTML = '<p class="error-message">' + data.error + '</p>';
+    return;
+  }
+
+  var providers = data.providers || [];
+  var activeProvider = data.active_provider || '';
+
+  var html = '<div style="padding:8px 0">';
+  html += '<div style="margin-bottom:16px">';
+  html += '<h4 style="margin:0 0 8px 0">' + esc(_('backends.codexProviders') || 'Configured Providers') + '</h4>';
+  html += '<p class="form-hint">' + esc(_('backends.codexProvidersDesc') || 'Switch the active provider for Codex CLI. The selected provider will be used when running codex commands.') + '</p>';
+  html += '</div>';
+
+  if (providers.length === 0) {
+    html += '<div class="empty-state" style="padding:24px;text-align:center">';
+    html += '<p>' + esc(_('backends.noProviders') || 'No providers configured. Add vendors and keys first, then sync to backends.') + '</p>';
+    html += '</div>';
+  } else {
+    html += '<div class="provider-list" style="display:flex;flex-direction:column;gap:8px">';
+    providers.forEach(function(p) {
+      var isActive = p.active || p.id === activeProvider;
+      var cardStyle = isActive
+        ? 'border:2px solid var(--primary);background:var(--primary-bg)'
+        : 'border:1px solid var(--border);background:var(--bg2)';
+      var badgeHtml = isActive
+        ? '<span class="badge badge-ok" style="margin-left:auto">' + esc(_('backends.active') || 'Active') + '</span>'
+        : '';
+
+      html += '<div class="provider-card" style="' + cardStyle + ';border-radius:var(--radius-sm);padding:12px;cursor:pointer" onclick="switchCodexProvider(\'' + esc(p.id) + '\')">';
+      html += '<div style="display:flex;align-items:center;gap:12px">';
+      html += '<div style="flex:1">';
+      html += '<div style="font-weight:600;margin-bottom:4px">' + esc(p.name || p.id) + '</div>';
+      html += '<div style="font-size:12px;color:var(--text2)">';
+      if (p.base_url) {
+        html += '<code style="font-size:11px">' + esc(p.base_url) + '</code>';
+      }
+      if (p.vendor_name) {
+        html += ' · ' + esc(p.vendor_name);
+      }
+      html += '</div>';
+      html += '</div>';
+      html += badgeHtml;
+      if (!isActive) {
+        html += '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();switchCodexProvider(\'' + esc(p.id) + '\')">' + esc(_('backends.switchTo') || 'Switch') + '</button>';
+      }
+      html += '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  html += '</div>';
+  $('backendConfigPane').innerHTML = html;
+}
+
+async function switchCodexProvider(providerId) {
+  if (!providerId) return;
+
+  var res = await api('/api/backends/codex-cli/switch-provider', {
+    method: 'POST',
+    body: JSON.stringify({provider_id: providerId}),
+  });
+
+  if (res.error) {
+    showToast(res.error || _('toast.error') || 'Error', 'error');
+    return;
+  }
+
+  showToast(_('toast.saved') || 'Switched successfully', 'success');
+  // Refresh the providers list
+  renderCodexProviders();
+  // Refresh backend status
+  refreshBackendStatus();
+}
+
 async function loadBackendConfig(name, path) {
   _currentConfigPath = path;
   $('backendConfigPane').innerHTML = '<p style="color:var(--text3);padding:20px">' + esc(_('common.loading') || 'Loading...') + '</p>';
@@ -1857,6 +2083,8 @@ function getHideFailedVendors() {
 
 function setHideFailedVendors(on) {
   try { localStorage.setItem('aiswitch_hide_failed_vendors', on ? '1' : '0'); } catch (e) {}
+  var el = $('hideFailedVendors');
+  if (el) el.checked = !!on;
 }
 
 function onHideFailedVendorsChange() {
@@ -2179,30 +2407,66 @@ function renderVendorList() {
 
 var _sortedVendorsForSelect = [];
 
-async function loadVendors() {
+async function loadVendors(opts) {
+  opts = opts || {};
+  var preferId = opts.focusVendorId != null && opts.focusVendorId !== ''
+    ? String(opts.focusVendorId)
+    : '';
   refreshUndoImportBtn();
   const data = await api('/api/vendors');
   // Keep API order stable in data; display sort is health-first
   _allVendorsData = data.vendors || [];
   _allHealthData = data.health || {};
 
+  if (preferId) {
+    var preferExists = _allVendorsData.some(function(v) { return String(v.id) === preferId; });
+    if (preferExists) {
+      // Always show the imported vendor even if "hide failed" is on
+      if (getHideFailedVendors()) {
+        var stPref = getVendorHealthStatus(
+          _allVendorsData.find(function(v) { return String(v.id) === preferId; }) || {}
+        ).status;
+        if (stPref === 'unhealthy') setHideFailedVendors(false);
+      }
+      // Clear search/tag filters that would hide the target
+      try {
+        if ($('vendorSearch') && $('vendorSearch').value) $('vendorSearch').value = '';
+      } catch (e) {}
+      if (_activeTagFilter) _activeTagFilter = '';
+      selectedVendorId = preferId;
+    }
+  }
+
   renderVendorList();
 
   if (selectedVendorId) {
-    var exists = _allVendorsData.some(function(v) { return v.id === selectedVendorId; });
-    var visible = (_sortedVendorsForSelect || []).some(function(v) { return v.id === selectedVendorId; });
-    if (exists && visible) selectVendor(selectedVendorId);
-    else if (exists && !visible) {
-      // selected vendor hidden by filter — pick first visible healthy
-      selectedVendorId = null;
-      if (_sortedVendorsForSelect.length) selectVendor(_sortedVendorsForSelect[0].id);
-      else showEmptyState();
+    var exists = _allVendorsData.some(function(v) { return String(v.id) === String(selectedVendorId); });
+    var visible = (_sortedVendorsForSelect || []).some(function(v) { return String(v.id) === String(selectedVendorId); });
+    if (exists && visible) {
+      await selectVendor(selectedVendorId);
+      if (preferId && String(preferId) === String(selectedVendorId)) {
+        scrollVendorIntoView(selectedVendorId);
+      }
+    } else if (exists && !visible) {
+      // selected vendor hidden by filter — if focus requested, force show
+      if (preferId && String(preferId) === String(selectedVendorId)) {
+        setHideFailedVendors(false);
+        if ($('vendorSearch')) $('vendorSearch').value = '';
+        _activeTagFilter = '';
+        renderVendorList();
+        await selectVendor(selectedVendorId);
+        scrollVendorIntoView(selectedVendorId);
+      } else {
+        selectedVendorId = null;
+        if (_sortedVendorsForSelect.length) await selectVendor(_sortedVendorsForSelect[0].id);
+        else showEmptyState();
+      }
     } else {
       selectedVendorId = null;
       showEmptyState();
     }
   } else if (_sortedVendorsForSelect.length > 0) {
-    selectVendor(_sortedVendorsForSelect[0].id);
+    await selectVendor(_sortedVendorsForSelect[0].id);
   } else if (_allVendorsData.length > 0) {
     // all hidden
     showEmptyState();
@@ -2211,6 +2475,15 @@ async function loadVendors() {
   }
   updateMiniStatus(data);
   updateI18n();
+}
+
+function scrollVendorIntoView(id) {
+  try {
+    var el = document.querySelector('.vendor-item[data-vendor-id="' + String(id) + '"]');
+    if (el && el.scrollIntoView) {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  } catch (e) {}
 }
 
 function updateMiniStatus(data) {
@@ -2242,6 +2515,52 @@ function showEmptyState() {
 
 // ── Key Detail ──────────────────────────
 
+function _mergeVendorIntoCache(v) {
+  if (!v || !v.id) return;
+  var ix = -1;
+  for (var i = 0; i < (_allVendorsData || []).length; i++) {
+    if (_allVendorsData[i].id === v.id) { ix = i; break; }
+  }
+  if (ix >= 0) _allVendorsData[ix] = v;
+  else {
+    _allVendorsData = _allVendorsData || [];
+    _allVendorsData.push(v);
+  }
+}
+
+function _applyHealthToLocalKey(vendorId, keyId, health) {
+  if (!health || health.error && health.healthy == null) return;
+  _allHealthData[vendorId + ':' + keyId] = health;
+  // patch vendor list cache so models modal / status work without full reload
+  var v = (_allVendorsData || []).find(function(x) { return x.id === vendorId; });
+  if (v) {
+    var k = (v.keys || []).find(function(x) { return x.id === keyId; });
+    if (k) {
+      if (health.healthy === true) {
+        k.enabled = true;
+        if (health.models && health.models.length) k.models = health.models;
+        if (health.default_model) k.default_model = health.default_model;
+        if (health.disabled_models) k.disabled_models = health.disabled_models;
+      } else if (health.key_enabled === false || health.enabled === false) {
+        k.enabled = false;
+      }
+    }
+  }
+  if (_currentVendor && _currentVendor.id === vendorId) {
+    var ck = (_allKeysData || []).find(function(x) { return x.id === keyId; });
+    if (ck) {
+      if (health.healthy === true) {
+        ck.enabled = true;
+        if (health.models && health.models.length) ck.models = health.models;
+        if (health.default_model) ck.default_model = health.default_model;
+        if (health.disabled_models) ck.disabled_models = health.disabled_models;
+      } else if (health.key_enabled === false || health.enabled === false) {
+        ck.enabled = false;
+      }
+    }
+  }
+}
+
 async function selectVendor(id) {
   selectedVendorId = id;
   document.querySelectorAll('.vendor-item').forEach(function(el) { el.classList.remove('selected'); });
@@ -2249,12 +2568,16 @@ async function selectVendor(id) {
   if (sel) sel.classList.add('selected');
 
   const data = await api('/api/vendors');
-  const v = data.vendors.find(function(x) { return x.id === id; });
+  if (data.error) return;
+  // keep full vendor list in sync so models modal never reads stale empty models
+  if (data.vendors) _allVendorsData = data.vendors;
+  if (data.health) _allHealthData = data.health;
+  const v = (data.vendors || []).find(function(x) { return x.id === id; });
   if (!v) return;
 
   _currentVendor = v;
   _allKeysData = v.keys || [];
-  _allHealthData = data.health || {};
+  _mergeVendorIntoCache(v);
 
   $('detailVendorName').textContent = v.name;
   $('detailVendorUrl').textContent = v.api_url;
@@ -2268,6 +2591,7 @@ async function selectVendor(id) {
   $('keyFilter').value = 'all';
   $('selectAllCheck').checked = false;
   $('batchActions').style.display = 'none';
+  if (typeof renderVendorList === 'function') renderVendorList();
   filterKeys();
 }
 
@@ -2326,9 +2650,9 @@ function filterKeys() {
       var mid = typeof m === 'string' ? m : (m.id || m.name || '');
       return disabledModels.indexOf(mid) === -1;
     }).length;
-    const modelStr = modelCount > 0
-      ? '<a href="#" onclick="showKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\');return false">' + enabledCount + '/' + modelCount + '</a>'
-      : '0';
+    // Always clickable so opening models never depends on stale zero-count
+    const modelLabel = modelCount > 0 ? (enabledCount + '/' + modelCount) : '0';
+    const modelStr = '<a href="#" class="models-link" onclick="showKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\');return false" title="' + esc(_('table.viewModels') || 'View models') + '">' + modelLabel + '</a>';
 
     const tr = document.createElement('tr');
     tr.dataset.keyId = k.id;
@@ -2626,13 +2950,14 @@ async function checkKeyHealth(vendorId, keyId) {
   if (res.error) showToast(res.error, 'error');
   else if (res.healthy) showToast(_('toast.checkOk'), 'success');
   else showToast(_('toast.checkFail') + ': ' + (res.error || ''), 'error');
-  // Update local health cache for immediate vendor status refresh
+  // Immediate local patch: status + enabled + models (before full reload)
   if (res && !res.error) {
-    _allHealthData[vendorId + ':' + keyId] = res;
+    _applyHealthToLocalKey(vendorId, keyId, res);
   }
   if (typeof renderVendorList === 'function') renderVendorList();
   if (selectedVendorId) { await selectVendor(selectedVendorId); }
   else { await loadVendors(); }
+  if (typeof renderVendorList === 'function') renderVendorList();
 }
 
 async function enableKey(vendorId, keyId) {
@@ -2674,6 +2999,9 @@ async function checkAllHealth() {
   }
   _healthCheckRunning = true;
   var ok = 0, fail = 0;
+  var startedAt = new Date().toISOString();
+  var t0 = Date.now();
+  var runResults = [];
   try {
     // include_disabled=1 → every key (so no vendor stays "未检测")
     var meta = await api('/api/health/check-targets?include_disabled=1');
@@ -2688,6 +3016,13 @@ async function checkAllHealth() {
         if (h && h.healthy) ok++; else fail++;
         if (h && h.vendor_id && h.key_id) {
           _allHealthData[h.vendor_id + ':' + h.key_id] = h;
+          runResults.push({
+            vendor_id: h.vendor_id,
+            key_id: h.key_id,
+            healthy: h.healthy,
+            latency_ms: h.latency_ms,
+            error: h.error,
+          });
         }
       });
     } else {
@@ -2707,26 +3042,39 @@ async function checkAllHealth() {
           else fail++;
           // Always store result (including failures) so UI never stays "未检测"
           if (h) {
-            _allHealthData[t.vendor_id + ':' + t.key_id] = h;
+            _applyHealthToLocalKey(t.vendor_id, t.key_id, h);
+            runResults.push({
+              vendor_id: t.vendor_id,
+              key_id: t.key_id,
+              healthy: h.healthy,
+              latency_ms: h.latency_ms,
+              error: h.error,
+            });
           } else {
-            _allHealthData[t.vendor_id + ':' + t.key_id] = {
+            _applyHealthToLocalKey(t.vendor_id, t.key_id, {
               vendor_id: t.vendor_id,
               key_id: t.key_id,
               healthy: false,
               error: 'check failed',
               checked_at: new Date().toISOString(),
-            };
+            });
+            runResults.push({ vendor_id: t.vendor_id, key_id: t.key_id, healthy: false, error: 'check failed' });
           }
           if (typeof renderVendorList === 'function') renderVendorList();
+          // live-refresh open key table for selected vendor
+          if (selectedVendorId === t.vendor_id && typeof filterKeys === 'function') filterKeys();
         } catch (e) {
           fail++;
-          _allHealthData[t.vendor_id + ':' + t.key_id] = {
+          var errMsg = String(e && e.message || e || 'check failed');
+          _applyHealthToLocalKey(t.vendor_id, t.key_id, {
             vendor_id: t.vendor_id,
             key_id: t.key_id,
             healthy: false,
-            error: String(e && e.message || e || 'check failed'),
+            error: errMsg,
             checked_at: new Date().toISOString(),
-          };
+          });
+          runResults.push({ vendor_id: t.vendor_id, key_id: t.key_id, healthy: false, error: errMsg });
+          if (typeof renderVendorList === 'function') renderVendorList();
         }
       }
       setHealthProgress(targets.length, targets.length, _('health.progressDone') || 'Done {total}/{total}');
@@ -2736,6 +3084,22 @@ async function checkAllHealth() {
         await api('/api/sync/push', { method: 'POST' });
       } catch (e) {}
     }
+    // Persist progressive run into health history (for Health page)
+    try {
+      await api('/api/health/history', {
+        method: 'POST',
+        body: JSON.stringify({
+          source: 'manual',
+          started_at: startedAt,
+          finished_at: new Date().toISOString(),
+          duration_ms: Date.now() - t0,
+          results: runResults,
+          ok: ok,
+          fail: fail,
+          total: runResults.length || (ok + fail),
+        }),
+      });
+    } catch (e) {}
     var reasonMap = {};
     Object.keys(_allHealthData || {}).forEach(function(ck) {
       var h = _allHealthData[ck] || {};
@@ -2754,6 +3118,7 @@ async function checkAllHealth() {
       var still = (_sortedVendorsForSelect || []).some(function(v) { return v.id === selectedVendorId; });
       if (still) await selectVendor(selectedVendorId);
     }
+    if (typeof loadDashHealthSummary === 'function') loadDashHealthSummary();
   } finally {
     _healthCheckRunning = false;
     setTimeout(function() { setHealthProgress(0, 0); }, 1200);
@@ -2809,13 +3174,46 @@ function renderModelsModalList(k) {
 }
 
 async function showKeyModels(vendorId, keyId) {
-  const v = _allVendorsData.find(function(x) { return x.id === vendorId; });
-  if (!v) return;
-  const k = (v.keys || []).find(function(x) { return x.id === keyId; });
-  if (!k) return;
+  // Prefer live selection cache, then vendor list; refresh from API if models empty
+  var v = (_currentVendor && _currentVendor.id === vendorId) ? _currentVendor : null;
+  if (!v) v = (_allVendorsData || []).find(function(x) { return x.id === vendorId; });
+  var k = null;
+  if (v) k = (v.keys || []).find(function(x) { return x.id === keyId; });
+  if (!k && _allKeysData && _currentVendor && _currentVendor.id === vendorId) {
+    k = (_allKeysData || []).find(function(x) { return x.id === keyId; });
+  }
+  // Merge models from health cache if key inventory empty (post-check race)
+  var h = _allHealthData[vendorId + ':' + keyId] || {};
+  if (k && (!k.models || !k.models.length) && h.models && h.models.length) {
+    k = Object.assign({}, k, { models: h.models, default_model: h.default_model || k.default_model });
+  }
+  if (!k || !k.models || !k.models.length) {
+    try {
+      var data = await api('/api/vendors');
+      if (data && data.vendors) {
+        _allVendorsData = data.vendors;
+        if (data.health) _allHealthData = Object.assign(_allHealthData || {}, data.health);
+        v = data.vendors.find(function(x) { return x.id === vendorId; }) || v;
+        k = v && (v.keys || []).find(function(x) { return x.id === keyId; });
+        if (v) {
+          _mergeVendorIntoCache(v);
+          if (_currentVendor && _currentVendor.id === vendorId) {
+            _currentVendor = v;
+            _allKeysData = v.keys || [];
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  if (!k) {
+    showToast(_('modelsModal.noModels') || 'No models', 'info');
+    return;
+  }
+  // still empty: open modal with empty state + allow check-models
   _modelsModalCtx = { vendorId: vendorId, keyId: keyId };
   renderModelsModalList(k);
-  $('modelsModal').classList.add('open');
+  var modal = $('modelsModal');
+  if (modal) modal.classList.add('open');
 }
 
 function closeModelsModal() {
@@ -3254,11 +3652,15 @@ async function applyBatchImport() {
       }).join('；');
       $('batchImportError').style.display = '';
     }
-    if (imported > 0) {
+    if (imported > 0 || res.focus_vendor_id) {
       closeBatchImportModal();
       // Backend already health-checks only newly imported keys during /api/batch/import.
       // Do NOT call checkAllHealth() — that would re-probe every existing key.
-      loadVendors();
+      var focusId = res.focus_vendor_id
+        || ((res.created || []).filter(function(c) { return c.vendor_id; }).slice(-1)[0] || {}).vendor_id
+        || '';
+      switchView('vendors');
+      await loadVendors({ focusVendorId: focusId });
       refreshUndoImportBtn();
     }
   } finally {
@@ -3429,7 +3831,10 @@ async function applySyncImport() {
   }
   showToast(msg, 'success');
   closeSyncImportModal();
-  if (typeof loadVendors === 'function') loadVendors();
+  if (typeof loadVendors === 'function') {
+    switchView('vendors');
+    await loadVendors({ focusVendorId: res.focus_vendor_id || '' });
+  }
   refreshUndoImportBtn();
   if (typeof loadDashboard === 'function' && document.querySelector('#view-dashboard.active')) loadDashboard();
 }
@@ -4478,6 +4883,10 @@ async function loadSettingsPage() {
   if ($('setHealthAutoDisable')) $('setHealthAutoDisable').checked = !!s.health_auto_disable;
   if ($('setHealthAutoFailover')) $('setHealthAutoFailover').checked = !!s.health_auto_failover;
   if (iv) iv.value = s.check_interval_seconds || 300;
+  if ($('setHealthNetworkRetries')) {
+    var nr = parseInt(s.health_network_retries, 10);
+    $('setHealthNetworkRetries').value = (nr >= 1 && nr <= 10) ? nr : 3;
+  }
   if ($('setBudgetDailyCost')) $('setBudgetDailyCost').value = s.budget_daily_cost || 0;
   if ($('setBudgetMonthlyCost')) $('setBudgetMonthlyCost').value = s.budget_monthly_cost || 0;
   if ($('setBudgetDailyTokens')) $('setBudgetDailyTokens').value = s.budget_daily_tokens || 0;
@@ -4545,6 +4954,7 @@ async function saveCurrentPolicy() {
     health_auto_disable: !!( $('setHealthAutoDisable') && $('setHealthAutoDisable').checked ),
     health_auto_failover: !!( $('setHealthAutoFailover') && $('setHealthAutoFailover').checked ),
     check_interval_seconds: parseInt(($('setHealthInterval') && $('setHealthInterval').value) || '300', 10) || 300,
+    health_network_retries: Math.max(1, Math.min(10, parseInt(($('setHealthNetworkRetries') && $('setHealthNetworkRetries').value) || '3', 10) || 3)),
     budget_daily_cost: parseFloat(($('setBudgetDailyCost') && $('setBudgetDailyCost').value) || '0') || 0,
     budget_monthly_cost: parseFloat(($('setBudgetMonthlyCost') && $('setBudgetMonthlyCost').value) || '0') || 0,
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
@@ -4591,6 +5001,7 @@ async function saveSettingsPage() {
     health_auto_disable: !!( $('setHealthAutoDisable') && $('setHealthAutoDisable').checked ),
     health_auto_failover: !!( $('setHealthAutoFailover') && $('setHealthAutoFailover').checked ),
     check_interval_seconds: parseInt(($('setHealthInterval') && $('setHealthInterval').value) || '300', 10) || 300,
+    health_network_retries: Math.max(1, Math.min(10, parseInt(($('setHealthNetworkRetries') && $('setHealthNetworkRetries').value) || '3', 10) || 3)),
     budget_daily_cost: parseFloat(($('setBudgetDailyCost') && $('setBudgetDailyCost').value) || '0') || 0,
     budget_monthly_cost: parseFloat(($('setBudgetMonthlyCost') && $('setBudgetMonthlyCost').value) || '0') || 0,
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
@@ -4658,6 +5069,200 @@ function _hmStateLabel(state) {
     idle: _('health.stateIdle') || 'Idle',
   };
   return map[state] || state || '—';
+}
+
+// ── Downstream routes page ────────────────
+var _dsModelCatalog = [];
+var _dsSelectedModels = {};
+
+async function loadRoutesPage() {
+  var list = $('routesList');
+  if (!list) return;
+  list.innerHTML = '<div class="todo-empty">' + esc(_('common.loading') || 'Loading...') + '</div>';
+  var res = await api('/api/downstream');
+  if (res.error) { list.innerHTML = '<div class="todo-empty">' + esc(res.error) + '</div>'; return; }
+  var keys = res.keys || [];
+  if (!keys.length) {
+    list.innerHTML = '<div class="todo-empty">' + esc(_('routes.empty') || 'No downstream keys yet') + '</div>';
+    return;
+  }
+  list.innerHTML = keys.map(function(k) {
+    var eps = (k.endpoint_types || []).join(', ');
+    var models = (k.selected_models || []).length
+      ? (k.selected_models.length + ' ' + (_('routes.modelsSelected') || 'models selected'))
+      : (_('routes.allModels') || 'all healthy models');
+    var auto = k.auto_update !== false ? (_('routes.autoOn') || 'auto') : (_('routes.autoOff') || 'manual');
+    var id = esc(String(k.id)).replace(/'/g, "\\'");
+    return '<div class="profile-row">' +
+      '<div class="profile-meta">' +
+      '<strong>' + esc(k.name || '') + '</strong> ' +
+      (k.enabled === false ? '<span class="badge badge-readonly">' + esc(_('badge.disabled') || 'Disabled') + '</span> ' : '') +
+      '<span class="badge">' + esc(auto) + '</span>' +
+      '<div class="form-hint"><code>' + esc(k.api_key_preview || '') + '</code> · ' + esc(eps) +
+      ' · ' + esc(models) +
+      ' · ' + esc(String(k.route_source_count || 0)) + ' ' + esc(_('routes.sources') || 'sources') +
+      ' / ' + esc(String(k.route_model_count || 0)) + ' ' + esc(_('routes.routedModels') || 'routed models') +
+      '</div></div>' +
+      '<div class="profile-actions">' +
+      '<button class="btn btn-sm" onclick="copyDownstreamSecret(\'' + id + '\')">' + esc(_('common.copy') || 'Copy') + '</button>' +
+      '<button class="btn btn-sm" onclick="rebuildDownstream(\'' + id + '\')">' + esc(_('routes.rebuild') || 'Rebuild') + '</button>' +
+      '<button class="btn btn-sm" onclick="editDownstream(\'' + id + '\')">' + esc(_('action.edit') || 'Edit') + '</button>' +
+      '<button class="btn btn-sm btn-danger" onclick="deleteDownstream(\'' + id + '\')">' + esc(_('action.delete') || 'Delete') + '</button>' +
+      '</div></div>';
+  }).join('');
+}
+
+async function showCreateDownstream() {
+  $('dsEditId').value = '';
+  $('downstreamModalTitle').textContent = _('routes.create') || 'Create downstream key';
+  $('dsName').value = '';
+  $('dsEpOpenai').checked = true;
+  $('dsEpAnthropic').checked = false;
+  $('dsAutoUpdate').checked = true;
+  $('dsNotes').value = '';
+  $('dsSecretBox').style.display = 'none';
+  _dsSelectedModels = {};
+  await loadDsModelCatalog();
+  $('downstreamModal').classList.add('open');
+}
+
+async function editDownstream(id) {
+  var res = await api('/api/downstream/' + encodeURIComponent(id));
+  if (res.error) { showToast(res.error, 'error'); return; }
+  $('dsEditId').value = id;
+  $('downstreamModalTitle').textContent = _('routes.edit') || 'Edit downstream key';
+  $('dsName').value = res.name || '';
+  var eps = res.endpoint_types || [];
+  $('dsEpOpenai').checked = eps.indexOf('openai') >= 0;
+  $('dsEpAnthropic').checked = eps.indexOf('anthropic') >= 0;
+  $('dsAutoUpdate').checked = res.auto_update !== false;
+  $('dsNotes').value = res.notes || '';
+  $('dsSecretBox').style.display = 'none';
+  _dsSelectedModels = {};
+  (res.selected_models || []).forEach(function(m) { _dsSelectedModels[m] = true; });
+  await loadDsModelCatalog();
+  $('downstreamModal').classList.add('open');
+}
+
+function closeDownstreamModal() {
+  $('downstreamModal').classList.remove('open');
+}
+
+async function loadDsModelCatalog() {
+  var res = await api('/api/downstream/models');
+  _dsModelCatalog = (res && res.models) || [];
+  filterDsModels();
+}
+
+function filterDsModels() {
+  var box = $('dsModelList');
+  if (!box) return;
+  var q = (($('dsModelSearch') && $('dsModelSearch').value) || '').trim().toLowerCase();
+  var rows = _dsModelCatalog || [];
+  if (q) {
+    rows = rows.filter(function(m) {
+      return String(m.model || '').toLowerCase().indexOf(q) >= 0 ||
+        (m.sources || []).some(function(s) { return String(s.vendor_name || '').toLowerCase().indexOf(q) >= 0; });
+    });
+  }
+  if (!rows.length) {
+    box.innerHTML = '<div class="todo-empty">' + esc(_('routes.noModelsAvail') || 'No healthy models yet — run health check first') + '</div>';
+    return;
+  }
+  box.innerHTML = rows.map(function(m) {
+    var mid = String(m.model || '');
+    var checked = !!_dsSelectedModels[mid];
+    var src = (m.source_count || 0) + ' ' + (_('routes.sources') || 'sources');
+    return '<label class="ds-model-item">' +
+      '<input type="checkbox" ' + (checked ? 'checked' : '') + ' onchange="toggleDsModel(\'' + esc(mid).replace(/'/g, "\\'") + '\', this.checked)">' +
+      '<span class="ds-model-name"><code>' + esc(mid) + '</code></span>' +
+      '<span class="form-hint">' + esc(src) + '</span>' +
+      '</label>';
+  }).join('');
+}
+
+function toggleDsModel(mid, on) {
+  if (on) _dsSelectedModels[mid] = true;
+  else delete _dsSelectedModels[mid];
+}
+
+function dsSelectAllModels(on) {
+  var q = (($('dsModelSearch') && $('dsModelSearch').value) || '').trim().toLowerCase();
+  (_dsModelCatalog || []).forEach(function(m) {
+    var mid = String(m.model || '');
+    if (q && mid.toLowerCase().indexOf(q) < 0) return;
+    if (on) _dsSelectedModels[mid] = true;
+    else delete _dsSelectedModels[mid];
+  });
+  filterDsModels();
+}
+
+async function saveDownstream() {
+  var name = (($('dsName') && $('dsName').value) || '').trim();
+  if (!name) { showToast(_('routes.nameRequired') || 'Name required', 'error'); return; }
+  var endpoint_types = [];
+  if ($('dsEpOpenai') && $('dsEpOpenai').checked) endpoint_types.push('openai');
+  if ($('dsEpAnthropic') && $('dsEpAnthropic').checked) endpoint_types.push('anthropic');
+  if (!endpoint_types.length) { showToast(_('routes.endpointRequired') || 'Select at least one endpoint type', 'error'); return; }
+  var selected_models = Object.keys(_dsSelectedModels);
+  var body = {
+    name: name,
+    endpoint_types: endpoint_types,
+    selected_models: selected_models,
+    auto_update: !!( $('dsAutoUpdate') && $('dsAutoUpdate').checked ),
+    notes: ($('dsNotes') && $('dsNotes').value) || '',
+  };
+  var id = ($('dsEditId') && $('dsEditId').value) || '';
+  var res;
+  if (id) {
+    res = await api('/api/downstream/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(body) });
+  } else {
+    res = await api('/api/downstream', { method: 'POST', body: JSON.stringify(body) });
+  }
+  if (res.error) { showToast(res.error, 'error'); return; }
+  if (res.api_key) {
+    var box = $('dsSecretBox');
+    if (box) {
+      box.style.display = '';
+      box.innerHTML = '<strong>' + esc(_('routes.secretOnce') || 'API key (copy now)') + ':</strong><br><code class="selectable">' + esc(res.api_key) + '</code>' +
+        ' <button class="btn btn-sm" onclick="copyText(\'' + esc(res.api_key).replace(/'/g, "\\'") + '\')">' + esc(_('common.copy') || 'Copy') + '</button>';
+    }
+    showToast(_('routes.created') || 'Created — copy the secret now', 'success');
+  } else {
+    showToast(_('toast.saved') || 'Saved', 'success');
+    closeDownstreamModal();
+  }
+  loadRoutesPage();
+}
+
+async function copyDownstreamSecret(id) {
+  var res = await api('/api/downstream/' + encodeURIComponent(id) + '?secret=1');
+  if (res.error) { showToast(res.error, 'error'); return; }
+  if (!res.api_key) { showToast(_('routes.noSecret') || 'Secret unavailable', 'error'); return; }
+  copyText(res.api_key);
+  showToast(_('common.copied') || 'Copied', 'success');
+}
+
+async function rebuildDownstream(id) {
+  var res = await api('/api/downstream/' + encodeURIComponent(id) + '/rebuild', { method: 'POST', body: '{}' });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast((_('routes.rebuilt') || 'Rebuilt: {n} sources').replace('{n}', res.route_source_count || 0), 'success');
+  loadRoutesPage();
+}
+
+async function rebuildAllDownstream() {
+  var res = await api('/api/downstream/rebuild-all', { method: 'POST', body: '{}' });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast((_('routes.rebuiltAll') || 'Rebuilt {n} keys').replace('{n}', res.rebuilt || 0), 'success');
+  loadRoutesPage();
+}
+
+async function deleteDownstream(id) {
+  if (!confirm(_('routes.deleteConfirm') || 'Delete this downstream key?')) return;
+  var res = await api('/api/downstream/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast(_('toast.deleted') || 'Deleted', 'success');
+  loadRoutesPage();
 }
 
 async function loadHealthMonitor() {
