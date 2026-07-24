@@ -125,20 +125,16 @@ class ClaudeCodeAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        try:
-            r = subprocess.run(
-                ["claude", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            version = (r.stdout + r.stderr).strip()
-            settings = self._load_settings()
-            has_key = bool(settings.get("env", {}).get("ANTHROPIC_API_KEY"))
-            return {
-                "running": r.returncode == 0,
-                "version": version,
-                "message": "API key configured" if has_key else "No API key configured",
-            }
-        except FileNotFoundError:
-            return {"running": False, "version": "", "message": "claude CLI not found"}
-        except Exception as e:
-            return {"running": False, "version": "", "message": str(e)[:100]}
+        from backends.base import make_status, cli_available
+
+        installed, version = cli_available("claude")
+        if not installed:
+            return make_status(installed=False, message="claude CLI not found")
+        settings = self._load_settings()
+        has_key = bool(settings.get("env", {}).get("ANTHROPIC_API_KEY"))
+        return make_status(
+            installed=True,
+            running=False,
+            version=version,
+            message="API key configured" if has_key else "No API key configured",
+        )

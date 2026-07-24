@@ -507,42 +507,36 @@ class KimiCodeAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
+        from backends.base import make_status, cli_available
+
         cfg_exists = self._config_path.exists()
         data = self._load() if cfg_exists else {}
         providers = data.get("providers") if isinstance(data.get("providers"), dict) else {}
         managed = sum(1 for k in providers if str(k).startswith(_MANAGED_PREFIX))
         total = len(providers or {})
-        version = ""
-        running = False
-        try:
-            r = subprocess.run(
-                ["kimi", "--version"],
-                capture_output=True, text=True, timeout=5,
+        installed, version = cli_available("kimi")
+        if not installed and cfg_exists:
+            installed = True
+        if not installed:
+            return make_status(
+                installed=False,
+                message="kimi CLI not found",
+                enabled=True,
+                config_path=str(self._config_path),
             )
-            version = (r.stdout or r.stderr or "").strip().splitlines()[0] if (r.stdout or r.stderr) else ""
-            running = r.returncode == 0
-        except FileNotFoundError:
-            version = ""
-            running = False
-        except Exception as e:
-            return {
-                "running": False,
-                "version": "",
-                "message": str(e)[:100],
-                "enabled": True,
-            }
         msg = f"{managed} managed / {total} provider(s)"
         if not cfg_exists:
             msg = "config.toml missing"
-        elif not running and not version:
+        elif not version:
             msg += "; kimi CLI not found"
-        return {
-            "running": running or cfg_exists,
-            "version": version,
-            "message": msg,
-            "enabled": True,
-            "config_path": str(self._config_path),
-        }
+        return make_status(
+            installed=True,
+            running=False,
+            version=version,
+            message=msg,
+            enabled=True,
+            config_path=str(self._config_path),
+        )
 
     def get_version(self) -> str:
         try:

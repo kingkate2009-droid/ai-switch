@@ -582,8 +582,14 @@ def api_create_key(vendor_id):
     k = add_key(vendor_id, data["name"], data["api_key"], notes=str(data.get("notes") or ""))
     if not k:
         return jsonify({"error": "vendor not found"}), 404
-    if data.get("role") and not k.get("_existing"):
-        k = update_key(vendor_id, k["id"], role=data.get("role")) or k
+    if not k.get("_existing"):
+        extra = {}
+        if data.get("role"):
+            extra["role"] = data.get("role")
+        if "check_model" in data:
+            extra["check_model"] = str(data.get("check_model") or "").strip()
+        if extra:
+            k = update_key(vendor_id, k["id"], **extra) or k
 
     health = check_key_health(vendor_id, k["id"])
     v = get_vendor(vendor_id)
@@ -620,7 +626,7 @@ def api_update_key(vendor_id, key_id):
     data = request.get_json() or {}
     allowed = {k: data[k] for k in (
         "name", "api_key", "enabled", "models", "default_model",
-        "disabled_models", "model_health", "notes", "role",
+        "check_model", "disabled_models", "model_health", "notes", "role",
     ) if k in data}
     k = update_key(vendor_id, key_id, **allowed)
     if not k:
@@ -1251,13 +1257,13 @@ def api_batch_apply():
     for c in reversed(created):
         if c.get("skipped"):
             continue
-        if c.get("vendor_id"):
-            focus_vendor_id = c["vendor_id"]
+        if c.get("vendor_id") is not None and str(c.get("vendor_id")) != "":
+            focus_vendor_id = str(c["vendor_id"])
             break
     if not focus_vendor_id:
         for c in reversed(created):
-            if c.get("vendor_id"):
-                focus_vendor_id = c["vendor_id"]
+            if c.get("vendor_id") is not None and str(c.get("vendor_id")) != "":
+                focus_vendor_id = str(c["vendor_id"])
                 break
 
     log_event(
@@ -1265,12 +1271,13 @@ def api_batch_apply():
         imported=sum(1 for c in created if not c.get("skipped")),
         skipped=sum(1 for c in created if c.get("skipped")),
         errors=len(errors),
+        focus_vendor_id=focus_vendor_id or "",
     )
     return jsonify({
         "created": created,
         "errors": errors,
         "count": len(created),
-        "focus_vendor_id": focus_vendor_id,
+        "focus_vendor_id": focus_vendor_id or "",
     })
 
 
@@ -1667,7 +1674,7 @@ def api_gateway_status():
         health = get_all_health_status()
         status["health"] = health
         status["openclaw_version"] = ocp.get_version()
-        status["manager_version"] = "2.0.0"
+        status["manager_version"] = "2.0.2"
         status["min_openclaw_version"] = "2026.3.0"
         status["recommended_openclaw_version"] = "2026.6.11"
         return jsonify(status)

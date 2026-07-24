@@ -38,23 +38,18 @@ class CursorCliAdapter(BackendAdapter):
         return []
 
     def get_status(self) -> dict:
-        try:
-            r = subprocess.run(
-                ["cursor", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            version = (r.stdout + r.stderr).strip()
-            has_cli = self._cli_config_path.exists()
-            return {
-                "running": r.returncode == 0,
-                "version": version,
-                "message": "Cursor account auth only; no BYOK support"
-                    if has_cli else "CLI not configured",
-            }
-        except FileNotFoundError:
-            return {"running": False, "version": "", "message": "cursor CLI not found"}
-        except Exception as e:
-            return {"running": False, "version": "", "message": str(e)[:100]}
+        from backends.base import make_status, cli_available
+
+        installed, version = cli_available("cursor")
+        if not installed:
+            return make_status(installed=False, message="cursor CLI not found")
+        has_cli = self._cli_config_path.exists()
+        return make_status(
+            installed=True,
+            running=False,
+            version=version,
+            message="Cursor account auth only; no BYOK support" if has_cli else "CLI not configured",
+        )
 
     @property
     def config_files(self) -> list[dict]:

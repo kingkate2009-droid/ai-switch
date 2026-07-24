@@ -169,6 +169,11 @@ bash scripts/build_package.sh
 - [ ] PWA 支持
 - [ ] 更多后端适配器
 
+## 友链
+
+- [GitHub](https://github.com/kingkate2009-droid/ai-switch)
+- [Linux.do](https://linux.do/) — 社区讨论
+
 ## 开源协议
 
 Apache 2.0

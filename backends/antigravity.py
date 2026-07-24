@@ -96,23 +96,19 @@ class AntigravityAdapter(BackendAdapter):
         }]
 
     def get_status(self) -> dict:
-        try:
-            r = subprocess.run(
-                ["agy", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            version = (r.stdout + r.stderr).strip()
-            settings = self._load_settings()
-            has_key = bool(settings.get("GEMINI_API_KEY"))
-            return {
-                "running": r.returncode == 0,
-                "version": version,
-                "message": "API key configured" if has_key else "OAuth mode (no custom key)",
-            }
-        except FileNotFoundError:
-            return {"running": False, "version": "", "message": "agy CLI not found"}
-        except Exception as e:
-            return {"running": False, "version": "", "message": str(e)[:100]}
+        from backends.base import make_status, cli_available
+
+        installed, version = cli_available("agy")
+        if not installed:
+            return make_status(installed=False, message="agy CLI not found")
+        settings = self._load_settings()
+        has_key = bool(settings.get("GEMINI_API_KEY"))
+        return make_status(
+            installed=True,
+            running=False,
+            version=version,
+            message="API key configured" if has_key else "OAuth mode (no custom key)",
+        )
 
     @property
     def config_files(self) -> list[dict]:

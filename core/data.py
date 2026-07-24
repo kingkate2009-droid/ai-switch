@@ -1,6 +1,9 @@
 import json
 import logging
+import os
 import shutil
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +13,18 @@ log = logging.getLogger(__name__)
 DATA_PATH = DATA_DIR / "data.json"
 _OLD_DATA_DIR = Path.home() / ".openclaw-auto-manager"
 _OLD_DATA_PATH = _OLD_DATA_DIR / "data.json"
+_DATA_LOCK = threading.RLock()
+_DEFAULT_DATA = {
+    "vendors": [],
+    "settings": {
+        "check_interval_seconds": 300,
+        "health_check_enabled": False,
+        "health_auto_disable": False,
+        "access_token": "",
+        "onboarding_done": False,
+    },
+    "backends": {},
+}
 
 
 def _migrate_old_data() -> None:
@@ -27,47 +42,112 @@ def _ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _backup_candidates() -> list[Path]:
+    return [
+        DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak"),
+        DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.1"),
+        DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.2"),
+    ]
+
+
+def _read_json_file(path: Path) -> dict:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"data root must be object, got {type(data).__name__}")
+    return data
+
+
+def _quarantine_corrupt(path: Path) -> Path:
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    dest = path.with_name(f"{path.name}.corrupt-{ts}")
+    try:
+        shutil.copy2(path, dest)
+    except OSError:
+        dest = path
+    return dest
+
+
+def _recover_data_from_backups(err: Exception) -> dict:
+    """Quarantine corrupt data.json and restore the newest valid backup."""
+    corrupt = _quarantine_corrupt(DATA_PATH) if DATA_PATH.exists() else None
+    log.error("data.json is corrupt (%s); attempting backup restore (quarantine=%s)", err, corrupt)
+    for bak in _backup_candidates():
+        if not bak.exists():
+            continue
+        try:
+            data = _read_json_file(bak)
+            # restore recovered file as active data.json
+            tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".recover-tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            tmp.replace(DATA_PATH)
+            n = len(data.get("vendors") or [])
+            log.warning("Restored data.json from %s (%s vendors)", bak.name, n)
+            return data
+        except Exception as e:
+            log.warning("backup %s unusable: %s", bak.name, e)
+    log.error("No valid backup found; starting with empty data")
+    return dict(_DEFAULT_DATA)
+
+
 def _load_data() -> dict:
-    _migrate_old_data()
-    _ensure_dirs()
-    if DATA_PATH.exists():
-        with open(DATA_PATH) as f:
-            return json.load(f)
-    return {"vendors": [], "settings": {"check_interval_seconds": 300, "health_check_enabled": False, "health_auto_disable": False, "access_token": "", "onboarding_done": False}, "backends": {}}
+    with _DATA_LOCK:
+        _migrate_old_data()
+        _ensure_dirs()
+        if not DATA_PATH.exists():
+            return dict(_DEFAULT_DATA)
+        try:
+            return _read_json_file(DATA_PATH)
+        except Exception as e:
+            return _recover_data_from_backups(e)
 
 
 def _save_data(data: dict) -> None:
     """Atomic write with rotating backups (data.json.bak, .bak.1, .bak.2)."""
-    _ensure_dirs()
-    # rotate backups before overwrite
-    try:
-        if DATA_PATH.exists():
-            bak0 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak")
-            bak1 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.1")
-            bak2 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.2")
-            if bak1.exists():
+    with _DATA_LOCK:
+        _ensure_dirs()
+        # never persist clearly broken payload
+        if not isinstance(data, dict):
+            raise TypeError("data must be a dict")
+        # rotate backups before overwrite
+        try:
+            if DATA_PATH.exists():
+                # only back up if current file is valid JSON
                 try:
-                    if bak2.exists():
-                        bak2.unlink()
-                    bak1.replace(bak2)
-                except OSError:
+                    _read_json_file(DATA_PATH)
+                    bak0 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak")
+                    bak1 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.1")
+                    bak2 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.2")
+                    if bak1.exists():
+                        try:
+                            if bak2.exists():
+                                bak2.unlink()
+                            bak1.replace(bak2)
+                        except OSError:
+                            pass
+                    if bak0.exists():
+                        try:
+                            bak0.replace(bak1)
+                        except OSError:
+                            pass
+                    try:
+                        shutil.copy2(DATA_PATH, bak0)
+                    except OSError:
+                        pass
+                except Exception:
+                    # current data.json is already corrupt — don't rotate it into backups
                     pass
-            if bak0.exists():
-                try:
-                    bak0.replace(bak1)
-                except OSError:
-                    pass
-            try:
-                shutil.copy2(DATA_PATH, bak0)
-            except OSError:
-                pass
-    except Exception:
-        pass
-    tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.flush()
-    tmp.replace(DATA_PATH)
+        except Exception:
+            pass
+        tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(DATA_PATH)
 
 
 def _next_id(items: list) -> str:
@@ -269,6 +349,7 @@ def add_key(vendor_id: str, name: str, api_key: str, *, allow_duplicate: bool = 
 
 _KEY_FIELDS = (
     "name", "api_key", "enabled", "models", "default_model",
+    "check_model",  # primary model for health / scheduled checks; empty = auto
     "disabled_models", "model_health", "notes", "role",
 )
 
@@ -1005,7 +1086,7 @@ def import_backup(payload: dict, *, mode: str = "merge", password: str = "") -> 
             if entry and not entry.get("_existing"):
                 added_k += 1
                 fields = {}
-                for f in ("models", "default_model", "disabled_models", "enabled", "role", "notes"):
+                for f in ("models", "default_model", "check_model", "disabled_models", "enabled", "role", "notes"):
                     if f in kin:
                         fields[f] = kin[f]
                 if fields:

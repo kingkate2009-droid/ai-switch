@@ -113,16 +113,18 @@ class QwenCodeAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        try:
-            r = subprocess.run(
-                ["qwen", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            version = (r.stdout + r.stderr).strip()
-            return {"running": r.returncode == 0, "version": version, "message": "CLI available"}
-        except FileNotFoundError:
-            settings = self._load_settings()
-            has_key = bool(settings.get("env", {}))
-            return {"running": False, "version": "", "message": "Key configured" if has_key else "Not installed"}
-        except Exception as e:
-            return {"running": False, "version": "", "message": str(e)[:100]}
+        from backends.base import make_status, cli_available
+
+        installed, version = cli_available("qwen")
+        settings = self._load_settings()
+        has_key = bool(settings.get("env", {}))
+        if not installed and (self._settings_path.exists() or has_key):
+            installed = True
+        if not installed:
+            return make_status(installed=False, message="Not installed")
+        return make_status(
+            installed=True,
+            running=False,
+            version=version,
+            message="CLI available" if version else ("Key configured" if has_key else "Installed"),
+        )

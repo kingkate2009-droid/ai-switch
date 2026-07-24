@@ -130,23 +130,18 @@ class GooseAdapter(BackendAdapter):
         return vendors
 
     def get_status(self) -> dict:
-        try:
-            r = subprocess.run(
-                ["goose", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            version = (r.stdout + r.stderr).strip()
-            secrets = self._load_secrets()
-            key_count = len(secrets)
-            return {
-                "running": r.returncode == 0,
-                "version": version,
-                "message": f"{key_count} key(s) in secrets.yaml",
-            }
-        except FileNotFoundError:
-            return {"running": False, "version": "", "message": "goose CLI not found"}
-        except Exception as e:
-            return {"running": False, "version": "", "message": str(e)[:100]}
+        from backends.base import make_status, cli_available
+
+        installed, version = cli_available("goose")
+        if not installed:
+            return make_status(installed=False, message="goose CLI not found")
+        secrets = self._load_secrets()
+        return make_status(
+            installed=True,
+            running=False,
+            version=version,
+            message=f"{len(secrets)} key(s) in secrets.yaml",
+        )
 
     @property
     def config_files(self) -> list[dict]:

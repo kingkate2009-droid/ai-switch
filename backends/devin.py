@@ -302,11 +302,21 @@ class DevinAdapter(BackendAdapter):
         elif "not found" in auth_msg.lower():
             parts.append(auth_msg)
 
-        return {
-            "running": bool(version) or has_token,
-            "version": version,
-            "message": "; ".join(parts),
-        }
+        from backends.base import make_status, cli_available
+
+        installed, ver2 = cli_available("devin")
+        if not version and ver2:
+            version = ver2
+        if not installed and (has_token or self._config_path.exists()):
+            installed = True
+        if not installed:
+            return make_status(installed=False, version="", message="; ".join(parts) or "devin CLI not found")
+        return make_status(
+            installed=True,
+            running=False,
+            version=version,
+            message="; ".join(parts),
+        )
 
     def get_version(self) -> str:
         for cmd in (["devin", "version"], ["devin", "--version"]):

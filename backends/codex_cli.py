@@ -180,14 +180,139 @@ def _env_key_for_vendor(vendor: dict) -> str:
 
 
 def _wire_api_for_vendor(vendor: dict) -> str:
-    ep = (vendor.get("endpoint_type") or "openai").lower().strip()
-    if ep in ("openai",):
-        return "responses"
-    return "chat"
+    # Codex CLI (0.144+) only supports wire_api = "responses".
+    # "chat" was removed and now fails config load.
+    return "responses"
 
 
 def _base_url(vendor: dict) -> str:
-    return (vendor.get("proxy_target") or vendor.get("api_url") or "").rstrip("/")
+    raw = (vendor.get("proxy_target") or vendor.get("api_url") or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    # Codex expects an OpenAI-compatible base that includes /v1 for most proxies.
+    if raw.endswith("/v1") or raw.endswith("/openai/v1"):
+        return raw
+    # Keep absolute custom paths (e.g. Azure-style) untouched if they already have a path.
+    # For bare hosts / roots, append /v1.
+    try:
+        from urllib.parse import urlparse
+        path = (urlparse(raw).path or "").strip("/")
+        if path and path not in ("v1",):
+            return raw
+    except Exception:
+        pass
+    return raw + "/v1"
+
+
+def _provider_entry(vendor: dict, api_key: str = "") -> dict:
+    """Build a Codex model_providers.* entry for a vendor."""
+    entry = {
+        "name": vendor.get("name") or vendor.get("provider") or "Custom",
+        "base_url": _base_url(vendor),
+        "wire_api": _wire_api_for_vendor(vendor),
+    }
+    # Prefer embedding the token so IDE/extension sessions don't depend on process env.
+    # Do not combine env_key with experimental_bearer_token (Codex treats env_key as required).
+    if api_key:
+        entry["experimental_bearer_token"] = api_key
+    else:
+        entry["env_key"] = _env_key_for_vendor(vendor)
+    return entry
+
+
+def _is_gpt_related_model(model_id: str) -> bool:
+    """Codex CLI works with OpenAI-style GPT / o-series model ids."""
+    mid = (model_id or "").strip().lower()
+    if not mid:
+        return False
+    # strip provider/ prefix: openai/gpt-4o -> gpt-4o
+    if "/" in mid and not mid.startswith("http"):
+        mid = mid.rsplit("/", 1)[-1]
+    if mid.startswith("gpt") or "gpt-" in mid or "chatgpt" in mid:
+        return True
+    # OpenAI reasoning models used by Codex
+    if mid in ("o1", "o3", "o4") or mid.startswith(("o1-", "o3-", "o4-", "o1_", "o3_", "o4_")):
+        return True
+    if mid.startswith("codex") or "codex-" in mid:
+        return True
+    # Open-weight OpenAI-compatible models often work via Responses API
+    if "gpt-oss" in mid or mid.startswith("oss-"):
+        return True
+    return False
+
+
+def _vendor_all_models(vendor: dict) -> list[str]:
+    """All known model ids from enabled keys (default model first)."""
+    from core.data import get_enabled_models, list_model_ids
+
+    out, seen = [], set()
+    for k in vendor.get("keys") or []:
+        if k.get("enabled") is False or not k.get("api_key"):
+            continue
+        ids = list(get_enabled_models(k) or list_model_ids(k) or [])
+        dm = (k.get("default_model") or "").strip()
+        if dm:
+            ids = [dm] + [x for x in ids if x != dm]
+        for mid in ids:
+            s = str(mid or "").strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def _vendor_gpt_models(vendor: dict) -> list[str]:
+    """Collect GPT-related model ids from enabled keys on a vendor."""
+    return [m for m in _vendor_all_models(vendor) if _is_gpt_related_model(m)]
+
+
+def _vendor_codex_models(vendor: dict) -> list[str]:
+    """Models suitable for Codex: prefer GPT-family, else any OpenAI-compatible inventory."""
+    gpt = _vendor_gpt_models(vendor)
+    if gpt:
+        return gpt
+    return _vendor_all_models(vendor)
+
+
+def _vendor_is_codex_switchable(vendor: dict) -> bool:
+    """Vendors with OpenAI-compatible endpoint + enabled key (or GPT model inventory)."""
+    if not _base_url(vendor):
+        return False
+    has_key = any(
+        k.get("enabled") is not False and k.get("api_key")
+        for k in (vendor.get("keys") or [])
+    )
+    if not has_key:
+        return False
+    # Prefer inventory with GPT-related models
+    if _vendor_gpt_models(vendor):
+        return True
+    # OpenAI-compatible endpoints (including third-party Responses proxies)
+    ep = (vendor.get("endpoint_type") or "").lower()
+    prov = (vendor.get("provider") or "").lower()
+    url = _base_url(vendor).lower()
+    if ep in ("openai", "") or prov in ("openai",) or "api.openai.com" in url or "/v1" in url:
+        return True
+    # Any vendor that already has a scanned model inventory can be tried
+    if _vendor_all_models(vendor):
+        return True
+    return False
+
+
+def _apply_third_party_safe_defaults(cfg: dict, vendor: Optional[dict] = None) -> None:
+    """Disable features third-party OpenAI proxies often reject (web_search tools, etc.)."""
+    url = ""
+    if vendor:
+        url = _base_url(vendor).lower()
+    # Always safe for non-official OpenAI hosts
+    if not url or "api.openai.com" not in url:
+        cfg["web_search"] = "disabled"
+        tools = cfg.get("tools")
+        if not isinstance(tools, dict):
+            tools = {}
+        tools["web_search"] = False
+        cfg["tools"] = tools
 
 
 # ── Adapter ───────────────────────────────────────────────────
@@ -228,6 +353,8 @@ class CodexCliAdapter(BackendAdapter):
         """Write or update a vendor entry in config.toml model_providers."""
         if not key.get("api_key") or not key.get("enabled", True):
             return
+        if not _vendor_is_codex_switchable(vendor):
+            return
 
         provider_id = _provider_id(vendor["id"])
         base_url = _base_url(vendor)
@@ -236,15 +363,17 @@ class CodexCliAdapter(BackendAdapter):
 
         cfg = self._load_config()
         providers = cfg.setdefault("model_providers", {})
-
-        providers[provider_id] = {
-            "name": vendor.get("name") or vendor.get("provider") or "Custom",
-            "base_url": base_url,
-            "env_key": _env_key_for_vendor(vendor),
-            "wire_api": _wire_api_for_vendor(vendor),
-        }
-
+        providers[provider_id] = _provider_entry(vendor, key.get("api_key") or "")
         self._save_config(cfg)
+
+    def _set_active_auth(self, api_key: str) -> None:
+        """Write auth.json + process env for the active API key."""
+        if not api_key:
+            return
+        auth = self._load_auth()
+        auth["OPENAI_API_KEY"] = api_key
+        self._save_auth(auth)
+        os.environ["OPENAI_API_KEY"] = api_key
 
     def _remove_vendor_from_config(self, vendor_id: str) -> None:
         """Remove a vendor entry from config.toml model_providers."""
@@ -263,15 +392,23 @@ class CodexCliAdapter(BackendAdapter):
     def on_key_added(self, vendor: dict, key: dict) -> None:
         if not key.get("api_key") or not key.get("enabled", True):
             return
-
-        # Write to auth.json
-        auth = self._load_auth()
-        auth["OPENAI_API_KEY"] = key["api_key"]
-        self._save_auth(auth)
-        os.environ["OPENAI_API_KEY"] = key["api_key"]
-
-        # Write to config.toml
+        # Only write provider catalog entry. Do NOT hijack active auth/provider
+        # unless this vendor is already the active model_provider (or none set).
         self._sync_vendor_to_config(vendor, key)
+        cfg = self._load_config()
+        pid = _provider_id(vendor["id"])
+        active = cfg.get("model_provider") or ""
+        if not active or active == pid:
+            cfg["model_provider"] = pid
+            models = _vendor_codex_models(vendor)
+            if models:
+                cfg["model"] = models[0]
+            _apply_third_party_safe_defaults(cfg, vendor)
+            # keep active provider entry tokenized
+            providers = cfg.setdefault("model_providers", {})
+            providers[pid] = _provider_entry(vendor, key.get("api_key") or "")
+            self._save_config(cfg)
+            self._set_active_auth(key.get("api_key") or "")
 
     def on_key_updated(self, vendor: dict, key: dict) -> None:
         if key.get("enabled", True):
@@ -302,9 +439,11 @@ class CodexCliAdapter(BackendAdapter):
         cfg = self._load_config()
         providers = cfg.get("model_providers") or {}
 
-        # Build set of valid managed provider IDs
+        # Build set of valid managed provider IDs (GPT-capable vendors only)
         valid_ids = set()
         for v in vendors:
+            if not _vendor_is_codex_switchable(v):
+                continue
             for k in v.get("keys", []):
                 if not k.get("enabled", True) or not k.get("api_key"):
                     continue
@@ -312,15 +451,10 @@ class CodexCliAdapter(BackendAdapter):
                     continue
                 pid = _provider_id(v["id"])
                 valid_ids.add(pid)
-                # Ensure provider exists in config
+                # Ensure provider exists in config (with token so IDE does not need env)
                 base_url = _base_url(v)
                 if base_url:
-                    providers[pid] = {
-                        "name": v.get("name") or v.get("provider") or "Custom",
-                        "base_url": base_url,
-                        "env_key": _env_key_for_vendor(v),
-                        "wire_api": _wire_api_for_vendor(v),
-                    }
+                    providers[pid] = _provider_entry(v, k.get("api_key") or "")
 
         # Remove stale managed providers
         stale = [pid for pid in providers if pid.startswith(_MANAGED_PREFIX) and pid not in valid_ids]
@@ -332,23 +466,59 @@ class CodexCliAdapter(BackendAdapter):
         elif "model_providers" in cfg:
             del cfg["model_providers"]
 
-        # Check if active provider still valid
+        # Check if active provider still valid; if not, pick first valid managed provider.
         active = cfg.get("model_provider") or ""
         if active.startswith(_MANAGED_PREFIX) and active not in valid_ids:
-            del cfg["model_provider"]
+            if valid_ids:
+                # Prefer keeping a deterministic order by vendor id numeric
+                def _pid_sort(pid: str):
+                    tail = pid[len(_MANAGED_PREFIX):]
+                    try:
+                        return (0, int(tail))
+                    except Exception:
+                        return (1, tail)
+                active = sorted(valid_ids, key=_pid_sort)[0]
+                cfg["model_provider"] = active
+            else:
+                cfg.pop("model_provider", None)
+                active = ""
 
+        # Keep active provider's auth.json + bearer token aligned
+        active_key = ""
+        if active.startswith(_MANAGED_PREFIX):
+            vid = active[len(_MANAGED_PREFIX):]
+            for v in vendors:
+                if str(v.get("id")) != str(vid):
+                    continue
+                for k in v.get("keys") or []:
+                    if k.get("enabled", True) and k.get("api_key") and self.should_sync(v, k):
+                        active_key = k["api_key"]
+                        # ensure active provider entry has token
+                        providers[active] = _provider_entry(v, active_key)
+                        models = _vendor_codex_models(v)
+                        if models and not (cfg.get("model") or "").strip():
+                            cfg["model"] = models[0]
+                        _apply_third_party_safe_defaults(cfg, v)
+                        break
+                break
+
+        if providers:
+            cfg["model_providers"] = providers
         self._save_config(cfg)
 
-        # Ensure auth.json has a valid key
-        has_active = any(
-            k.get("enabled", True) and k.get("api_key")
-            for v in vendors
-            for k in v.get("keys", [])
-        )
-        if not has_active:
-            auth = self._load_auth()
-            if auth.pop("OPENAI_API_KEY", None):
-                self._save_auth(auth)
+        if active_key:
+            self._set_active_auth(active_key)
+        else:
+            # Ensure auth.json has a valid key only if nothing active
+            has_active = any(
+                k.get("enabled", True) and k.get("api_key")
+                for v in vendors
+                for k in v.get("keys", [])
+            )
+            if not has_active:
+                auth = self._load_auth()
+                if auth.pop("OPENAI_API_KEY", None):
+                    self._save_auth(auth)
 
     def switch_provider(self, provider_id: str = "", vendor_id: str = "", key_id: str = "") -> dict:
         """Switch the active provider for Codex CLI.
@@ -368,6 +538,8 @@ class CodexCliAdapter(BackendAdapter):
             vendor = get_vendor(vendor_id)
             if not vendor:
                 return {"success": False, "message": f"Vendor {vendor_id} not found"}
+            if not _vendor_is_codex_switchable(vendor):
+                return {"success": False, "message": "Vendor is not OpenAI-compatible for Codex (need API URL + enabled key)"}
             provider_id = _provider_id(vendor_id)
 
             # Find the key to use
@@ -384,18 +556,13 @@ class CodexCliAdapter(BackendAdapter):
 
             # Ensure vendor is synced to config
             self._sync_vendor_to_config(vendor, key)
-
-            # Update auth.json
-            auth = self._load_auth()
-            auth["OPENAI_API_KEY"] = key["api_key"]
-            self._save_auth(auth)
-            os.environ["OPENAI_API_KEY"] = key["api_key"]
+            self._set_active_auth(key.get("api_key") or "")
 
         elif provider_id:
             # Direct provider_id - verify it exists in config
             cfg = self._load_config()
             providers = cfg.get("model_providers") or {}
-            if provider_id not in providers:
+            if provider_id not in providers and not provider_id.startswith(_MANAGED_PREFIX):
                 return {"success": False, "message": f"Provider {provider_id} not found in config"}
 
             # Find matching vendor and update auth
@@ -403,64 +570,130 @@ class CodexCliAdapter(BackendAdapter):
                 vid = provider_id[len(_MANAGED_PREFIX):]
                 vendor = get_vendor(vid)
                 if vendor:
+                    if not _vendor_is_codex_switchable(vendor):
+                        return {"success": False, "message": "Vendor is not OpenAI-compatible for Codex"}
                     keys = vendor.get("keys") or []
                     key = next((k for k in keys if k.get("enabled", True) and k.get("api_key")), None)
                     if key:
-                        auth = self._load_auth()
-                        auth["OPENAI_API_KEY"] = key["api_key"]
-                        self._save_auth(auth)
-                        os.environ["OPENAI_API_KEY"] = key["api_key"]
+                        self._sync_vendor_to_config(vendor, key)
+                        self._set_active_auth(key.get("api_key") or "")
+                        models = _vendor_codex_models(vendor)
+                        if models:
+                            cfg0 = self._load_config()
+                            cfg0["model"] = models[0]
+                            self._save_config(cfg0)
         else:
             return {"success": False, "message": "provider_id or vendor_id required"}
 
         # Update model_provider in config
         cfg = self._load_config()
         cfg["model_provider"] = provider_id
+        # Always set model from inventory when available (avoids stale broken model ids)
+        resolved_vid = vendor_id
+        if not resolved_vid and provider_id.startswith(_MANAGED_PREFIX):
+            resolved_vid = provider_id[len(_MANAGED_PREFIX):]
+        if resolved_vid:
+            vendor = get_vendor(resolved_vid)
+            if vendor:
+                models = _vendor_codex_models(vendor)
+                if models:
+                    cfg["model"] = models[0]
+                # ensure active provider entry includes bearer token
+                key = next((k for k in (vendor.get("keys") or []) if k.get("enabled", True) and k.get("api_key")), None)
+                if key:
+                    providers = cfg.setdefault("model_providers", {})
+                    providers[provider_id] = _provider_entry(vendor, key.get("api_key") or "")
+                    self._set_active_auth(key.get("api_key") or "")
+                _apply_third_party_safe_defaults(cfg, vendor)
         self._save_config(cfg)
 
         return {
             "success": True,
             "active_provider": provider_id,
             "message": f"Switched to {provider_id}",
+            "model": cfg.get("model") or "",
         }
 
     def list_providers(self) -> list[dict]:
-        """List all configured providers in config.toml."""
+        """List switchable Codex providers (vendors with GPT-related models).
+
+        Includes managed entries from system vendors (even if not yet written
+        to config.toml) plus any already-configured aiswitch-* entries that still
+        qualify.
+        """
         from core.data import get_vendors
 
         cfg = self._load_config()
         providers = cfg.get("model_providers") or {}
         active_id = cfg.get("model_provider") or ""
-
-        # Build vendor lookup
-        vendors_by_id = {v["id"]: v for v in get_vendors()}
+        vendors = get_vendors()
+        vendors_by_id = {str(v["id"]): v for v in vendors}
 
         result = []
-        for pid, pdata in providers.items():
-            is_managed = pid.startswith(_MANAGED_PREFIX)
-            vendor_id = ""
-            vendor_name = ""
-            if is_managed:
-                vid = pid[len(_MANAGED_PREFIX):]
-                vendor = vendors_by_id.get(vid)
-                if vendor:
-                    vendor_id = vid
-                    vendor_name = vendor.get("name") or ""
+        seen_ids = set()
 
+        # 1) System vendors that have GPT-related models
+        for v in vendors:
+            if not _vendor_is_codex_switchable(v):
+                continue
+            # need at least one syncable key
+            keys = [
+                k for k in (v.get("keys") or [])
+                if k.get("enabled") is not False and k.get("api_key") and self.should_sync(v, k)
+            ]
+            if not keys:
+                continue
+            pid = _provider_id(v["id"])
+            seen_ids.add(pid)
+            pdata = providers.get(pid) or {}
+            gpt_models = _vendor_gpt_models(v)
             result.append({
                 "id": pid,
-                "name": pdata.get("name") or pid,
+                "name": v.get("name") or pdata.get("name") or v.get("provider") or pid,
+                "base_url": _base_url(v) or pdata.get("base_url") or "",
+                "env_key": pdata.get("env_key") or _env_key_for_vendor(v),
+                "wire_api": pdata.get("wire_api") or _wire_api_for_vendor(v),
+                "vendor_id": str(v.get("id") or ""),
+                "vendor_name": v.get("name") or "",
+                "models": gpt_models,
+                "model_preview": ", ".join(gpt_models[:6]) + ("…" if len(gpt_models) > 6 else ""),
+                "has_gpt_models": bool(gpt_models),
+                "active": pid == active_id,
+                "managed": True,
+            })
+
+        # 2) Extra config.toml managed providers still mapped to GPT vendors
+        for pid, pdata in providers.items():
+            if pid in seen_ids:
+                continue
+            if not pid.startswith(_MANAGED_PREFIX):
+                continue
+            vid = pid[len(_MANAGED_PREFIX):]
+            vendor = vendors_by_id.get(str(vid))
+            if not vendor or not _vendor_is_codex_switchable(vendor):
+                continue
+            gpt_models = _vendor_gpt_models(vendor)
+            result.append({
+                "id": pid,
+                "name": pdata.get("name") or (vendor.get("name") if vendor else pid),
                 "base_url": pdata.get("base_url") or "",
                 "env_key": pdata.get("env_key") or "",
                 "wire_api": pdata.get("wire_api") or "chat",
-                "vendor_id": vendor_id,
-                "vendor_name": vendor_name,
+                "vendor_id": str(vid),
+                "vendor_name": (vendor.get("name") if vendor else "") or "",
+                "models": gpt_models,
+                "model_preview": ", ".join(gpt_models[:6]) + ("…" if len(gpt_models) > 6 else ""),
+                "has_gpt_models": bool(gpt_models),
                 "active": pid == active_id,
-                "managed": is_managed,
+                "managed": True,
             })
 
-        # Sort: active first, then by name
-        result.sort(key=lambda x: (0 if x["active"] else 1, x["name"].lower()))
+        # Sort: active first, then vendors with more GPT models, then name
+        result.sort(key=lambda x: (
+            0 if x["active"] else 1,
+            -len(x.get("models") or []),
+            (x.get("name") or "").lower(),
+        ))
         return result
 
     def get_active_provider(self) -> dict:
@@ -499,10 +732,32 @@ class CodexCliAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
+        from backends.base import make_status, cli_available
+
+        installed, version = cli_available("codex")
+        if not installed:
+            try:
+                import glob
+                matches = sorted(
+                    glob.glob(str(Path.home() / ".vscode/extensions/openai.chatgpt-*/bin/*/codex"))
+                    + glob.glob(str(Path.home() / ".cursor/extensions/openai.chatgpt-*/bin/*/codex"))
+                )
+                for m in reversed(matches):
+                    p = Path(m)
+                    if p.is_file() and os.access(p, os.X_OK):
+                        installed, version = True, "vscode-extension"
+                        break
+            except Exception:
+                pass
+        # ~/.codex config means product is present (CLI or IDE extension)
+        if not installed and (self._config_path.exists() or self._auth_path.exists() or self._codex_dir.exists()):
+            installed = True
+            if not version:
+                version = "config-only"
+
         auth = self._load_auth()
         has_key = bool(auth.get("OPENAI_API_KEY"))
-        config_exists = self._config_path.exists()
-        cfg = self._load_config() if config_exists else {}
+        cfg = self._load_config() if self._config_path.exists() else {}
         active = cfg.get("model_provider") or ""
         providers = cfg.get("model_providers") or {}
 
@@ -513,14 +768,32 @@ class CodexCliAdapter(BackendAdapter):
             msg_parts.append(f"active: {active}")
         if providers:
             msg_parts.append(f"{len(providers)} provider(s)")
+        from backends.base import process_running
 
-        return {
-            "running": config_exists or has_key,
-            "version": "",
-            "message": "; ".join(msg_parts) if msg_parts else "Not configured",
-            "active_provider": active,
-            "provider_count": len(providers),
-        }
+        # VS Code Codex extension keeps app-server process(es) alive while IDE is open
+        running = process_running(
+            "codex app-server",
+            "codex -c features",
+            "openai.chatgpt-",  # extension path + codex binary running
+        )
+        if running and not process_running("app-server"):
+            # only count openai.chatgpt codex binary processes that look like servers
+            running = process_running("openai.chatgpt-") and process_running("app-server")
+        if not installed:
+            msg = "codex CLI not found"
+        else:
+            msg = "; ".join(msg_parts) if msg_parts else "Installed"
+            if running:
+                msg = ("app-server running; " + msg) if msg_parts else "app-server running"
+
+        return make_status(
+            installed=installed,
+            running=running,
+            version=version,
+            message=msg,
+            active_provider=active,
+            provider_count=len(providers),
+        )
 
     def restart(self) -> dict:
         return {"success": False, "message": "Codex CLI does not require restart"}

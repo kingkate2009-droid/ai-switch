@@ -95,26 +95,42 @@ class CopilotCliAdapter(BackendAdapter):
         }]
 
     def get_status(self) -> dict:
+        from backends.base import make_status
+        import shutil
+
+        settings = self._load_settings()
+        has_byok = "byok" in settings
+        if not shutil.which("gh"):
+            return make_status(installed=False, message="gh CLI not found")
         try:
             r = subprocess.run(
                 ["gh", "copilot", "--version"],
                 capture_output=True, text=True, timeout=5,
             )
-            version = (r.stdout + r.stderr).strip() or "installed"
-            settings = self._load_settings()
-            has_byok = "byok" in settings
-            return {
-                "running": True,
-                "version": version,
-                "message": "BYOK configured" if has_byok else "GitHub auth mode",
-            }
+            out = (r.stdout or "") + (r.stderr or "")
+            low = out.lower()
+            # gh prints usage/help when extension missing
+            if r.returncode != 0 or "unknown command" in low or "available commands" in low:
+                # settings may still exist from previous install
+                if has_byok or self._settings_path.exists():
+                    return make_status(
+                        installed=True,
+                        running=False,
+                        version="",
+                        message="BYOK configured (gh copilot extension missing)",
+                    )
+                return make_status(installed=False, message="gh copilot extension not installed")
+            version = out.strip().splitlines()[0][:80] if out.strip() else "installed"
+            return make_status(
+                installed=True,
+                running=False,
+                version=version,
+                message="BYOK configured" if has_byok else "GitHub auth mode",
+            )
         except FileNotFoundError:
-            import shutil
-            if shutil.which("gh"):
-                return {"running": True, "version": "gh extension", "message": "gh copilot extension installed"}
-            return {"running": False, "version": "", "message": "gh CLI not found"}
+            return make_status(installed=False, message="gh CLI not found")
         except Exception as e:
-            return {"running": False, "version": "", "message": str(e)[:100]}
+            return make_status(installed=False, message=str(e)[:100])
 
     @property
     def config_files(self) -> list[dict]:

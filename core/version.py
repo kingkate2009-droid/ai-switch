@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from core.paths import version_file
 
-__version__ = "2.0.0"
+__version__ = "2.0.2"
 
 
 def get_version() -> str:

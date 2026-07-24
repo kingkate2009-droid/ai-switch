@@ -142,11 +142,20 @@ class ClineAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
+        from backends.base import make_status, vscode_extension_installed
+
+        # Only real product install counts. ~/.cline may be created by this manager.
+        installed = vscode_extension_installed(
+            "saoudrizwan.claude-dev",
+            "saoudrizwan.claude-dev-nightly",
+            "rooveterinaryinc.roo-cline",
+        )
         secrets = self._load_secrets()
         has_key = bool(secrets)
-        config = self._load_config()
-        return {
-            "running": config != {},
-            "version": "",
-            "message": f"{len(secrets)} key(s) configured" if has_key else "Not configured",
-        }
+        if not installed:
+            return make_status(installed=False, message="Cline extension not installed")
+        return make_status(
+            installed=True,
+            running=False,
+            message=f"{len(secrets)} key(s) configured" if has_key else "Installed",
+        )

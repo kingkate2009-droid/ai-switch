@@ -414,25 +414,31 @@ class OpenCodeAdapter(BackendAdapter):
         return vendors
 
     def get_status(self) -> dict:
+        from backends.base import make_status, cli_available, process_running
+
+        installed, version = cli_available("opencode")
+        auth = self._load_auth()
+        n_auth = sum(1 for v in auth.values() if self._extract_key(v))
         try:
-            r = subprocess.run(
-                ["opencode", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            version = (r.stdout + r.stderr).strip().split("\n")[0][:60]
-            auth = self._load_auth()
-            n_auth = sum(1 for v in auth.values() if self._extract_key(v))
             cfg = self._load_config()
             n_prov = len(cfg.get("provider") or {})
-            return {
-                "running": r.returncode == 0 or bool(version),
-                "version": version,
-                "message": f"{n_auth} credential(s), {n_prov} provider(s) in config",
-            }
-        except FileNotFoundError:
-            return {"running": False, "version": "", "message": "opencode CLI not found"}
-        except Exception as e:
-            return {"running": False, "version": "", "message": str(e)[:100]}
+        except Exception:
+            n_prov = 0
+        if not installed and (self._auth_path.exists() or self._config_path.exists()):
+            installed = True
+        if not installed:
+            return make_status(installed=False, message="opencode CLI not found")
+        # Interactive TUI / sessions show as process name "opencode"
+        running = process_running("opencode")
+        msg = f"{n_auth} credential(s), {n_prov} provider(s) in config"
+        if running:
+            msg = "process running; " + msg
+        return make_status(
+            installed=True,
+            running=running,
+            version=version,
+            message=msg,
+        )
 
     def get_version(self) -> str:
         try:

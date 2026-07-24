@@ -22,7 +22,7 @@ AGENT_AUTH_PATH = AGENT_DIR / "auth-profiles.json"
 AGENT_MODELS_PATH = AGENT_DIR / "models.json"
 AGENT_SQLITE_PATH = AGENT_DIR / "openclaw-agent.sqlite"
 
-MANAGER_VERSION = "2.0.0"
+MANAGER_VERSION = "2.0.2"
 MIN_OPENCLAW_VERSION = "2026.3.0"
 RECOMMENDED_OPENCLAW_VERSION = "2026.6.11"
 
@@ -721,34 +721,77 @@ class OpenClawAdapter(BackendAdapter):
         return out
 
     def get_status(self) -> dict:
+        from backends.base import make_status, cli_available, enriched_env, process_running, port_listening
+
+        env = enriched_env()
+        installed, version = cli_available("openclaw")
+        if not installed:
+            # binary may exist under nvm even when default node is too old
+            version = self.get_version()
+            if version and "not found" not in version.lower():
+                installed = True
+            elif process_running("openclaw", "openclaw/dist/index.js"):
+                installed = True
+            else:
+                return make_status(installed=False, port=None, message="openclaw CLI not found")
+        if not version:
+            version = self.get_version()
+
+        port = None
+        running = False
+        message = ""
         try:
             r = subprocess.run(
                 ["openclaw", "gateway", "status"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=10, env=env,
             )
-            output = r.stdout + r.stderr
-            running = "running" in output.lower() or "active" in output.lower()
-            port = None
-            message = output.strip()
+            output = (r.stdout or "") + (r.stderr or "")
+            low = output.lower()
+            # Prefer explicit runtime line: "Runtime: running (pid …)"
+            if re.search(r"runtime:\s*running", low) or re.search(r"\brunning\s*\(pid", low):
+                running = True
+            elif ("running" in low or "active" in low) and not any(
+                x in low for x in ("not running", "stopped", "inactive", "is not running", "node.js v")
+            ):
+                running = True
             for line in output.split("\n"):
                 if "port" in line.lower():
                     m = re.search(r"(\d{4,5})", line)
                     if m:
                         port = m.group(1)
-            version = self.get_version()
-            return {"running": running, "port": port, "version": version, "message": message[:200]}
+            message = output.strip()[:200]
         except FileNotFoundError:
-            return {"running": False, "port": None, "version": "", "message": "openclaw CLI not found"}
+            return make_status(installed=False, port=None, message="openclaw CLI not found")
         except subprocess.TimeoutExpired:
-            return {"running": False, "port": None, "version": "", "message": "Status check timed out"}
+            message = "Status check timed out"
         except Exception as e:
-            return {"running": False, "port": None, "version": "", "message": str(e)[:200]}
+            message = str(e)[:200]
+
+        # Fallback: process / port (CLI status may fail due to wrong Node on PATH)
+        if not running:
+            if process_running("openclaw/dist/index.js gateway", "openclaw gateway"):
+                running = True
+            elif port_listening(18789) or (port and port_listening(int(port))):
+                running = True
+        if not port and port_listening(18789):
+            port = "18789"
+        if not message:
+            message = f"Gateway running on :{port}" if running and port else ("Running" if running else "Stopped")
+        return make_status(
+            installed=True,
+            running=running,
+            port=port,
+            version=version,
+            message=message[:200],
+        )
 
     def restart(self) -> dict:
+        from backends.base import enriched_env
         try:
             r = subprocess.run(
                 ["openclaw", "gateway", "restart"],
                 capture_output=True, text=True, timeout=15,
+                env=enriched_env(),
             )
             time.sleep(2)
             output = r.stdout + r.stderr
@@ -771,11 +814,25 @@ class OpenClawAdapter(BackendAdapter):
         ]
 
     def get_version(self) -> str:
+        from backends.base import enriched_env
         try:
             r = subprocess.run(
                 ["openclaw", "--version"],
                 capture_output=True, text=True, timeout=5,
+                env=enriched_env(),
             )
-            return (r.stdout + r.stderr).strip()
+            text = (r.stdout or "") + (r.stderr or "")
+            for line in text.splitlines():
+                s = line.strip()
+                if not s:
+                    continue
+                if "node.js" in s.lower() and "required" in s.lower():
+                    continue
+                if s.lower().startswith("if you use nvm"):
+                    continue
+                return s[:80]
+            return text.strip().split("\n")[0][:80] if text.strip() else "unknown"
         except (FileNotFoundError, subprocess.TimeoutExpired):
+            return "unknown"
+        except Exception:
             return "unknown"

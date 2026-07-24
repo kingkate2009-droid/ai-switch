@@ -122,10 +122,16 @@ class ContinueAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
+        from backends.base import make_status, vscode_extension_installed
+
+        # Only real product install counts. ~/.continue may be created by this manager.
+        installed = vscode_extension_installed("continue.continue")
         config = self._load_config()
         models = config.get("models", [])
-        return {
-            "running": config != {},
-            "version": "",
-            "message": f"{len(models)} model(s) configured" if models else "Not configured",
-        }
+        if not installed:
+            return make_status(installed=False, message="Continue.dev extension not installed")
+        return make_status(
+            installed=True,
+            running=False,
+            message=f"{len(models)} model(s) configured" if models else "Installed",
+        )

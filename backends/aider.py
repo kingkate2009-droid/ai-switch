@@ -121,20 +121,16 @@ class AiderAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        try:
-            r = subprocess.run(
-                ["aider", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            version = (r.stdout + r.stderr).strip()
-            config = self._load_config()
-            keys = config.get("api-key", [])
-            return {
-                "running": r.returncode == 0,
-                "version": version,
-                "message": f"{len(keys) if isinstance(keys, list) else 1} key(s) configured",
-            }
-        except FileNotFoundError:
-            return {"running": False, "version": "", "message": "aider CLI not found"}
-        except Exception as e:
-            return {"running": False, "version": "", "message": str(e)[:100]}
+        from backends.base import make_status, cli_available
+
+        installed, version = cli_available("aider")
+        if not installed:
+            return make_status(installed=False, message="aider CLI not found")
+        config = self._load_config()
+        keys = config.get("api-key", [])
+        return make_status(
+            installed=True,
+            running=False,
+            version=version,
+            message=f"{len(keys) if isinstance(keys, list) else 1} key(s) configured",
+        )

@@ -179,6 +179,11 @@ bash scripts/build_package.sh
 - [ ] PWA support
 - [ ] Additional backend adapters
 
+## Links
+
+- [GitHub](https://github.com/kingkate2009-droid/ai-switch)
+- [Linux.do](https://linux.do/) — community & discussion
+
 ## License
 
 Apache 2.0

@@ -2,9 +2,7 @@ import json
 import threading
 import time
 from datetime import datetime, timezone
-
 from pathlib import Path
-
 from core.data import (
     get_enabled_models,
     get_settings,
@@ -160,19 +158,36 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
     api_key = key_entry["api_key"]
     check_type = _resolve_check_type(vendor)
 
-    # Key-level check: try any known model (full inventory), not only enabled ones
+    # Primary check model (user-selected). If set, key-level / scheduled checks
+    # probe this model only. If empty, keep legacy multi-model / scan behavior.
+    check_model = str(key_entry.get("check_model") or "").strip()
     key_models = key_entry.get("models", [])
-    if key_models:
+    if check_model:
+        models_to_try = [check_model]
+    elif key_models:
+        # Legacy: try any known model (full inventory), not only enabled ones
         models_to_try = [m["id"] if isinstance(m, dict) else m for m in key_models]
+        # Prefer default_model first when present in inventory
+        dm = str(key_entry.get("default_model") or "").strip()
+        if dm and dm in models_to_try:
+            models_to_try = [dm] + [m for m in models_to_try if m != dm]
     else:
         models_to_try = None
 
     start = time.time()
-    healthy, error_msg = _probe_with_retry(check_type, api_url, api_key, models_to_try)
+    if check_model:
+        healthy, error_msg = _probe_model_with_retry(check_type, api_url, api_key, check_model)
+        if healthy and error_msg and not str(error_msg).startswith("["):
+            error_msg = f"[{check_model}] {error_msg}"
+        elif healthy and not error_msg:
+            error_msg = f"[{check_model}] ok"
+    else:
+        healthy, error_msg = _probe_with_retry(check_type, api_url, api_key, models_to_try)
     latency_ms = int((time.time() - start) * 1000)
 
     models = []
     default_model = key_entry.get("default_model", "")
+    # Still allow inventory scan when healthy (does not change check_model)
     if healthy and scan_models_flag:
         models = scan_models(check_type, api_url, api_key)
         # Merge scan results with existing inventory so we never wipe known models
@@ -212,6 +227,8 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "models": models,
         "default_model": default_model,
+        "check_model": check_model,
+        "used_check_model": bool(check_model),
     }
 
     with _lock:
@@ -289,25 +306,53 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
         "disabled_models": sorted(disabled),
         "model_health": model_health,
     }
-    # Prefer a working enabled model as default
+    # Prefer a working enabled model as default — never overwrite user check_model
+    # and only auto-fill default_model when user has not set one.
     enabled_ok = [m for m in ok_models if m not in disabled]
+    user_default = str(key_entry.get("default_model") or "").strip()
+    if not user_default:
+        if enabled_ok:
+            updates["default_model"] = enabled_ok[0]
+        elif ok_models:
+            updates["default_model"] = ok_models[0]
+    # Any usable model ⇒ key stays/becomes enabled (vendor considered normal)
     if enabled_ok:
-        updates["default_model"] = enabled_ok[0]
-        if key_entry.get("enabled", True) is False and ok_models:
-            updates["enabled"] = True
+        updates["enabled"] = True
     elif ok_models:
-        updates["default_model"] = ok_models[0]
+        updates["enabled"] = True
 
     updated = update_key_data(vendor_id, key_id, **updates) or key_entry
 
+    # Reflect aggregate key health in cache: usable model ⇒ healthy for vendor status
+    cache_key = f"{vendor_id}:{key_id}"
+    key_healthy = bool(enabled_ok or ok_models)
+    with _lock:
+        cache = _load_cache()
+        prev = cache.get(cache_key) or {}
+        cache[cache_key] = {
+            **prev,
+            "key_id": key_id,
+            "vendor_id": vendor_id,
+            "healthy": key_healthy,
+            "latency_ms": (results[0].get("latency_ms") if results else prev.get("latency_ms") or 0),
+            "error": None if key_healthy else (fail_models and f"{len(fail_models)} model(s) failed" or prev.get("error")),
+            "message": (
+                f"{len(ok_models)} model(s) ok"
+                if key_healthy
+                else (prev.get("message") or "no usable model")
+            ),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "models": list_model_ids(updated) or models,
+            "default_model": updated.get("default_model") or "",
+            "check_model": updated.get("check_model") or "",
+        }
+        _save_cache(cache)
+
     # Backend engines: sync enabled models only (failed auto-removed via disabled_models)
-    if updated.get("enabled", True):
-        if get_enabled_models(updated):
-            on_key_updated(vendor, updated)
-        else:
-            # No healthy/enabled models left → drop key models from backends, keep in system
-            on_key_removed(vendor, updated)
+    if updated.get("enabled", True) and get_enabled_models(updated):
+        on_key_updated(vendor, updated)
     else:
+        # No healthy/enabled models left → drop key models from backends, keep in system
         on_key_removed(vendor, updated)
 
     reconcile_all()
@@ -323,16 +368,41 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
         "enabled_models": get_enabled_models(updated),
         "results": results,
         "key": updated,
+        "healthy": key_healthy,
+        "enabled": updated.get("enabled") is not False,
     }
+
+
+def _key_has_usable_model(key: dict, health: dict = None) -> bool:
+    """True if key-level healthy OR any non-disabled model is healthy in model_health."""
+    if not key or not key.get("api_key"):
+        return False
+    if health is None:
+        health = {}
+    if health.get("healthy") is True:
+        return True
+    disabled = set(key.get("disabled_models") or [])
+    mh = key.get("model_health") or {}
+    for mid, rec in mh.items():
+        if mid in disabled:
+            continue
+        if isinstance(rec, dict) and rec.get("healthy") is True:
+            return True
+    # enabled models list after successful inventory (key healthy path)
+    try:
+        if health.get("healthy") is True and (get_enabled_models(key) or list_model_ids(key)):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def is_key_backend_syncable(vendor_id: str, key: dict) -> bool:
     """Whether a key may be written into backend engine configs.
 
     - disabled keys: never
-    - known unhealthy (health cache): never (system may still keep the key)
-    - healthy / not-yet-checked: yes (unchecked kept for first-push UX;
-      after full check, failures are removed via on_key_removed + reconcile)
+    - known unhealthy AND no usable model: never
+    - healthy / has usable model / not-yet-checked: yes
     """
     if not key or not key.get("api_key"):
         return False
@@ -344,16 +414,21 @@ def is_key_backend_syncable(vendor_id: str, key: dict) -> bool:
     with _lock:
         cache = _load_cache()
     h = cache.get(f"{vendor_id}:{kid}") or {}
-    if h.get("healthy") is False:
+    if h.get("healthy") is False and not _key_has_usable_model(key, h):
         return False
     return True
 
 
 def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
-    """Push healthy keys (auto-enable + sync); strip unhealthy from backends (keep in system)."""
+    """Push usable keys (auto-enable + sync); strip fully-unusable from backends (keep in system).
+
+    Policy: if the key is healthy OR has at least one usable model, treat as enabled
+    and sync to backends. Only strip when nothing is usable.
+    """
     if not vendor or not key:
         return
-    if health.get("healthy"):
+    usable = bool(health.get("healthy")) or _key_has_usable_model(key, health)
+    if usable:
         models = health.get("models", [])
         default_model = health.get("default_model", "") or key.get("default_model", "")
         updates = {"enabled": True}
@@ -364,9 +439,12 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
         if default_model:
             updates["default_model"] = default_model
         updated = update_key_data(vendor["id"], key["id"], **updates) or key
-        # mark response for UI
+        # mark response for UI — usable ⇒ enabled + healthy for vendor aggregation
         try:
             health["enabled"] = True
+            if health.get("healthy") is not True:
+                health["healthy"] = True
+                health.setdefault("message", "usable model available")
             if updates.get("models") is not None:
                 health["models"] = updates["models"]
             if updates.get("default_model"):

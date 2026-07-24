@@ -216,27 +216,19 @@ class GrokCliAdapter(BackendAdapter):
         return vendors
 
     def get_status(self) -> dict:
+        from backends.base import make_status, cli_available
+
         env = self._load_env()
         key_vars = [v for v in set(self._KEY_ENV.values()) | {"CUSTOM_API_KEY"} if env.get(v)]
-        version = ""
-        running = False
-        for cmd in ("grok", "grok-cli"):
-            try:
-                r = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=5)
-                if r.returncode == 0 or (r.stdout + r.stderr).strip():
-                    version = (r.stdout + r.stderr).strip().split("\n")[0][:80]
-                    running = True
-                    break
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                continue
-        if not running and shutil.which("grok"):
-            running = True
+        installed, version = cli_available(("grok", "grok-cli"))
+        if not installed and (self._env_path.exists() or self._config_dir.exists() or key_vars):
+            installed = True
+        if not installed:
+            return make_status(installed=False, message="grok CLI not found")
         msg = f"{len(key_vars)} key(s) in .env"
         if env.get("GROKCLI_PROVIDER"):
             msg += f"; provider={env['GROKCLI_PROVIDER']}"
-        if not version and not key_vars:
-            msg = "Not installed / not configured"
-        return {"running": running or bool(key_vars), "version": version, "message": msg}
+        return make_status(installed=True, running=False, version=version, message=msg)
 
     def get_version(self) -> str:
         for cmd in ("grok", "grok-cli"):

@@ -103,6 +103,12 @@ def reconcile_all() -> dict:
             if cfg.get("disabled"):
                 results[name] = {"ok": False, "skipped": True, "error": "disabled"}
                 continue
+            try:
+                if not adapter.is_installed():
+                    results[name] = {"ok": False, "skipped": True, "error": "not installed"}
+                    continue
+            except Exception:
+                pass
             adapter.reconcile()
             results[name] = {"ok": True, "skipped": False, "error": None}
         except Exception as e:
