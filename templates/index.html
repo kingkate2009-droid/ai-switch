@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title data-i18n="app.title">{{ t('app.title') }}</title>
-<link rel="stylesheet" href="/static/style.css?v=vendor-focus-8">
+<link rel="stylesheet" href="/static/style.css?v=checkin-inline-edit-1">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -64,6 +64,10 @@
       <a href="#" class="nav-item" data-view="health" onclick="switchView('health');return false">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         <span data-i18n="nav.health">{{ t('nav.health') }}</span>
+      </a>
+      <a href="#" class="nav-item" data-view="checkin" onclick="switchView('checkin');return false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <span data-i18n="nav.checkin">{{ t('nav.checkin') }}</span>
       </a>
       <a href="#" class="nav-item" data-view="diagnostics" onclick="switchView('diagnostics');return false">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -290,18 +294,22 @@
 
             <div id="keyTableContainer">
               <div class="key-toolbar">
-                <input type="text" id="keySearch" oninput="filterKeys()" data-i18n-placeholder="keySearch.placeholder" placeholder="{{ t('keySearch.placeholder') }}">
-                <select id="keyFilter" onchange="filterKeys()">
-                  <option value="all" data-i18n="keyFilter.all">{{ t('keyFilter.all') }}</option>
-                  <option value="healthy" data-i18n="keyFilter.healthy">{{ t('keyFilter.healthy') }}</option>
-                  <option value="unhealthy" data-i18n="keyFilter.unhealthy">{{ t('keyFilter.unhealthy') }}</option>
-                  <option value="disabled" data-i18n="keyFilter.disabled">{{ t('keyFilter.disabled') }}</option>
-                </select>
-                <div id="batchActions" class="batch-actions" style="display:none">
-                  <button class="btn btn-sm" onclick="batchAction('enable')" data-i18n="action.batchEnable">{{ t('action.batchEnable') }}</button>
-                  <button class="btn btn-sm btn-warning" onclick="batchAction('disable')" data-i18n="action.batchDisable">{{ t('action.batchDisable') }}</button>
-                  <button class="btn btn-sm btn-danger" onclick="batchAction('delete')" data-i18n="action.batchDelete">{{ t('action.batchDelete') }}</button>
-                  <span id="batchCount" class="batch-count"></span>
+                <div class="key-toolbar-left">
+                  <input type="text" id="keySearch" oninput="filterKeys()" data-i18n-placeholder="keySearch.placeholder" placeholder="{{ t('keySearch.placeholder') }}">
+                  <select id="keyFilter" onchange="filterKeys()">
+                    <option value="all" data-i18n="keyFilter.all">{{ t('keyFilter.all') }}</option>
+                    <option value="healthy" data-i18n="keyFilter.healthy">{{ t('keyFilter.healthy') }}</option>
+                    <option value="unhealthy" data-i18n="keyFilter.unhealthy">{{ t('keyFilter.unhealthy') }}</option>
+                    <option value="disabled" data-i18n="keyFilter.disabled">{{ t('keyFilter.disabled') }}</option>
+                  </select>
+                </div>
+                <div class="key-toolbar-right">
+                  <div id="batchActions" class="batch-actions" style="display:none">
+                    <button class="btn btn-sm" onclick="batchAction('enable')" data-i18n="action.batchEnable">{{ t('action.batchEnable') }}</button>
+                    <button class="btn btn-sm btn-warning" onclick="batchAction('disable')" data-i18n="action.batchDisable">{{ t('action.batchDisable') }}</button>
+                    <button class="btn btn-sm btn-danger" onclick="batchAction('delete')" data-i18n="action.batchDelete">{{ t('action.batchDelete') }}</button>
+                    <span id="batchCount" class="batch-count"></span>
+                  </div>
                 </div>
               </div>
               <div class="table-wrap">
@@ -648,6 +656,51 @@
       </div>
     </div>
 
+    <!-- ═══ Check-in ═══ -->
+    <div class="view" id="view-checkin">
+      <div class="page-head">
+        <h2 data-i18n="nav.checkin">{{ t('nav.checkin') }}</h2>
+        <p class="page-desc" data-i18n="checkin.pageDesc">{{ t('checkin.pageDesc') }}</p>
+        <div class="page-actions">
+          <button class="btn btn-sm" onclick="loadCheckinPage()">
+            <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+            <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+          </button>
+        </div>
+      </div>
+      <div class="dash-section">
+        <div class="key-toolbar checkin-toolbar">
+          <div class="key-toolbar-left">
+            <select id="checkinVendorFilter" onchange="renderCheckinTable()">
+              <option value="" data-i18n="checkin.filterAllVendors">{{ t('checkin.filterAllVendors') }}</option>
+            </select>
+            <select id="checkinSupportFilter" onchange="renderCheckinTable()">
+              <option value="all" data-i18n="checkin.filterSupportAll">{{ t('checkin.filterSupportAll') }}</option>
+              <option value="yes" data-i18n="checkin.filterSupportYes">{{ t('checkin.filterSupportYes') }}</option>
+              <option value="no" data-i18n="checkin.filterSupportNo">{{ t('checkin.filterSupportNo') }}</option>
+            </select>
+          </div>
+          <div class="key-toolbar-right">
+            <span class="batch-count" id="checkinSummary">—</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="checkinTable">
+            <thead>
+              <tr>
+                <th data-i18n="checkin.colVendor">{{ t('checkin.colVendor') }}</th>
+                <th data-i18n="checkin.colSupport">{{ t('checkin.colSupport') }}</th>
+                <th data-i18n="checkin.colUrl">{{ t('checkin.colUrl') }}</th>
+                <th data-i18n="table.actions">{{ t('table.actions') }}</th>
+              </tr>
+            </thead>
+            <tbody id="checkinBody"></tbody>
+          </table>
+        </div>
+        <p class="form-hint" style="padding:10px 14px" data-i18n="checkin.hint">{{ t('checkin.hint') }}</p>
+      </div>
+    </div>
+
     <!-- ═══ Health Monitor ═══ -->
     <div class="view" id="view-health">
       <div class="page-head">
@@ -955,6 +1008,11 @@
         <label for="vendorTags" data-i18n="vendorModal.tags">{{ t('vendorModal.tags') }}</label>
         <input type="text" id="vendorTags" data-i18n-placeholder="vendorModal.tagsPh" placeholder="{{ t('vendorModal.tagsPh') }}">
         <p class="form-hint" data-i18n="vendorModal.tagsHint">{{ t('vendorModal.tagsHint') }}</p>
+      </div>
+      <div class="form-group form-group-wide">
+        <label for="vendorCheckinUrl" data-i18n="vendorModal.checkinUrl">{{ t('vendorModal.checkinUrl') }}</label>
+        <input type="text" id="vendorCheckinUrl" class="input-url-wide" data-i18n-placeholder="vendorModal.checkinUrlPh" placeholder="{{ t('vendorModal.checkinUrlPh') }}">
+        <p class="form-hint" data-i18n="vendorModal.checkinUrlHint">{{ t('vendorModal.checkinUrlHint') }}</p>
       </div>
     </div>
     <div class="modal-footer">
@@ -1337,7 +1395,7 @@ function showToast(msg, type) {
 
 function switchView(name, opts) {
   opts = opts || {};
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, routes: 1, health: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, routes: 1, health: 1, checkin: 1, diagnostics: 1, settings: 1 };
   if (!allowed[name]) name = 'dashboard';
 
   document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
@@ -1366,6 +1424,7 @@ function switchView(name, opts) {
   if (name === 'models') loadModelsCatalog();
   if (name === 'routes') loadRoutesPage();
   if (name === 'health') loadHealthMonitor();
+  if (name === 'checkin') loadCheckinPage();
   if (name === 'diagnostics') loadDiagnostics();
   if (name === 'settings') loadSettingsPage();
   applyReadOnlyUI();
@@ -1655,6 +1714,8 @@ function getBackendIcon(name) {
     'copilot-cli': 'GH',
     'antigravity': 'AG',
     'cursor-cli': 'CS',
+    'trae-work': 'TW',
+    'kimi-code': 'KM',
   };
   return icons[name] || 'B';
 }
@@ -1670,6 +1731,21 @@ function getIconClass(name) {
   return map[name] || '';
 }
 
+function formatInstallKinds(kinds) {
+  if (!kinds || !kinds.length) return '';
+  var map = { cli: 'CLI', app: 'App', extension: 'Ext', config: 'Cfg' };
+  var order = ['cli', 'app', 'extension', 'config'];
+  var seen = {};
+  var parts = [];
+  order.forEach(function(k) {
+    if (kinds.indexOf(k) >= 0 && !seen[k]) { seen[k] = 1; parts.push(map[k] || k); }
+  });
+  kinds.forEach(function(k) {
+    if (!seen[k]) { seen[k] = 1; parts.push(map[k] || k); }
+  });
+  return parts.join('+');
+}
+
 function getBackendStatusInfo(s, config, supportsByok) {
   var running = s && s.running === true;
   var msg = (s && s.message) || '';
@@ -1683,6 +1759,7 @@ function getBackendStatusInfo(s, config, supportsByok) {
     installed = !notFoundKeywords.some(function(k) { return msgLower.indexOf(k) !== -1; });
     if (!installed && running) installed = true;
   }
+  var form = formatInstallKinds((s && s.install_kinds) || []);
 
   var status, badgeClass, dotClass;
   if (disabled) {
@@ -1708,8 +1785,11 @@ function getBackendStatusInfo(s, config, supportsByok) {
     badgeClass = 'badge-off';
     dotClass = 'dot-off';
   }
+  if (form && installed && !disabled) {
+    status = status + ' · ' + form;
+  }
 
-  return { status: status, badgeClass: badgeClass, dotClass: dotClass, installed: installed, running: running && installed };
+  return { status: status, badgeClass: badgeClass, dotClass: dotClass, installed: installed, running: running && installed, form: form };
 }
 
 function renderBackendCards(list, containerId) {
@@ -2899,6 +2979,7 @@ function showAddVendorModal() {
   $('vendorProxyTarget').value = '';
   $('proxyTargetGroup').style.display = 'none';
   if ($('vendorTags')) $('vendorTags').value = '';
+  if ($('vendorCheckinUrl')) $('vendorCheckinUrl').value = '';
   loadProviderSelect();
   $('vendorModal').classList.add('open');
 }
@@ -2916,6 +2997,7 @@ function editVendor() {
   $('vendorProxyTarget').value = v.proxy_target || '';
   $('proxyTargetGroup').style.display = v.proxy_target ? '' : 'none';
   if ($('vendorTags')) $('vendorTags').value = formatTags(v.tags || []);
+  if ($('vendorCheckinUrl')) $('vendorCheckinUrl').value = v.checkin_url || '';
   loadProviderSelect();
   const match = _knownProviders.find(function(x) { return x.id === v.provider; });
   if (match) {
@@ -2958,6 +3040,7 @@ async function saveVendor() {
     thinking_disabled: $('vendorThinkingDisabled').checked,
     proxy_target: $('vendorProxyEnabled').checked ? $('vendorProxyTarget').value.trim() : '',
     tags: parseTagsInput(($('vendorTags') && $('vendorTags').value) || ''),
+    checkin_url: ($('vendorCheckinUrl') && $('vendorCheckinUrl').value.trim()) || '',
   };
   if (!data.name) { alert(_('validation.nameRequired') || 'Name is required'); return; }
   if (id) {
@@ -4206,10 +4289,15 @@ async function onBackupFileSelected(ev) {
       return;
     }
   }
-  var replace = confirm(_('backup.chooseMode') || 'OK = REPLACE all data. Cancel = MERGE (only add missing keys).');
-  var mode = replace ? 'replace' : 'merge';
-  if (mode === 'replace' && !confirm(_('backup.confirmReplaceFinal') || 'Replace will overwrite all vendors/settings. Continue?')) {
-    return;
+  var mode = 'merge';
+  // MetaAPI backups always merge (sites/accounts → vendors/keys)
+  var isMetapi = !!(payload && payload.accounts && Array.isArray(payload.accounts.sites) && Array.isArray(payload.accounts.accounts));
+  if (!isMetapi) {
+    var replace = confirm(_('backup.chooseMode') || 'OK = REPLACE all data. Cancel = MERGE (only add missing keys).');
+    mode = replace ? 'replace' : 'merge';
+    if (mode === 'replace' && !confirm(_('backup.confirmReplaceFinal') || 'Replace will overwrite all vendors/settings. Continue?')) {
+      return;
+    }
   }
   var res = await api('/api/backup/import', {
     method: 'POST',
@@ -4219,15 +4307,28 @@ async function onBackupFileSelected(ev) {
     showToast(res.error || 'Import failed', 'error');
     return;
   }
-  var msg = mode === 'replace'
-    ? (_('backup.replaceDone') || 'Backup restored (replace)')
-    : (_('backup.mergeDone') || 'Backup merged: +{v} vendors, +{k} keys, skipped {s}')
+  var msg;
+  if (res.format === 'metapi') {
+    msg = (_('backup.metapiDone') || 'MetaAPI import: +{v} vendors, merge {m}, +{k} keys, move {mv}, skip {s}, no-key sites {nk}, checkin {c}')
+      .replace('{v}', res.vendors_added || 0)
+      .replace('{m}', res.vendors_merged || 0)
+      .replace('{k}', res.keys_added || 0)
+      .replace('{mv}', res.keys_moved || 0)
+      .replace('{s}', res.keys_skipped || 0)
+      .replace('{nk}', res.sites_skipped_no_keys || 0)
+      .replace('{c}', res.checkin_updated || 0);
+  } else if (mode === 'replace') {
+    msg = (_('backup.replaceDone') || 'Backup restored (replace)');
+  } else {
+    msg = (_('backup.mergeDone') || 'Backup merged: +{v} vendors, +{k} keys, skipped {s}')
         .replace('{v}', res.vendors_added || 0)
         .replace('{k}', res.keys_added || 0)
         .replace('{s}', res.keys_skipped || 0);
+  }
   showToast(msg, 'success');
   if (typeof loadVendors === 'function') loadVendors();
   if (typeof loadDashboard === 'function') loadDashboard();
+  if (typeof loadCheckinPage === 'function' && document.querySelector('#view-checkin.active')) loadCheckinPage();
 }
 
 // ── Backends Page ────────────────────────
@@ -5597,6 +5698,182 @@ async function loadHealthMonitor() {
       if (document.querySelector('#view-health.active')) loadHealthMonitor();
     }, state === 'running' ? 3000 : 15000);
   }
+}
+
+// ── Check-in page ────────────────────────
+
+var _checkinVendors = [];
+
+async function loadCheckinPage() {
+  try {
+    var res = await api('/api/checkin/vendors?support=all');
+    _checkinVendors = (res && res.vendors) || [];
+  } catch (e) {
+    _checkinVendors = [];
+    showToast((e && e.message) || 'load failed', 'error');
+  }
+  // fill vendor filter
+  var sel = $('checkinVendorFilter');
+  if (sel) {
+    var cur = sel.value || '';
+    var opts = '<option value="">' + esc(_('checkin.filterAllVendors') || 'All vendors') + '</option>';
+    _checkinVendors.forEach(function(v) {
+      opts += '<option value="' + esc(String(v.id)) + '">' + esc(v.name || v.provider || v.id) + '</option>';
+    });
+    sel.innerHTML = opts;
+    if (cur) sel.value = cur;
+  }
+  renderCheckinTable();
+}
+
+function renderCheckinTable() {
+  var body = $('checkinBody');
+  if (!body) return;
+  var vid = ($('checkinVendorFilter') && $('checkinVendorFilter').value) || '';
+  var support = ($('checkinSupportFilter') && $('checkinSupportFilter').value) || 'all';
+  var rows = (_checkinVendors || []).filter(function(v) {
+    if (vid && String(v.id) !== String(vid)) return false;
+    if (support === 'yes' && !v.supports_checkin) return false;
+    if (support === 'no' && v.supports_checkin) return false;
+    return true;
+  });
+  var yes = rows.filter(function(v) { return v.supports_checkin; }).length;
+  var no = rows.length - yes;
+  var sum = $('checkinSummary');
+  if (sum) {
+    sum.textContent = (_('checkin.summary') || '{total} total · {yes} supported · {no} not')
+      .replace('{total}', String(rows.length))
+      .replace('{yes}', String(yes))
+      .replace('{no}', String(no));
+  }
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="4" class="todo-empty">' + esc(_('checkin.none') || 'No matching vendors') + '</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(function(v) {
+    var id = String(v.id || '');
+    var idSafe = esc(id).replace(/'/g, "\\'");
+    var url = v.checkin_url || '';
+    var supportBadge = url
+      ? '<span class="badge badge-ok">' + esc(_('checkin.yes') || 'Yes') + '</span>'
+      : '<span class="badge">' + esc(_('checkin.no') || 'No') + '</span>';
+    var urlCell = url
+      ? '<span class="checkin-url-cell" title="' + esc(url) + '">' + esc(url) + '</span>'
+      : '<span class="form-hint">—</span>';
+    var actions = [];
+    if (url) {
+      actions.push('<button class="btn btn-sm btn-primary" onclick="runCheckin(\'' + idSafe + '\')">' + esc(_('checkin.run') || 'Check in') + '</button>');
+      actions.push('<button class="btn btn-sm btn-warning" onclick="disableCheckin(\'' + idSafe + '\')">' + esc(_('checkin.disable') || 'Disable check-in') + '</button>');
+    }
+    actions.push('<button class="btn btn-sm" onclick="checkinEditVendor(\'' + idSafe + '\')">' + esc(_('checkin.editVendor') || 'Edit vendor') + '</button>');
+    return '<tr data-checkin-vendor="' + esc(id) + '">' +
+      '<td><strong>' + esc(v.name || '') + '</strong><div class="form-hint">' + esc(v.provider || '') + ' · ' + esc(String(v.enabled_key_count || 0)) + '/' + esc(String(v.key_count || 0)) + ' keys</div></td>' +
+      '<td>' + supportBadge + '</td>' +
+      '<td>' + urlCell + '</td>' +
+      '<td class="actions-cell">' + actions.join('') + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function saveCheckinUrl(vendorId, inputEl) {
+  var input = inputEl || document.querySelector('.checkin-url-input[data-vendor-id="' + vendorId + '"]');
+  if (!input) return;
+  var next = String(input.value || '').trim();
+  var cur = '';
+  for (var i = 0; i < (_checkinVendors || []).length; i++) {
+    if (String(_checkinVendors[i].id) === String(vendorId)) {
+      cur = String(_checkinVendors[i].checkin_url || '').trim();
+      break;
+    }
+  }
+  if (next === cur) return;
+  try {
+    await api('/api/vendors/' + encodeURIComponent(vendorId), {
+      method: 'PUT',
+      body: JSON.stringify({ checkin_url: next }),
+    });
+    // patch local cache
+    for (var j = 0; j < (_checkinVendors || []).length; j++) {
+      if (String(_checkinVendors[j].id) === String(vendorId)) {
+        _checkinVendors[j].checkin_url = next;
+        _checkinVendors[j].supports_checkin = !!next;
+        break;
+      }
+    }
+    if (_allVendorsData) {
+      for (var k = 0; k < _allVendorsData.length; k++) {
+        if (String(_allVendorsData[k].id) === String(vendorId)) {
+          _allVendorsData[k].checkin_url = next;
+          break;
+        }
+      }
+    }
+    if (_currentVendor && String(_currentVendor.id) === String(vendorId)) {
+      _currentVendor.checkin_url = next;
+    }
+    renderCheckinTable();
+    showToast(_('checkin.urlSaved') || 'Check-in URL saved', 'success');
+  } catch (e) {
+    showToast((e && e.message) || 'save failed', 'error');
+    input.value = cur;
+  }
+}
+
+async function disableCheckin(vendorId) {
+  if (!confirm(_('checkin.disableConfirm') || 'Disable check-in and clear URL?')) return;
+  try {
+    await api('/api/vendors/' + encodeURIComponent(vendorId), {
+      method: 'PUT',
+      body: JSON.stringify({ checkin_url: '' }),
+    });
+    for (var j = 0; j < (_checkinVendors || []).length; j++) {
+      if (String(_checkinVendors[j].id) === String(vendorId)) {
+        _checkinVendors[j].checkin_url = '';
+        _checkinVendors[j].supports_checkin = false;
+        break;
+      }
+    }
+    if (_allVendorsData) {
+      for (var k = 0; k < _allVendorsData.length; k++) {
+        if (String(_allVendorsData[k].id) === String(vendorId)) {
+          _allVendorsData[k].checkin_url = '';
+          break;
+        }
+      }
+    }
+    if (_currentVendor && String(_currentVendor.id) === String(vendorId)) {
+      _currentVendor.checkin_url = '';
+    }
+    renderCheckinTable();
+    showToast(_('checkin.disabled') || 'Check-in disabled', 'success');
+  } catch (e) {
+    showToast((e && e.message) || 'disable failed', 'error');
+  }
+}
+
+async function checkinEditVendor(vendorId) {
+  try {
+    await selectVendor(String(vendorId));
+    switchView('vendors', { skipLoad: true });
+    editVendor();
+  } catch (e) {
+    showToast((e && e.message) || 'open vendor failed', 'error');
+  }
+}
+
+function runCheckin(vendorId) {
+  var url = '';
+  for (var i = 0; i < (_checkinVendors || []).length; i++) {
+    if (String(_checkinVendors[i].id) === String(vendorId)) {
+      url = String(_checkinVendors[i].checkin_url || '').trim();
+      break;
+    }
+  }
+  if (!url) {
+    showToast(_('checkin.noUrl') || 'Check-in URL not set', 'error');
+    return;
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 function renderHealthKeys() {

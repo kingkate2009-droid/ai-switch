@@ -28,6 +28,7 @@ from core.data import (
     get_vendors,
     is_read_only,
     list_all_tags,
+    list_checkin_vendors,
     list_model_ids,
     list_profiles,
     promote_key,
@@ -504,6 +505,7 @@ def api_create_vendor():
         thinking_disabled=data.get("thinking_disabled", False),
         proxy_target=data.get("proxy_target", ""),
         tags=data.get("tags"),
+        checkin_url=data.get("checkin_url", ""),
     )
     log_event("vendor.add", vendor_id=v.get("id"), name=v.get("name"), provider=v.get("provider"))
     return jsonify(v), 201
@@ -515,7 +517,7 @@ def api_update_vendor(vendor_id):
     # only pass known fields
     allowed = {k: data[k] for k in (
         "name", "provider", "api_url", "endpoint_type",
-        "thinking_disabled", "proxy_target", "tags",
+        "thinking_disabled", "proxy_target", "tags", "checkin_url",
     ) if k in data}
     v = update_vendor(vendor_id, **allowed)
     if not v:
@@ -526,6 +528,27 @@ def api_update_vendor(vendor_id):
 @app.route("/api/tags", methods=["GET"])
 def api_list_tags():
     return jsonify({"tags": list_all_tags()})
+
+
+@app.route("/api/checkin/vendors", methods=["GET"])
+def api_checkin_vendors():
+    """List vendors for check-in page.
+
+    Query:
+      vendor_id: optional filter by vendor id
+      support: all | yes | no  (whether checkin_url is set)
+    """
+    vendor_id = (request.args.get("vendor_id") or "").strip()
+    support = (request.args.get("support") or "all").strip().lower()
+    if support not in ("all", "yes", "no"):
+        support = "all"
+    items = list_checkin_vendors(vendor_id=vendor_id, support=support)
+    return jsonify({
+        "vendors": items,
+        "total": len(items),
+        "supported": sum(1 for x in items if x.get("supports_checkin")),
+        "unsupported": sum(1 for x in items if not x.get("supports_checkin")),
+    })
 
 
 @app.route("/api/models/catalog", methods=["GET"])
@@ -1674,7 +1697,7 @@ def api_gateway_status():
         health = get_all_health_status()
         status["health"] = health
         status["openclaw_version"] = ocp.get_version()
-        status["manager_version"] = "2.0.2"
+        status["manager_version"] = "2.0.3"
         status["min_openclaw_version"] = "2026.3.0"
         status["recommended_openclaw_version"] = "2026.6.11"
         return jsonify(status)

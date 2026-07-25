@@ -920,9 +920,9 @@ main {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .detail-head-left {
@@ -931,11 +931,15 @@ main {
   gap: 8px;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .detail-head-left h3 {
   font-size: 16px;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail-url {
@@ -944,12 +948,20 @@ main {
   background: var(--bg3);
   padding: 2px 6px;
   border-radius: 4px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detail-head-actions {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 6px;
   align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* ── Table ─────────────────────── */
@@ -1065,9 +1077,10 @@ td.status-cell {
 
 .actions-cell {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 4px;
-  flex-wrap: wrap;
-  white-space: normal;
+  white-space: nowrap;
   justify-content: flex-end;
   align-items: center;
   position: sticky;
@@ -1075,11 +1088,16 @@ td.status-cell {
   background: var(--bg);
   z-index: 1;
   box-shadow: -6px 0 8px -6px rgba(0,0,0,0.25);
+  padding: 4px 6px;
 }
 
 tr:hover .actions-cell { background: var(--bg2); }
 
-.actions-cell .btn { flex-shrink: 0; }
+.actions-cell .btn {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  font-size: 11px;
+}
 
 th:last-child {
   width: 1%;
@@ -1090,6 +1108,7 @@ th:last-child {
 td:last-child {
   width: 1%;
   text-align: right;
+  white-space: nowrap;
 }
 
 #keysTable {
@@ -1331,16 +1350,90 @@ td:last-child {
 
 .key-toolbar {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+}
+
+.key-toolbar-left {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.key-toolbar-right {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.checkin-toolbar select {
+  min-width: 140px;
+}
+
+.form-group-wide input.input-url-wide,
+#vendorCheckinUrl {
+  width: 100%;
+  min-width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+
+#checkinTable {
+  table-layout: fixed;
+  min-width: 720px;
+}
+
+#checkinTable th:nth-child(1),
+#checkinTable td:nth-child(1) {
+  width: 22%;
+}
+
+#checkinTable th:nth-child(2),
+#checkinTable td:nth-child(2) {
+  width: 90px;
+}
+
+#checkinTable th:nth-child(3),
+#checkinTable td:nth-child(3) {
+  width: auto;
+  min-width: 200px;
+}
+
+#checkinTable th:nth-child(4),
+#checkinTable td:nth-child(4) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.checkin-url-cell {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text2);
 }
 
 .key-toolbar input[type="text"] {
   flex: 1;
-  min-width: 120px;
+  min-width: 100px;
+  max-width: 240px;
   padding: 6px 10px;
   background: var(--bg3);
   border: 1px solid var(--border);
@@ -1362,19 +1455,22 @@ td:last-child {
   font-size: 13px;
   outline: none;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .batch-actions {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
 }
 
 .batch-count {
   font-size: 12px;
   color: var(--text2);
-  margin-left: 4px;
+  margin-left: 2px;
+  white-space: nowrap;
 }
 
 /* ── Empty State ──────────────── */

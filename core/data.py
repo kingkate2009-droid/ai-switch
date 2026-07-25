@@ -188,7 +188,8 @@ def _normalize_tags(raw) -> list[str]:
 
 
 def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "openai",
-               thinking_disabled: bool = False, proxy_target: str = "", tags=None) -> dict:
+               thinking_disabled: bool = False, proxy_target: str = "", tags=None,
+               checkin_url: str = "") -> dict:
     data = _load_data()
     vendor = {
         "id": _next_id(data.get("vendors", [])),
@@ -198,6 +199,7 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
         "endpoint_type": endpoint_type,
         "thinking_disabled": thinking_disabled,
         "proxy_target": proxy_target,
+        "checkin_url": (checkin_url or "").strip(),
         "tags": _normalize_tags(tags),
         "keys": [],
     }
@@ -210,11 +212,13 @@ def update_vendor(vendor_id: str, **kwargs) -> Optional[dict]:
     data = _load_data()
     for v in data["vendors"]:
         if v["id"] == vendor_id:
-            for key in ("name", "provider", "api_url", "endpoint_type", "thinking_disabled", "proxy_target"):
+            for key in ("name", "provider", "api_url", "endpoint_type", "thinking_disabled", "proxy_target", "checkin_url"):
                 if key in kwargs:
                     v[key] = kwargs[key]
             if "api_url" in kwargs:
                 v["api_url"] = kwargs["api_url"].rstrip("/")
+            if "checkin_url" in kwargs:
+                v["checkin_url"] = (kwargs.get("checkin_url") or "").strip()
             if "tags" in kwargs:
                 v["tags"] = _normalize_tags(kwargs["tags"])
             _save_data(data)
@@ -1015,12 +1019,21 @@ def import_backup(payload: dict, *, mode: str = "merge", password: str = "") -> 
     merge: upsert vendors by provider/name, skip duplicate secrets
     replace: overwrite vendors/settings/backends entirely
     password: required when payload is encrypted
+
+    Also accepts MetaAPI backups (accounts.sites + accounts.accounts).
     """
     if not isinstance(payload, dict):
         raise ValueError("invalid backup")
     from core.crypto_backup import is_encrypted_backup, maybe_decrypt
     if is_encrypted_backup(payload):
         payload = maybe_decrypt(payload, (password or "").strip() or None)
+    # MetaAPI / metapi backup format
+    try:
+        from core.metapi_import import is_metapi_backup, import_metapi_backup
+        if is_metapi_backup(payload):
+            return import_metapi_backup(payload, include_disabled=True)
+    except ImportError:
+        pass
     body = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     if not isinstance(body, dict):
         raise ValueError("invalid backup data")
@@ -1066,6 +1079,7 @@ def import_backup(payload: dict, *, mode: str = "merge", password: str = "") -> 
                 bool(vin.get("thinking_disabled")),
                 vin.get("proxy_target") or "",
                 tags=vin.get("tags"),
+                checkin_url=vin.get("checkin_url") or "",
             )
             existing = nv
             added_v += 1
@@ -1617,3 +1631,46 @@ def switch_profile(name: str) -> dict:
     except Exception:
         pass
     return load_profile(name, mode="replace")
+
+
+# ── Check-in (签到) ──────────────────────────────────────────
+
+
+def vendor_supports_checkin(vendor: dict) -> bool:
+    return bool(((vendor or {}).get("checkin_url") or "").strip())
+
+
+def list_checkin_vendors(
+    *,
+    vendor_id: str = "",
+    support: str = "all",
+) -> list[dict]:
+    """List vendors for check-in page with filters.
+
+    support: all | yes | no
+    """
+    out = []
+    for v in get_vendors():
+        if vendor_id and str(v.get("id")) != str(vendor_id):
+            continue
+        url = (v.get("checkin_url") or "").strip()
+        supports = bool(url)
+        if support == "yes" and not supports:
+            continue
+        if support == "no" and supports:
+            continue
+        keys = v.get("keys") or []
+        enabled_keys = [k for k in keys if k.get("enabled") is not False and k.get("api_key")]
+        out.append({
+            "id": v.get("id"),
+            "name": v.get("name") or "",
+            "provider": v.get("provider") or "",
+            "api_url": v.get("api_url") or "",
+            "checkin_url": url,
+            "supports_checkin": supports,
+            "key_count": len(keys),
+            "enabled_key_count": len(enabled_keys),
+            "tags": v.get("tags") or [],
+        })
+    out.sort(key=lambda x: (0 if x["supports_checkin"] else 1, (x.get("name") or "").lower()))
+    return out

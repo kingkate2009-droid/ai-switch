@@ -54,7 +54,7 @@ python3 run.py
 
 **Requirements**: Python 3.9+
 
-**Compatible with**: OpenClaw 2026.6.11+, OpenCode, Claude Code, Codex CLI, Cline 3.x+, Aider, Continue.dev, Hermes Agent, QwenCode, Kimi Code
+**Compatible with**: OpenClaw 2026.6.11+, OpenCode, Claude Code, Codex CLI, Cline 3.x+, Aider, Continue.dev, Hermes Agent, QwenCode, Kimi Code, TRAE Work
 
 ### Docker
 
@@ -114,6 +114,7 @@ Unknown providers default to `openai_chat` probe.
 | Hermes Agent | `config.yaml`, `.env` |
 | QwenCode | `settings.json`, `.env` |
 | Kimi Code | `~/.kimi-code/config.toml`, `tui.toml` |
+| TRAE Work | `~/.trae-work/ai-switch-models.json`; Windows `%APPDATA%\\ai-switch\\trae-work\\`; TRAE app data dirs |
 
 
 

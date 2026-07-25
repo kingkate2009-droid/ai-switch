@@ -96,17 +96,17 @@ class AntigravityAdapter(BackendAdapter):
         }]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
-
-        installed, version = cli_available("agy")
-        if not installed:
-            return make_status(installed=False, message="agy CLI not found")
+        from backends.base import detect_install, status_from_detect
+        det = detect_install(
+            cli_commands=("agy", "agy.exe", "antigravity"),
+            config_files=[self._settings_path],
+            treat_config_as_installed=True,
+        )
         settings = self._load_settings()
         has_key = bool(settings.get("GEMINI_API_KEY"))
-        return make_status(
-            installed=True,
-            running=False,
-            version=version,
+        return status_from_detect(
+            det,
+            not_installed_message="agy CLI not found",
             message="API key configured" if has_key else "OAuth mode (no custom key)",
         )
 

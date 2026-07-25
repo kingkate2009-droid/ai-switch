@@ -31,20 +31,16 @@ class DevinAdapter(BackendAdapter):
 
     @property
     def _config_dir(self) -> Path:
-        if platform.system() == "Windows":
-            appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-            return Path(appdata) / "devin"
-        return Path.home() / ".config" / "devin"
+        from backends.base import home_config_dir
+        return home_config_dir("devin")
 
     @property
     def _data_dir(self) -> Path:
-        if platform.system() == "Windows":
-            appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-            return Path(appdata) / "devin"
-        xdg = os.environ.get("XDG_DATA_HOME")
-        if xdg:
-            return Path(xdg) / "devin"
-        return Path.home() / ".local" / "share" / "devin"
+        from backends.base import home_data_dir, is_windows
+        # Windows historically used Roaming for both; keep Local data dir for new writes
+        if is_windows():
+            return home_data_dir("devin")
+        return home_data_dir("devin")
 
     @property
     def _config_path(self) -> Path:
@@ -302,20 +298,20 @@ class DevinAdapter(BackendAdapter):
         elif "not found" in auth_msg.lower():
             parts.append(auth_msg)
 
-        from backends.base import make_status, cli_available
+        from backends.base import detect_install, status_from_detect
 
-        installed, ver2 = cli_available("devin")
-        if not version and ver2:
-            version = ver2
-        if not installed and (has_token or self._config_path.exists()):
-            installed = True
-        if not installed:
-            return make_status(installed=False, version="", message="; ".join(parts) or "devin CLI not found")
-        return make_status(
-            installed=True,
-            running=False,
-            version=version,
-            message="; ".join(parts),
+        det = detect_install(
+            cli_commands=("devin", "devin.exe"),
+            config_files=[self._config_path, self._credentials_path],
+            data_dirs=[self._config_dir, self._data_dir],
+            treat_config_as_installed=True,
+        )
+        if version and not det.get("version"):
+            det["version"] = version
+        return status_from_detect(
+            det,
+            not_installed_message="; ".join(parts) or "devin CLI not found",
+            message="; ".join(parts) if parts else "Installed",
         )
 
     def get_version(self) -> str:

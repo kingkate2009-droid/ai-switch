@@ -121,16 +121,17 @@ class AiderAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
-
-        installed, version = cli_available("aider")
-        if not installed:
-            return make_status(installed=False, message="aider CLI not found")
+        from backends.base import detect_install, status_from_detect
+        det = detect_install(
+            cli_commands=("aider", "aider.exe"),
+            config_files=[self._config_path],
+            treat_config_as_installed=True,
+        )
         config = self._load_config()
         keys = config.get("api-key", [])
-        return make_status(
-            installed=True,
-            running=False,
-            version=version,
-            message=f"{len(keys) if isinstance(keys, list) else 1} key(s) configured",
+        n = len(keys) if isinstance(keys, list) else (1 if keys else 0)
+        return status_from_detect(
+            det,
+            not_installed_message="aider CLI not found",
+            message=f"{n} key(s) configured",
         )

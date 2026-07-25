@@ -95,39 +95,61 @@ class CopilotCliAdapter(BackendAdapter):
         }]
 
     def get_status(self) -> dict:
-        from backends.base import make_status
+        from backends.base import (
+            make_status, enriched_env, INSTALL_CLI, INSTALL_EXTENSION, INSTALL_CONFIG,
+        )
         import shutil
 
         settings = self._load_settings()
         has_byok = "byok" in settings
-        if not shutil.which("gh"):
-            return make_status(installed=False, message="gh CLI not found")
+        env = enriched_env()
+        kinds = []
+        version = ""
+        if shutil.which("gh", path=env.get("PATH")) or shutil.which("gh"):
+            kinds.append(INSTALL_CLI)
         try:
             r = subprocess.run(
                 ["gh", "copilot", "--version"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, env=env,
             )
             out = (r.stdout or "") + (r.stderr or "")
             low = out.lower()
-            # gh prints usage/help when extension missing
-            if r.returncode != 0 or "unknown command" in low or "available commands" in low:
-                # settings may still exist from previous install
-                if has_byok or self._settings_path.exists():
-                    return make_status(
-                        installed=True,
-                        running=False,
-                        version="",
-                        message="BYOK configured (gh copilot extension missing)",
-                    )
-                return make_status(installed=False, message="gh copilot extension not installed")
-            version = out.strip().splitlines()[0][:80] if out.strip() else "installed"
-            return make_status(
-                installed=True,
-                running=False,
-                version=version,
-                message="BYOK configured" if has_byok else "GitHub auth mode",
-            )
+            if r.returncode == 0 and "unknown command" not in low and "available commands" not in low:
+                kinds.append(INSTALL_EXTENSION)
+                version = out.strip().splitlines()[0][:80] if out.strip() else "gh copilot"
+                return make_status(
+                    installed=True,
+                    running=False,
+                    version=version,
+                    message=f"[CLI+extension] {'BYOK configured' if has_byok else 'GitHub auth mode'}",
+                    install_kinds=list(dict.fromkeys(kinds + [INSTALL_EXTENSION])),
+                )
+            if has_byok or self._settings_path.exists():
+                if INSTALL_CONFIG not in kinds:
+                    kinds.append(INSTALL_CONFIG)
+                return make_status(
+                    installed=True,
+                    running=False,
+                    version="",
+                    message="[CLI] BYOK configured (gh copilot extension missing)",
+                    install_kinds=kinds or [INSTALL_CONFIG],
+                )
+            if kinds:
+                return make_status(
+                    installed=True,
+                    running=False,
+                    message="[CLI] gh installed; copilot extension missing",
+                    install_kinds=kinds,
+                )
+            return make_status(installed=False, message="gh CLI / copilot extension not installed")
         except FileNotFoundError:
+            if has_byok or self._settings_path.exists():
+                return make_status(
+                    installed=True,
+                    running=False,
+                    message="[config] BYOK file present; gh CLI not found",
+                    install_kinds=[INSTALL_CONFIG],
+                )
             return make_status(installed=False, message="gh CLI not found")
         except Exception as e:
             return make_status(installed=False, message=str(e)[:100])

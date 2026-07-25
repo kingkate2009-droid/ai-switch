@@ -38,17 +38,34 @@ class CursorCliAdapter(BackendAdapter):
         return []
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
+        from backends.base import detect_install, status_from_detect, env_path, is_windows
 
-        installed, version = cli_available("cursor")
-        if not installed:
-            return make_status(installed=False, message="cursor CLI not found")
+        home = Path.home()
+        app_paths = [
+            Path("/Applications/Cursor.app"),
+            home / "Applications" / "Cursor.app",
+        ]
+        if is_windows():
+            local = env_path("LOCALAPPDATA") or (home / "AppData" / "Local")
+            app_paths.extend([
+                local / "Programs" / "cursor" / "Cursor.exe",
+                local / "Programs" / "Cursor" / "Cursor.exe",
+            ])
+        det = detect_install(
+            cli_commands=("cursor", "cursor.cmd", "cursor.exe"),
+            app_paths=app_paths,
+            process_markers=("Cursor.exe", "Cursor.app", "Cursor Helper"),
+            data_dirs=[home / ".cursor"],
+            config_files=[self._cli_config_path, self._mcp_path],
+            treat_config_as_installed=False,  # need CLI or app, not only config we might write
+        )
+        # Cursor is primarily a desktop app; CLI is optional
         has_cli = self._cli_config_path.exists()
-        return make_status(
-            installed=True,
-            running=False,
-            version=version,
-            message="Cursor account auth only; no BYOK support" if has_cli else "CLI not configured",
+        msg = "Cursor account auth only; no BYOK support" if (has_cli or det["installed"]) else "not configured"
+        return status_from_detect(
+            det,
+            not_installed_message="Cursor app/CLI not installed",
+            message=msg,
         )
 
     @property

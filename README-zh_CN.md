@@ -48,7 +48,7 @@ python3 run.py
 
 **要求**: Python 3.9+
 
-**兼容**: OpenClaw 2026.6.11+、OpenCode、Claude Code、Codex CLI、Cline 3.x+、Aider、Continue.dev、Hermes Agent、QwenCode、Kimi Code
+**兼容**: OpenClaw 2026.6.11+、OpenCode、Claude Code、Codex CLI、Cline 3.x+、Aider、Continue.dev、Hermes Agent、QwenCode、Kimi Code、TRAE Work
 
 ### Docker
 
@@ -108,6 +108,7 @@ deepseek https://api.deepseek.com/v1 sk-xxxx...
 | Hermes Agent | `config.yaml`、`.env` |
 | QwenCode | `settings.json`、`.env` |
 | Kimi Code | `~/.kimi-code/config.toml`、`tui.toml` |
+| TRAE Work | `~/.trae-work/ai-switch-models.json`；Windows `%APPDATA%\\ai-switch\\trae-work\\`；TRAE 应用数据目录 |
 
 
 

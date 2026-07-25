@@ -15,14 +15,22 @@ from core.data import get_vendor, get_vendors, add_vendor, add_key, update_key, 
 
 log = logging.getLogger(__name__)
 
-OPENCLAW_CONFIG_DIR = Path.home() / ".openclaw"
+def _openclaw_config_dir() -> Path:
+    """~/.openclaw on all platforms (Windows: %USERPROFILE%\\.openclaw)."""
+    env = (os.environ.get("OPENCLAW_HOME") or os.environ.get("OPENCLAW_CONFIG_DIR") or "").strip()
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".openclaw"
+
+
+OPENCLAW_CONFIG_DIR = _openclaw_config_dir()
 OPENCLAW_CONFIG_PATH = OPENCLAW_CONFIG_DIR / "openclaw.json"
 AGENT_DIR = OPENCLAW_CONFIG_DIR / "agents" / "main" / "agent"
 AGENT_AUTH_PATH = AGENT_DIR / "auth-profiles.json"
 AGENT_MODELS_PATH = AGENT_DIR / "models.json"
 AGENT_SQLITE_PATH = AGENT_DIR / "openclaw-agent.sqlite"
 
-MANAGER_VERSION = "2.0.2"
+MANAGER_VERSION = "2.0.3"
 MIN_OPENCLAW_VERSION = "2026.3.0"
 RECOMMENDED_OPENCLAW_VERSION = "2026.6.11"
 
@@ -721,22 +729,36 @@ class OpenClawAdapter(BackendAdapter):
         return out
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available, enriched_env, process_running, port_listening
+        from backends.base import (
+            detect_install, status_from_detect, enriched_env,
+            process_running, port_listening, INSTALL_CLI, INSTALL_APP,
+        )
+
+        # OpenClaw: primarily CLI + long-running gateway (daemon/service)
+        det = detect_install(
+            cli_commands=("openclaw", "openclaw.exe"),
+            process_markers=(
+                "openclaw/dist/index.js",
+                "openclaw gateway",
+                "openclaw.exe",
+                "openclaw\\dist\\index.js",
+            ),
+            data_dirs=[OPENCLAW_CONFIG_DIR],
+            config_files=[OPENCLAW_CONFIG_PATH],
+            treat_config_as_installed=True,
+        )
+        version = det.get("version") or self.get_version()
+        if version and "not found" not in version.lower() and "node.js" not in version.lower():
+            det["version"] = version
+            det["installed"] = True
+            if INSTALL_CLI not in det.get("install_kinds", []):
+                # version banner without PATH hit still means product present
+                if det.get("install_kinds") == ["config"] or not det.get("install_kinds"):
+                    det["install_kinds"] = list(dict.fromkeys(
+                        [INSTALL_CLI] + list(det.get("install_kinds") or [])
+                    ))
 
         env = enriched_env()
-        installed, version = cli_available("openclaw")
-        if not installed:
-            # binary may exist under nvm even when default node is too old
-            version = self.get_version()
-            if version and "not found" not in version.lower():
-                installed = True
-            elif process_running("openclaw", "openclaw/dist/index.js"):
-                installed = True
-            else:
-                return make_status(installed=False, port=None, message="openclaw CLI not found")
-        if not version:
-            version = self.get_version()
-
         port = None
         running = False
         message = ""
@@ -747,7 +769,6 @@ class OpenClawAdapter(BackendAdapter):
             )
             output = (r.stdout or "") + (r.stderr or "")
             low = output.lower()
-            # Prefer explicit runtime line: "Runtime: running (pid …)"
             if re.search(r"runtime:\s*running", low) or re.search(r"\brunning\s*\(pid", low):
                 running = True
             elif ("running" in low or "active" in low) and not any(
@@ -760,29 +781,45 @@ class OpenClawAdapter(BackendAdapter):
                     if m:
                         port = m.group(1)
             message = output.strip()[:200]
+            if det.get("installed") and INSTALL_CLI not in (det.get("install_kinds") or []):
+                det.setdefault("install_kinds", []).insert(0, INSTALL_CLI)
         except FileNotFoundError:
-            return make_status(installed=False, port=None, message="openclaw CLI not found")
+            if not det.get("installed"):
+                return status_from_detect(
+                    det,
+                    not_installed_message="openclaw CLI not installed",
+                    port=None,
+                )
         except subprocess.TimeoutExpired:
             message = "Status check timed out"
         except Exception as e:
             message = str(e)[:200]
 
-        # Fallback: process / port (CLI status may fail due to wrong Node on PATH)
         if not running:
-            if process_running("openclaw/dist/index.js gateway", "openclaw gateway"):
+            if process_running(
+                "openclaw/dist/index.js gateway",
+                "openclaw gateway",
+                "openclaw.exe",
+                "openclaw\\dist\\index.js",
+                "openclaw/dist/index.js",
+            ):
                 running = True
             elif port_listening(18789) or (port and port_listening(int(port))):
                 running = True
+                if INSTALL_APP not in (det.get("install_kinds") or []):
+                    # gateway service without CLI on PATH
+                    det.setdefault("install_kinds", []).append(INSTALL_APP)
         if not port and port_listening(18789):
             port = "18789"
         if not message:
-            message = f"Gateway running on :{port}" if running and port else ("Running" if running else "Stopped")
-        return make_status(
-            installed=True,
+            message = f"Gateway on :{port}" if running and port else ("Running" if running else "Stopped")
+        det["installed"] = bool(det.get("installed") or running or OPENCLAW_CONFIG_PATH.exists())
+        return status_from_detect(
+            det,
+            not_installed_message="openclaw CLI not installed",
+            message=message[:200],
             running=running,
             port=port,
-            version=version,
-            message=message[:200],
         )
 
     def restart(self) -> dict:

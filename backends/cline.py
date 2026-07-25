@@ -142,20 +142,31 @@ class ClineAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, vscode_extension_installed
+        from backends.base import detect_install, status_from_detect, process_running
 
-        # Only real product install counts. ~/.cline may be created by this manager.
-        installed = vscode_extension_installed(
-            "saoudrizwan.claude-dev",
-            "saoudrizwan.claude-dev-nightly",
-            "rooveterinaryinc.roo-cline",
+        # Cline is primarily a VS Code / Cursor extension (not a standalone CLI)
+        det = detect_install(
+            extension_ids=(
+                "saoudrizwan.claude-dev",
+                "saoudrizwan.claude-dev-nightly",
+                "rooveterinaryinc.roo-cline",
+            ),
+            # do NOT treat ~/.cline alone as installed (manager may create it)
+            treat_config_as_installed=False,
         )
         secrets = self._load_secrets()
         has_key = bool(secrets)
-        if not installed:
-            return make_status(installed=False, message="Cline extension not installed")
-        return make_status(
-            installed=True,
-            running=False,
-            message=f"{len(secrets)} key(s) configured" if has_key else "Installed",
+        # Plugin form: "running" ≈ host IDE is running (extension loads with IDE)
+        running = False
+        if det["installed"]:
+            running = process_running(
+                "Visual Studio Code", "Code.exe", "Code Helper",
+                "Cursor.exe", "Cursor.app", "Cursor Helper",
+            )
+        msg = f"{len(secrets)} key(s) configured" if has_key else "extension installed"
+        return status_from_detect(
+            det,
+            not_installed_message="Cline extension not installed",
+            message=msg,
+            running=running,
         )

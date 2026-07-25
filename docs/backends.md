@@ -25,6 +25,57 @@ English summary tables follow the Chinese sections.
 | Devin CLI | `devin` | ✅ 专用 | 仅 Devin 系 | — | JSON + credentials.toml | 专用 token |
 | Antigravity | `antigravity` | ✅ | 仅 Google | ✅ | JSON | 覆盖 |
 | Cursor CLI | `cursor-cli` | ❌ 只读 | — | — | JSON | 账号体系 |
+| **TRAE Work** | `trae-work` | ✅ 自定义模型清单 | ✅ 多模型条目 | ✅ baseUrl | JSON（托管文件） | TRAE Settings > Models |
+
+### 安装形态：CLI / 客户端 / 插件
+
+后端产品可能以多种形式安装，检测统一走 `detect_install()`（`backends/base.py`）：
+
+| 形态 | `install_kinds` | 判定依据 | 典型引擎 |
+|------|-----------------|----------|----------|
+| **CLI** | `cli` | PATH 上可执行文件（`cli_available`） | OpenCode、Aider、Goose、Hermes、OpenClaw |
+| **桌面客户端** | `app` | 安装目录 / `.app` / `Program Files` / 进程 | Cursor、TRAE Work、OpenClaw gateway |
+| **IDE 插件** | `extension` | VS Code / Cursor 扩展目录 | Cline、Continue、Codex（ChatGPT 扩展） |
+| **配置痕迹** | `config` | 仅配置文件存在（弱证据，按需开启） | 部分 CLI 仅有 `~/.tool` 配置 |
+
+状态字段：
+
+- `installed` / `running` / `version` / `message`
+- `install_kinds`: 如 `["cli","extension"]`
+- UI 徽章会附加形态标签，例如 `运行中 · CLI+Ext`
+
+规则：
+
+1. **任一形态命中即视为已安装**（可同步）
+2. **未安装一律不同步**
+3. 插件形态的「运行中」≈ 宿主 IDE 进程在跑
+4. CLI 形态的「运行中」≈ CLI/守护进程在跑（如 OpenClaw gateway、Codex app-server）
+5. 管理器自己写入的配置目录 **不能单独** 作为插件已安装证据（Cline / Continue）
+
+### 跨平台路径约定（macOS / Windows / Linux）
+
+通用助手在 `backends/base.py`：
+
+| 助手 | macOS / Linux | Windows |
+|------|---------------|---------|
+| `home_dot_dir("x")` | `~/.x` | `%USERPROFILE%\.x` |
+| `home_config_dir("x")` | `~/.config/x` 或 `$XDG_CONFIG_HOME/x` | `%APPDATA%\x` |
+| `home_data_dir("x")` | `~/.local/share/x` 或 `$XDG_DATA_HOME/x` | `%LOCALAPPDATA%\x` |
+| `process_running` | `ps` | `tasklist` / PowerShell |
+| `vscode_extension_roots` | `~/.vscode/extensions` 等 | `%USERPROFILE%\.vscode\extensions`、`%APPDATA%\Code\User\extensions` 等 |
+
+主要引擎配置根目录：
+
+| 引擎 | macOS/Linux | Windows |
+|------|-------------|---------|
+| OpenClaw | `~/.openclaw` | `%USERPROFILE%\.openclaw` |
+| OpenCode auth | `~/.local/share/opencode` | `%LOCALAPPDATA%\opencode` |
+| OpenCode config | `~/.config/opencode` | `%APPDATA%\opencode` |
+| Codex | `~/.codex`（或 `$CODEX_HOME`） | `%USERPROFILE%\.codex` |
+| Claude Code | `~/.claude` | `%USERPROFILE%\.claude` |
+| Goose | `~/.config/goose` | `%APPDATA%\goose` |
+| Devin | `~/.config/devin` + data dir | `%APPDATA%\devin` / `%LOCALAPPDATA%\devin` |
+| TRAE Work | 见上文 TRAE 节 | 见上文 TRAE 节 |
 
 ---
 
@@ -134,6 +185,25 @@ English summary tables follow the Chinese sections.
 
 - **BYOK**: 否（账号体系）
 - **差异**: 只读展示配置；不同步系统 Key
+
+### TRAE Work (`backends/trae_work.py`)
+
+- **产品**: [TRAE Work](https://www.trae.ai/) / TRAE IDE（Settings > Models 自定义模型）
+- **文档**: https://docs.trae.ai/ide/models
+- **配置 / 数据目录（跨平台）**:
+  - **macOS**: `~/Library/Application Support/Trae*`、`Trae Work*`
+  - **Windows**: `%APPDATA%\Trae*`、`%LOCALAPPDATA%\Trae*`（及 `ByteDance\Trae*`）；安装包常见于 `%LOCALAPPDATA%\Programs\Trae\`、`%ProgramFiles%\Trae\`
+  - **Linux**: `~/.config/Trae*`、`~/.local/share/Trae*`
+  - **托管清单（始终）**:
+    - macOS/Linux: `~/.trae-work/ai-switch-models.json`
+    - Windows: `%APPDATA%\ai-switch\trae-work\ai-switch-models.json` 与 `~/.trae-work/ai-switch-models.json`
+    - 若检测到产品目录，同时写入 `ai-switch-models.json` 与 `User/globalStorage/ai-switch.trae-work/models.json`
+- **差异**:
+  - TRAE 官方以 **UI 添加自定义模型** 为主（API 格式：OpenAI chat/completions 或 Anthropic messages；Base URL + model ID + API Key）
+  - 适配器将健康 Key 写成 **托管 JSON 清单**，便于对照导入；字段：`apiFormat` / `baseUrl` / `modelId` / `apiKey`
+  - 安装检测：可执行文件 / 应用数据目录 / 进程（Windows 用 `tasklist`/`Get-CimInstance`）；**未安装不同步**
+  - 运行中：跨平台进程名匹配（`Trae.exe` / `Trae.app` / `Trae Work` 等）
+  - 若官方落盘格式有变更，可在本适配器中扩展写入路径
 
 ---
 

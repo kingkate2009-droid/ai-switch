@@ -507,32 +507,27 @@ class KimiCodeAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
+        from backends.base import detect_install, status_from_detect
 
         cfg_exists = self._config_path.exists()
         data = self._load() if cfg_exists else {}
         providers = data.get("providers") if isinstance(data.get("providers"), dict) else {}
         managed = sum(1 for k in providers if str(k).startswith(_MANAGED_PREFIX))
         total = len(providers or {})
-        installed, version = cli_available("kimi")
-        if not installed and cfg_exists:
-            installed = True
-        if not installed:
-            return make_status(
-                installed=False,
-                message="kimi CLI not found",
-                enabled=True,
-                config_path=str(self._config_path),
-            )
+        det = detect_install(
+            cli_commands=("kimi", "kimi.exe", "kimi-code"),
+            config_files=[self._config_path],
+            data_dirs=[self._config_dir],
+            treat_config_as_installed=True,
+        )
         msg = f"{managed} managed / {total} provider(s)"
         if not cfg_exists:
             msg = "config.toml missing"
-        elif not version:
+        elif "cli" not in (det.get("install_kinds") or []):
             msg += "; kimi CLI not found"
-        return make_status(
-            installed=True,
-            running=False,
-            version=version,
+        return status_from_detect(
+            det,
+            not_installed_message="kimi CLI not found",
             message=msg,
             enabled=True,
             config_path=str(self._config_path),

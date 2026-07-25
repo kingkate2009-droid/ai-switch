@@ -108,6 +108,7 @@ deepseek https://api.deepseek.com/v1 sk-xxxx...
 | Hermes Agent | `config.yaml`、`.env` |
 | QwenCode | `settings.json`、`.env` |
 | Kimi Code | `~/.kimi-code/config.toml`、`tui.toml` |
+| TRAE Work | `~/.trae-work/ai-switch-models.json`；Windows `%APPDATA%\\ai-switch\\trae-work\\`；TRAE 應用資料目錄 |
 
 
 

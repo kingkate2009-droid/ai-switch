@@ -129,13 +129,17 @@ class HermesAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
-
-        installed, version = cli_available("hermes")
+        from backends.base import detect_install, status_from_detect
         env = self._load_env()
-        if not installed and (self._config_path.exists() or self._env_path.exists() or env):
-            installed = True
-        if not installed:
-            return make_status(installed=False, message="hermes CLI not found")
-        msg = "CLI available" if version else (f"{len(env)} key(s) configured" if env else "Installed")
-        return make_status(installed=True, running=False, version=version, message=msg)
+        det = detect_install(
+            cli_commands=("hermes", "hermes.exe"),
+            config_files=[self._config_path, self._env_path],
+            data_dirs=[Path.home() / ".hermes"],
+            treat_config_as_installed=True,
+        )
+        msg = "CLI available" if det.get("version") else (f"{len(env)} key(s) configured" if env else "Installed")
+        return status_from_detect(
+            det,
+            not_installed_message="hermes CLI not found",
+            message=msg,
+        )

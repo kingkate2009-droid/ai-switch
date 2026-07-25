@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from backends.base import BackendAdapter
+from backends.base import BackendAdapter, home_config_dir
 
 
 class GooseAdapter(BackendAdapter):
@@ -14,7 +14,8 @@ class GooseAdapter(BackendAdapter):
 
     @property
     def _config_dir(self) -> Path:
-        return Path.home() / ".config" / "goose"
+        # macOS/Linux: ~/.config/goose  Windows: %APPDATA%\goose
+        return home_config_dir("goose")
 
     @property
     def _config_path(self) -> Path:
@@ -130,16 +131,17 @@ class GooseAdapter(BackendAdapter):
         return vendors
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
-
-        installed, version = cli_available("goose")
-        if not installed:
-            return make_status(installed=False, message="goose CLI not found")
+        from backends.base import detect_install, status_from_detect
+        det = detect_install(
+            cli_commands=("goose", "goose.exe"),
+            config_files=[self._config_path, self._secrets_path],
+            data_dirs=[self._config_dir],
+            treat_config_as_installed=True,
+        )
         secrets = self._load_secrets()
-        return make_status(
-            installed=True,
-            running=False,
-            version=version,
+        return status_from_detect(
+            det,
+            not_installed_message="goose CLI not found",
             message=f"{len(secrets)} key(s) in secrets.yaml",
         )
 

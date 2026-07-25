@@ -125,16 +125,21 @@ class ClaudeCodeAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
+        from backends.base import detect_install, status_from_detect
 
-        installed, version = cli_available("claude")
-        if not installed:
-            return make_status(installed=False, message="claude CLI not found")
+        # Claude Code is primarily a CLI
+        det = detect_install(
+            cli_commands=("claude", "claude.exe"),
+            process_markers=("claude.exe", " claude ", "Claude.app"),
+            config_files=[self._settings_path, self._claude_json_path],
+            data_dirs=[Path.home() / ".claude"],
+            treat_config_as_installed=True,
+        )
         settings = self._load_settings()
         has_key = bool(settings.get("env", {}).get("ANTHROPIC_API_KEY"))
-        return make_status(
-            installed=True,
-            running=False,
-            version=version,
-            message="API key configured" if has_key else "No API key configured",
+        msg = "API key configured" if has_key else "No API key configured"
+        return status_from_detect(
+            det,
+            not_installed_message="claude CLI not found",
+            message=msg,
         )

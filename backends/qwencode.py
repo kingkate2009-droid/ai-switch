@@ -102,7 +102,14 @@ class QwenCodeAdapter(BackendAdapter):
 
     @property
     def _system_settings_path(self) -> Path:
-        return Path("/Library/Application Support/QwenCode/settings.json")
+        import platform
+        system = platform.system()
+        if system == "Darwin":
+            return Path("/Library/Application Support/QwenCode/settings.json")
+        if system == "Windows":
+            prog = os.environ.get("PROGRAMDATA") or r"C:\ProgramData"
+            return Path(prog) / "QwenCode" / "settings.json"
+        return Path("/etc/qwen-code/settings.json")
 
     @property
     def config_files(self) -> list[dict]:
@@ -113,18 +120,18 @@ class QwenCodeAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
-
-        installed, version = cli_available("qwen")
+        from backends.base import detect_install, status_from_detect
         settings = self._load_settings()
         has_key = bool(settings.get("env", {}))
-        if not installed and (self._settings_path.exists() or has_key):
-            installed = True
-        if not installed:
-            return make_status(installed=False, message="Not installed")
-        return make_status(
-            installed=True,
-            running=False,
-            version=version,
-            message="CLI available" if version else ("Key configured" if has_key else "Installed"),
+        det = detect_install(
+            cli_commands=("qwen", "qwen.exe", "qwen-code"),
+            config_files=[self._settings_path, self._env_path],
+            data_dirs=[Path.home() / ".qwen"],
+            treat_config_as_installed=True,
+        )
+        msg = "CLI available" if det.get("version") else ("Key configured" if has_key else "Installed")
+        return status_from_detect(
+            det,
+            not_installed_message="Not installed",
+            message=msg,
         )

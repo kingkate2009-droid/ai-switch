@@ -1,4 +1,5 @@
 import os
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -7,12 +8,20 @@ from typing import Optional, Sequence, Union
 from core.data import get_backend_config
 
 
+# Install forms a backend product may take
+INSTALL_CLI = "cli"
+INSTALL_APP = "app"          # desktop / client
+INSTALL_EXTENSION = "extension"  # IDE plugin
+INSTALL_CONFIG = "config"    # product config footprint only (weak)
+
+
 def make_status(
     *,
     installed: bool,
     running: bool = False,
     version: str = "",
     message: str = "",
+    install_kinds: Optional[Sequence[str]] = None,
     **extra,
 ) -> dict:
     """Normalize backend status for UI + sync.
@@ -21,9 +30,12 @@ def make_status(
     - not installed: installed=False, running=False → UI「未安装」, do not sync
     - stopped: installed=True, running=False → UI「已停止」, may sync
     - running: installed=True, running=True → UI「运行中」
+
+    install_kinds: one or more of cli / app / extension / config
     """
     installed = bool(installed)
     running = bool(running) and installed
+    kinds = [str(k) for k in (install_kinds or []) if k]
     if not installed and not message:
         message = "Not installed"
     out = {
@@ -31,9 +43,169 @@ def make_status(
         "running": running,
         "version": version or "",
         "message": message or "",
+        "install_kinds": kinds,
     }
     out.update(extra)
     return out
+
+
+def format_install_kinds(kinds: Sequence[str]) -> str:
+    """Human-readable install form label (EN tokens; UI may i18n later)."""
+    order = [INSTALL_CLI, INSTALL_APP, INSTALL_EXTENSION, INSTALL_CONFIG]
+    labels = {
+        INSTALL_CLI: "CLI",
+        INSTALL_APP: "app",
+        INSTALL_EXTENSION: "extension",
+        INSTALL_CONFIG: "config",
+    }
+    seen = set()
+    parts = []
+    for k in order:
+        if k in kinds and k not in seen:
+            seen.add(k)
+            parts.append(labels.get(k, k))
+    for k in kinds:
+        if k not in seen:
+            seen.add(k)
+            parts.append(labels.get(k, k))
+    return "+".join(parts) if parts else ""
+
+
+def status_from_detect(
+    det: dict,
+    *,
+    not_installed_message: str = "Not installed",
+    message: str = "",
+    running: Optional[bool] = None,
+    **extra,
+) -> dict:
+    """Build make_status() from detect_install() result."""
+    kinds = list(det.get("install_kinds") or [])
+    installed = bool(det.get("installed"))
+    run = det.get("running") if running is None else running
+    form = format_install_kinds(kinds)
+    if not installed:
+        msg = not_installed_message
+    else:
+        base = message or (det.get("evidence") or "Installed")
+        msg = f"[{form}] {base}" if form else base
+    return make_status(
+        installed=installed,
+        running=bool(run) and installed,
+        version=det.get("version") or "",
+        message=msg,
+        install_kinds=kinds,
+        **extra,
+    )
+
+
+def path_exists_any(paths: Sequence[Union[str, Path]]) -> Optional[Path]:
+    for p in paths or []:
+        try:
+            pp = Path(p)
+            if pp.exists():
+                return pp
+        except OSError:
+            continue
+    return None
+
+
+def detect_install(
+    *,
+    cli_commands: Optional[Union[str, Sequence[str]]] = None,
+    cli_version_args: Optional[Sequence[str]] = None,
+    extension_ids: Optional[Sequence[str]] = None,
+    app_paths: Optional[Sequence[Union[str, Path]]] = None,
+    process_markers: Optional[Sequence[str]] = None,
+    data_dirs: Optional[Sequence[Union[str, Path]]] = None,
+    config_files: Optional[Sequence[Union[str, Path]]] = None,
+    treat_config_as_installed: bool = False,
+) -> dict:
+    """Detect product presence across CLI / desktop app / IDE extension forms.
+
+    Returns dict:
+      installed: bool
+      running: bool
+      version: str
+      install_kinds: list[str]  # cli, app, extension, config
+      evidence: short str
+    """
+    kinds: list[str] = []
+    version = ""
+    evidence_parts: list[str] = []
+
+    # 1) CLI
+    if cli_commands:
+        ok, ver = cli_available(cli_commands, cli_version_args)
+        if ok:
+            kinds.append(INSTALL_CLI)
+            version = ver or version
+            if isinstance(cli_commands, str):
+                evidence_parts.append(f"cli:{cli_commands}")
+            else:
+                evidence_parts.append("cli:" + ",".join(str(c) for c in cli_commands[:3]))
+
+    # 2) Desktop / client app paths
+    hit = path_exists_any(app_paths or [])
+    if hit is not None:
+        if INSTALL_APP not in kinds:
+            kinds.append(INSTALL_APP)
+        evidence_parts.append(f"app:{hit.name}")
+        if not version:
+            version = hit.stem
+
+    # 3) IDE extension
+    if extension_ids and vscode_extension_installed(*extension_ids):
+        if INSTALL_EXTENSION not in kinds:
+            kinds.append(INSTALL_EXTENSION)
+        evidence_parts.append("extension")
+        if not version:
+            version = "extension"
+
+    # 4) Product data dirs (weak footprint → config, not desktop app)
+    data_hit = path_exists_any(data_dirs or [])
+    if data_hit is not None:
+        try:
+            has_content = data_hit.is_file() or (data_hit.is_dir() and any(data_hit.iterdir()))
+        except OSError:
+            has_content = data_hit.exists()
+        if has_content:
+            evidence_parts.append(f"data:{data_hit.name}")
+            # Only count as installed if we already have a strong form, or config is allowed
+            if not kinds and treat_config_as_installed:
+                kinds.append(INSTALL_CONFIG)
+                if not version:
+                    version = "config"
+
+    # 5) Config files (weak — only if allowed and no stronger form yet)
+    cfg_hit = path_exists_any(config_files or [])
+    if cfg_hit is not None:
+        evidence_parts.append(f"config:{cfg_hit.name}")
+        if treat_config_as_installed and not kinds:
+            kinds.append(INSTALL_CONFIG)
+            if not version:
+                version = "config"
+
+    # 6) Running process implies installed (daemon/app/cli process)
+    running = False
+    if process_markers:
+        running = process_running(*process_markers)
+        if running:
+            evidence_parts.append("process")
+            if not kinds:
+                # Prefer cli if commands were requested, else app
+                kinds.append(INSTALL_CLI if cli_commands else INSTALL_APP)
+            if not version:
+                version = "running"
+
+    installed = bool(kinds)
+    return {
+        "installed": installed,
+        "running": running and installed,
+        "version": version or "",
+        "install_kinds": kinds,
+        "evidence": "; ".join(evidence_parts),
+    }
 
 
 def cli_available(commands: Union[str, Sequence[str]], version_args: Optional[Sequence[str]] = None) -> tuple[bool, str]:
@@ -75,10 +247,16 @@ def cli_available(commands: Union[str, Sequence[str]], version_args: Optional[Se
 
 
 def process_running(*name_substrings: str) -> bool:
-    """True if any process cmdline contains one of the substrings (case-insensitive)."""
+    """True if any process cmdline/name contains one of the substrings (cross-platform)."""
     needles = [s.lower() for s in name_substrings if s]
     if not needles:
         return False
+
+    def _match(text: str) -> bool:
+        low = (text or "").lower()
+        return any(n in low for n in needles)
+
+    # Unix
     try:
         r = subprocess.run(
             ["ps", "-ax", "-o", "command="],
@@ -86,31 +264,162 @@ def process_running(*name_substrings: str) -> bool:
             text=True,
             timeout=5,
         )
-        for line in (r.stdout or "").splitlines():
-            low = line.lower()
-            if any(n in low for n in needles):
-                return True
+        if r.returncode == 0:
+            for line in (r.stdout or "").splitlines():
+                if _match(line):
+                    return True
     except Exception:
         pass
+
+    # Windows: tasklist / WMIC / PowerShell
+    if os.name == "nt" or platform.system() == "Windows":
+        try:
+            r = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if r.returncode == 0:
+                for line in (r.stdout or "").splitlines():
+                    if _match(line):
+                        return True
+        except Exception:
+            pass
+        try:
+            r = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_Process | Select-Object -ExpandProperty CommandLine",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if r.returncode == 0:
+                for line in (r.stdout or "").splitlines():
+                    if _match(line):
+                        return True
+        except Exception:
+            pass
     return False
 
 
 def port_listening(port: int) -> bool:
-    """True if something is listening on TCP port (localhost)."""
+    """True if something is listening on TCP port (localhost). Cross-platform."""
+    port = int(port)
+    # Unix lsof
     try:
         r = subprocess.run(
-            ["lsof", "-nP", f"-iTCP:{int(port)}", "-sTCP:LISTEN"],
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        return r.returncode == 0 and bool((r.stdout or "").strip())
+        if r.returncode == 0 and bool((r.stdout or "").strip()):
+            return True
+    except Exception:
+        pass
+    # Windows netstat
+    if os.name == "nt" or platform.system() == "Windows":
+        try:
+            r = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            needle = f":{port}"
+            for line in (r.stdout or "").splitlines():
+                low = line.lower()
+                if "listen" in low and needle in line:
+                    return True
+        except Exception:
+            pass
+    # portable socket probe (bind fails if in use on some OS; connect is safer for LISTEN check)
+    try:
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.4)
+            return s.connect_ex(("127.0.0.1", port)) == 0
     except Exception:
         return False
 
 
+def is_windows() -> bool:
+    return platform.system() == "Windows" or os.name == "nt"
+
+
+def is_macos() -> bool:
+    return platform.system() == "Darwin"
+
+
+def env_path(*keys: str) -> Optional[Path]:
+    for k in keys:
+        v = (os.environ.get(k) or "").strip()
+        if v:
+            return Path(v)
+    return None
+
+
+def home_config_dir(*parts: str) -> Path:
+    """User config dir: ~/.config/<parts> or %APPDATA%\\<parts> on Windows."""
+    if is_windows():
+        base = env_path("APPDATA") or (Path.home() / "AppData" / "Roaming")
+        return base.joinpath(*parts) if parts else base
+    xdg = env_path("XDG_CONFIG_HOME")
+    if xdg:
+        return xdg.joinpath(*parts) if parts else xdg
+    return Path.home().joinpath(".config", *parts) if parts else (Path.home() / ".config")
+
+
+def home_data_dir(*parts: str) -> Path:
+    """User data dir: ~/.local/share/<parts> or %LOCALAPPDATA%\\<parts> on Windows."""
+    if is_windows():
+        base = env_path("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
+        return base.joinpath(*parts) if parts else base
+    xdg = env_path("XDG_DATA_HOME")
+    if xdg:
+        return xdg.joinpath(*parts) if parts else xdg
+    return Path.home().joinpath(".local", "share", *parts) if parts else (Path.home() / ".local" / "share")
+
+
+def home_dot_dir(*parts: str) -> Path:
+    """Portable home-relative path: ~/.name/... (works on Windows as %USERPROFILE%\\.name)."""
+    return Path.home().joinpath(*parts)
+
+
+def vscode_extension_roots() -> list[Path]:
+    """Common VS Code / Cursor / VSCodium / Windsurf extension directories (all OS)."""
+    home = Path.home()
+    roots = [
+        home / ".vscode" / "extensions",
+        home / ".vscode-oss" / "extensions",
+        home / ".cursor" / "extensions",
+        home / ".cursor-server" / "extensions",
+        home / ".windsurf" / "extensions",
+    ]
+    if is_macos():
+        support = home / "Library" / "Application Support"
+        for app in ("Code", "Cursor", "VSCodium", "Code - Insiders", "Windsurf"):
+            roots.append(support / app / "User" / "extensions")
+    elif is_windows():
+        roaming = env_path("APPDATA") or (home / "AppData" / "Roaming")
+        for app in ("Code", "Cursor", "VSCodium", "Code - Insiders", "Windsurf"):
+            roots.append(roaming / app / "User" / "extensions")
+    else:
+        for app in ("Code", "Cursor", "VSCodium", "Code - Insiders", "Windsurf"):
+            roots.append(home / ".config" / app / "User" / "extensions")
+    return roots
+
+
 def enriched_env() -> dict:
-    """Environment with common user tool paths (nvm/homebrew) prepended to PATH."""
+    """Environment with common user tool paths (nvm/homebrew/Windows) prepended to PATH."""
     env = os.environ.copy()
     home = Path.home()
     extras = []
@@ -132,9 +441,19 @@ def enriched_env() -> dict:
     ):
         if p.is_dir():
             extras.append(str(p))
+    if is_windows():
+        for p in (
+            home / "AppData" / "Local" / "Programs",
+            env_path("LOCALAPPDATA") / "Programs" if env_path("LOCALAPPDATA") else None,
+            Path(r"C:\Program Files\nodejs"),
+            Path(r"C:\Program Files\Git\cmd"),
+        ):
+            if p and p.is_dir():
+                extras.append(str(p))
     if extras:
         cur = env.get("PATH", "")
-        env["PATH"] = ":".join(extras + ([cur] if cur else []))
+        sep = ";" if is_windows() else ":"
+        env["PATH"] = sep.join(extras + ([cur] if cur else []))
     return env
 
 
@@ -146,21 +465,8 @@ def vscode_extension_installed(*extension_id_prefixes: str) -> bool:
     """
     if not extension_id_prefixes:
         return False
-    home = Path.home()
-    roots = [
-        home / ".vscode" / "extensions",
-        home / ".vscode-oss" / "extensions",
-        home / ".cursor" / "extensions",
-        home / ".cursor-server" / "extensions",
-        home / ".windsurf" / "extensions",
-        home / "Library" / "Application Support" / "Code" / "User" / "extensions",
-        home / "Library" / "Application Support" / "Cursor" / "User" / "extensions",
-        home / "Library" / "Application Support" / "VSCodium" / "User" / "extensions",
-        home / ".config" / "Code" / "User" / "extensions",
-        home / ".config" / "Cursor" / "User" / "extensions",
-    ]
     prefixes = tuple(p.lower() for p in extension_id_prefixes if p)
-    for root in roots:
+    for root in vscode_extension_roots():
         try:
             if not root.is_dir():
                 continue

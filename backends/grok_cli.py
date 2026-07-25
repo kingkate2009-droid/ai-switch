@@ -216,19 +216,24 @@ class GrokCliAdapter(BackendAdapter):
         return vendors
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
+        from backends.base import detect_install, status_from_detect
 
         env = self._load_env()
         key_vars = [v for v in set(self._KEY_ENV.values()) | {"CUSTOM_API_KEY"} if env.get(v)]
-        installed, version = cli_available(("grok", "grok-cli"))
-        if not installed and (self._env_path.exists() or self._config_dir.exists() or key_vars):
-            installed = True
-        if not installed:
-            return make_status(installed=False, message="grok CLI not found")
+        det = detect_install(
+            cli_commands=("grok", "grok-cli", "grok.exe", "grok-cli.exe"),
+            data_dirs=[self._config_dir],
+            config_files=[self._env_path],
+            treat_config_as_installed=True,
+        )
         msg = f"{len(key_vars)} key(s) in .env"
         if env.get("GROKCLI_PROVIDER"):
             msg += f"; provider={env['GROKCLI_PROVIDER']}"
-        return make_status(installed=True, running=False, version=version, message=msg)
+        return status_from_detect(
+            det,
+            not_installed_message="grok CLI not found",
+            message=msg,
+        )
 
     def get_version(self) -> str:
         for cmd in ("grok", "grok-cli"):

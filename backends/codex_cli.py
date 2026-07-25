@@ -42,6 +42,7 @@ def _home_dir() -> Path:
     env = (os.environ.get("CODEX_HOME") or "").strip()
     if env:
         return Path(env).expanduser()
+    # Official default is ~/.codex on all platforms (Windows: %USERPROFILE%\.codex)
     return Path.home() / ".codex"
 
 
@@ -732,28 +733,28 @@ class CodexCliAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available
+        from backends.base import detect_install, status_from_detect, process_running
 
-        installed, version = cli_available("codex")
-        if not installed:
-            try:
-                import glob
-                matches = sorted(
-                    glob.glob(str(Path.home() / ".vscode/extensions/openai.chatgpt-*/bin/*/codex"))
-                    + glob.glob(str(Path.home() / ".cursor/extensions/openai.chatgpt-*/bin/*/codex"))
-                )
-                for m in reversed(matches):
-                    p = Path(m)
-                    if p.is_file() and os.access(p, os.X_OK):
-                        installed, version = True, "vscode-extension"
-                        break
-            except Exception:
-                pass
-        # ~/.codex config means product is present (CLI or IDE extension)
-        if not installed and (self._config_path.exists() or self._auth_path.exists() or self._codex_dir.exists()):
-            installed = True
-            if not version:
-                version = "config-only"
+        # Codex: CLI and/or VS Code / Cursor ChatGPT extension (plugin)
+        det = detect_install(
+            cli_commands=("codex", "codex.exe"),
+            extension_ids=("openai.chatgpt",),
+            process_markers=(
+                "codex app-server",
+                "codex -c features",
+                "openai.chatgpt-",
+            ),
+            data_dirs=[self._codex_dir],
+            config_files=[self._config_path, self._auth_path],
+            treat_config_as_installed=True,
+        )
+        # Windows: codex.exe + app-server
+        if not det.get("running"):
+            if process_running("codex.exe") and process_running("app-server"):
+                det["running"] = True
+                if "cli" not in det.get("install_kinds", []):
+                    det.setdefault("install_kinds", []).append("cli")
+                det["installed"] = True
 
         auth = self._load_auth()
         has_key = bool(auth.get("OPENAI_API_KEY"))
@@ -768,28 +769,13 @@ class CodexCliAdapter(BackendAdapter):
             msg_parts.append(f"active: {active}")
         if providers:
             msg_parts.append(f"{len(providers)} provider(s)")
-        from backends.base import process_running
+        msg = "; ".join(msg_parts) if msg_parts else "Installed"
+        if det.get("running"):
+            msg = "app-server running; " + msg
 
-        # VS Code Codex extension keeps app-server process(es) alive while IDE is open
-        running = process_running(
-            "codex app-server",
-            "codex -c features",
-            "openai.chatgpt-",  # extension path + codex binary running
-        )
-        if running and not process_running("app-server"):
-            # only count openai.chatgpt codex binary processes that look like servers
-            running = process_running("openai.chatgpt-") and process_running("app-server")
-        if not installed:
-            msg = "codex CLI not found"
-        else:
-            msg = "; ".join(msg_parts) if msg_parts else "Installed"
-            if running:
-                msg = ("app-server running; " + msg) if msg_parts else "app-server running"
-
-        return make_status(
-            installed=installed,
-            running=running,
-            version=version,
+        return status_from_detect(
+            det,
+            not_installed_message="codex CLI / ChatGPT extension not installed",
             message=msg,
             active_provider=active,
             provider_count=len(providers),

@@ -122,16 +122,22 @@ class ContinueAdapter(BackendAdapter):
         ]
 
     def get_status(self) -> dict:
-        from backends.base import make_status, vscode_extension_installed
+        from backends.base import detect_install, status_from_detect, process_running
 
-        # Only real product install counts. ~/.continue may be created by this manager.
-        installed = vscode_extension_installed("continue.continue")
+        # Continue.dev is primarily an IDE extension
+        det = detect_install(
+            extension_ids=("continue.continue",),
+            treat_config_as_installed=False,
+        )
         config = self._load_config()
         models = config.get("models", [])
-        if not installed:
-            return make_status(installed=False, message="Continue.dev extension not installed")
-        return make_status(
-            installed=True,
-            running=False,
-            message=f"{len(models)} model(s) configured" if models else "Installed",
+        running = False
+        if det["installed"]:
+            running = process_running("Visual Studio Code", "Code.exe", "Cursor", "Cursor.exe", "Code Helper")
+        msg = f"{len(models)} model(s) configured" if models else "extension installed"
+        return status_from_detect(
+            det,
+            not_installed_message="Continue.dev extension not installed",
+            message=msg,
+            running=running,
         )

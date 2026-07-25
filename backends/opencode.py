@@ -1,11 +1,12 @@
 import json
 import logging
+import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
 
-from backends.base import BackendAdapter
+from backends.base import BackendAdapter, home_config_dir, home_data_dir
 
 log = logging.getLogger(__name__)
 
@@ -24,9 +25,12 @@ class OpenCodeAdapter(BackendAdapter):
     """Sync vendors into OpenCode (auth.json + opencode.jsonc provider defs).
 
     OpenCode requires:
-      1. ~/.local/share/opencode/auth.json  →  { providerId: {type:"api", key:"..."} }
-      2. For custom / proxy endpoints: ~/.config/opencode/opencode.jsonc
-         provider.<id> = { npm, name, options.baseURL, models }
+      1. data dir auth.json  →  { providerId: {type:"api", key:"..."} }
+         macOS/Linux: ~/.local/share/opencode/auth.json
+         Windows: %LOCALAPPDATA%\\opencode\\auth.json
+      2. config dir opencode.jsonc for custom / proxy endpoints
+         macOS/Linux: ~/.config/opencode/opencode.jsonc
+         Windows: %APPDATA%\\opencode\\opencode.jsonc
     """
 
     name = "opencode"
@@ -35,11 +39,17 @@ class OpenCodeAdapter(BackendAdapter):
 
     @property
     def _auth_path(self) -> Path:
-        return Path.home() / ".local" / "share" / "opencode" / "auth.json"
+        env = (os.environ.get("OPENCODE_DATA_DIR") or "").strip()
+        if env:
+            return Path(env).expanduser() / "auth.json"
+        return home_data_dir("opencode") / "auth.json"
 
     @property
     def _config_dir(self) -> Path:
-        return Path.home() / ".config" / "opencode"
+        env = (os.environ.get("OPENCODE_CONFIG_DIR") or "").strip()
+        if env:
+            return Path(env).expanduser()
+        return home_config_dir("opencode")
 
     @property
     def _config_path(self) -> Path:
@@ -414,9 +424,16 @@ class OpenCodeAdapter(BackendAdapter):
         return vendors
 
     def get_status(self) -> dict:
-        from backends.base import make_status, cli_available, process_running
+        from backends.base import detect_install, status_from_detect
 
-        installed, version = cli_available("opencode")
+        # OpenCode is primarily a CLI (TUI); config dirs support install evidence
+        det = detect_install(
+            cli_commands=("opencode", "opencode.exe"),
+            process_markers=("opencode", "opencode.exe"),
+            data_dirs=[self._auth_path.parent],
+            config_files=[self._auth_path, self._config_path],
+            treat_config_as_installed=True,
+        )
         auth = self._load_auth()
         n_auth = sum(1 for v in auth.values() if self._extract_key(v))
         try:
@@ -424,19 +441,10 @@ class OpenCodeAdapter(BackendAdapter):
             n_prov = len(cfg.get("provider") or {})
         except Exception:
             n_prov = 0
-        if not installed and (self._auth_path.exists() or self._config_path.exists()):
-            installed = True
-        if not installed:
-            return make_status(installed=False, message="opencode CLI not found")
-        # Interactive TUI / sessions show as process name "opencode"
-        running = process_running("opencode")
         msg = f"{n_auth} credential(s), {n_prov} provider(s) in config"
-        if running:
-            msg = "process running; " + msg
-        return make_status(
-            installed=True,
-            running=running,
-            version=version,
+        return status_from_detect(
+            det,
+            not_installed_message="opencode CLI not found",
             message=msg,
         )
 
