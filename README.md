@@ -39,6 +39,8 @@ A unified management platform for AI provider API keys and development tool back
 
 ## Quick Start
 
+3-minute guide: [docs/quickstart.md](docs/quickstart.md) · Codex issues: [docs/troubleshoot-codex.md](docs/troubleshoot-codex.md) · New backend: [docs/adapter-contribution.md](docs/adapter-contribution.md)
+
 ```bash
 # Clone
 git clone https://github.com/kingkate2009-droid/ai-switch.git

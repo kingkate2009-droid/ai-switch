@@ -64,6 +64,86 @@ def _is_network_error(msg: str) -> bool:
     return any(n in s for n in needles)
 
 
+def classify_health_error(msg: str) -> dict:
+    """Map raw probe error → {code, label_en, suggestion_en} for UI/i18n.
+
+    code values: auth | quota | model | timeout | network | rate | ssl | other
+    """
+    s = (msg or "").lower()
+    if not s:
+        return {
+            "code": "other",
+            "label": "Unknown error",
+            "suggestion": "Re-run the check; if it keeps failing, open Diagnostics.",
+        }
+    if any(x in s for x in ("401", "403", "unauthorized", "forbidden", "invalid api", "auth failed", "authentication", "api key")):
+        return {
+            "code": "auth",
+            "label": "Auth failed (401/403)",
+            "suggestion": "Check API key, endpoint URL, and whether the key is revoked.",
+        }
+    if any(x in s for x in ("429", "rate limit", "too many requests", "rate_limit")):
+        return {
+            "code": "rate",
+            "label": "Rate limited (429)",
+            "suggestion": "Slow down requests or switch to another key; retry later.",
+        }
+    if any(x in s for x in ("quota", "billing", "insufficient", "payment", "balance", "credit", "exceeded your current quota")):
+        return {
+            "code": "quota",
+            "label": "Quota / billing",
+            "suggestion": "Top up balance or wait for quota reset; disable this key if spent.",
+        }
+    if any(x in s for x in ("ssl", "tls", "certificate", "ssleof", "wrong version number", "unexpected_eof")):
+        return {
+            "code": "ssl",
+            "label": "SSL / TLS error",
+            "suggestion": "Check proxy/MITM, system time, and HTTPS base URL.",
+        }
+    if any(x in s for x in ("timeout", "timed out", "read timed out")):
+        return {
+            "code": "timeout",
+            "label": "Timeout",
+            "suggestion": "Network is slow or the endpoint is unreachable; retry or check proxy.",
+        }
+    if any(x in s for x in (
+        "connection", "connect", "network", "dns", "refused", "reset",
+        "name resolution", "nodename", "proxy", "max retries", "httpsconnectionpool",
+    )):
+        return {
+            "code": "network",
+            "label": "Network error",
+            "suggestion": "Check internet, DNS, firewall, and proxy settings.",
+        }
+    if any(x in s for x in ("model", "not found", "compatible", "unsupported", "does not exist", "no such model")):
+        return {
+            "code": "model",
+            "label": "Model / channel issue",
+            "suggestion": "Pick another check model or rescan models for this key.",
+        }
+    return {
+        "code": "other",
+        "label": "Check failed",
+        "suggestion": "See raw error detail; re-check after fixing endpoint or key.",
+    }
+
+
+def _enrich_health_result(result: dict) -> dict:
+    """Attach error_code / error_label / suggestion when unhealthy."""
+    if not isinstance(result, dict):
+        return result
+    if result.get("healthy") is True:
+        result.setdefault("error_code", None)
+        result.setdefault("suggestion", None)
+        return result
+    raw = result.get("error") or result.get("message") or ""
+    info = classify_health_error(str(raw))
+    result["error_code"] = info.get("code")
+    result["error_label"] = info.get("label")
+    result["suggestion"] = info.get("suggestion")
+    return result
+
+
 def _probe_with_retry(check_type: str, api_url: str, api_key: str, models_to_try=None) -> tuple:
     """Call probe_provider; retry only on network-ish failures."""
     attempts = _network_retry_attempts()
@@ -117,6 +197,8 @@ def _resolve_check_type(vendor: dict) -> str:
     endpoint_type = (vendor.get("endpoint_type") or "").lower().strip()
     if endpoint_type in ("openai", "openai_chat"):
         return "openai_chat"
+    if endpoint_type in ("openai_responses", "responses", "codex"):
+        return "openai_responses"
     if endpoint_type in ("anthropic", "claude"):
         return "anthropic"
     if endpoint_type in ("google", "gemini"):
@@ -131,6 +213,8 @@ def _resolve_check_type(vendor: dict) -> str:
         return "anthropic"
     if "generativelanguage.googleapis.com" in url or "/gemini" in url:
         return "gemini"
+    if "/responses" in url or "chatgpt.com/backend-api/codex" in url:
+        return "openai_responses"
 
     provider_id = (vendor.get("provider") or "").strip()
     if provider_id:
@@ -138,6 +222,51 @@ def _resolve_check_type(vendor: dict) -> str:
         if prov:
             return prov["check_type"]
     return "openai_chat"
+
+
+def _vendor_wants_responses(vendor: dict, key_entry: dict) -> bool:
+    """Whether this key should also (or primarily) verify Responses API for Codex."""
+    tags = [str(t).lower() for t in (vendor.get("tags") or [])]
+    if any(t in ("codex", "responses", "suitable-codex", "适合codex") for t in tags):
+        return True
+    notes = str(key_entry.get("notes") or "").lower()
+    if "codex" in notes or "responses" in notes:
+        return True
+    url = (vendor.get("proxy_target") or vendor.get("api_url") or "").lower()
+    if "/responses" in url or "backend-api/codex" in url:
+        return True
+    # GPT-ish inventory strongly suggests Codex-switchable OpenAI-compat
+    models = []
+    for m in key_entry.get("models") or []:
+        mid = m.get("id") if isinstance(m, dict) else str(m or "")
+        if mid:
+            models.append(mid.lower())
+    dm = str(key_entry.get("default_model") or key_entry.get("check_model") or "").lower()
+    if dm:
+        models.append(dm)
+    for mid in models:
+        if mid.startswith("gpt-") or mid.startswith("o1") or mid.startswith("o3") or mid.startswith("o4") or "codex" in mid:
+            return True
+    return False
+
+
+def _gptish_models(key_entry: dict) -> list[str]:
+    out = []
+    for m in key_entry.get("models") or []:
+        mid = m.get("id") if isinstance(m, dict) else str(m or "")
+        if not mid:
+            continue
+        low = mid.lower()
+        if low.startswith(("gpt-", "o1", "o3", "o4")) or "codex" in low:
+            out.append(mid)
+    cm = str(key_entry.get("check_model") or "").strip()
+    dm = str(key_entry.get("default_model") or "").strip()
+    for extra in (cm, dm):
+        if extra and extra not in out:
+            low = extra.lower()
+            if low.startswith(("gpt-", "o1", "o3", "o4")) or "codex" in low:
+                out.insert(0, extra)
+    return out
 
 
 def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True) -> dict:
@@ -157,6 +286,7 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
     api_url = vendor.get("proxy_target", "") or vendor["api_url"]
     api_key = key_entry["api_key"]
     check_type = _resolve_check_type(vendor)
+    wants_responses = check_type == "openai_responses" or _vendor_wants_responses(vendor, key_entry)
 
     # Primary check model (user-selected). If set, key-level / scheduled checks
     # probe this model only. If empty, keep legacy multi-model / scan behavior.
@@ -175,21 +305,53 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
         models_to_try = None
 
     start = time.time()
-    if check_model:
+    layers = {}
+    if check_type == "openai_responses":
+        # Primary path is Responses (Codex)
+        gpt_models = _gptish_models(key_entry)
+        resp_models = [check_model] if check_model else (gpt_models or models_to_try)
+        healthy, error_msg = _probe_with_retry("openai_responses", api_url, api_key, resp_models)
+        layers["responses"] = {"healthy": healthy, "message": error_msg}
+        check_layer = "responses"
+    elif check_model:
         healthy, error_msg = _probe_model_with_retry(check_type, api_url, api_key, check_model)
         if healthy and error_msg and not str(error_msg).startswith("["):
             error_msg = f"[{check_model}] {error_msg}"
         elif healthy and not error_msg:
             error_msg = f"[{check_model}] ok"
+        layers["connectivity"] = {"healthy": healthy, "message": error_msg}
+        check_layer = "model"
+        # Optional Responses secondary for Codex-suitable keys
+        if healthy and wants_responses:
+            gpt_models = _gptish_models(key_entry) or ([check_model] if check_model else None)
+            rh, rm = _probe_with_retry("openai_responses", api_url, api_key, gpt_models)
+            layers["responses"] = {"healthy": rh, "message": rm}
+            if not rh:
+                # keep connectivity success but surface responses failure as overall fail for Codex path
+                healthy = False
+                error_msg = f"Chat OK; Responses failed: {rm}"
+                check_layer = "responses"
     else:
         healthy, error_msg = _probe_with_retry(check_type, api_url, api_key, models_to_try)
+        layers["connectivity"] = {"healthy": healthy, "message": error_msg}
+        check_layer = "connectivity"
+        if healthy and wants_responses:
+            gpt_models = _gptish_models(key_entry) or models_to_try
+            rh, rm = _probe_with_retry("openai_responses", api_url, api_key, gpt_models)
+            layers["responses"] = {"healthy": rh, "message": rm}
+            if not rh:
+                healthy = False
+                error_msg = f"Chat OK; Responses failed: {rm}"
+                check_layer = "responses"
     latency_ms = int((time.time() - start) * 1000)
 
     models = []
     default_model = key_entry.get("default_model", "")
     # Still allow inventory scan when healthy (does not change check_model)
+    # Model list endpoints are chat-compatible; use openai_chat for scan when responses.
+    scan_type = "openai_chat" if check_type == "openai_responses" else check_type
     if healthy and scan_models_flag:
-        models = scan_models(check_type, api_url, api_key)
+        models = scan_models(scan_type, api_url, api_key)
         # Merge scan results with existing inventory so we never wipe known models
         if models:
             existing = list_model_ids(key_entry)
@@ -229,7 +391,11 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
         "default_model": default_model,
         "check_model": check_model,
         "used_check_model": bool(check_model),
+        "check_layer": check_layer,
+        "check_layers": layers,
+        "wants_responses": wants_responses,
     }
+    _enrich_health_result(result)
 
     with _lock:
         cache = _load_cache()
@@ -285,7 +451,9 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
             "message": msg if healthy else None,
             "error": None if healthy else msg,
             "checked_at": datetime.now(timezone.utc).isoformat(),
+            "check_layer": "model",
         }
+        _enrich_health_result(entry)
         results.append(entry)
         model_health[mid] = {
             "healthy": healthy,

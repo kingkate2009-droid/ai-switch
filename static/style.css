@@ -1739,14 +1739,48 @@ input[type="checkbox"] { accent-color: var(--primary); }
   color: #fff;
   pointer-events: auto;
   animation: toast-in 0.3s ease-out;
-  max-width: 360px;
+  max-width: 420px;
   word-break: break-word;
   box-shadow: var(--shadow-lg);
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
+
+.toast-text { flex: 1; min-width: 0; }
+
+.toast-action {
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.55);
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast-action:hover { background: rgba(255,255,255,0.28); }
 
 .toast-success { background: var(--success); }
 .toast-error { background: var(--danger); }
 .toast-info { background: var(--primary); }
+
+.backend-card-missing {
+  opacity: 0.78;
+}
+
+.backend-card-disabled {
+  opacity: 0.85;
+}
+
+.backend-last-sync,
+.backend-no-sync {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+}
 
 .toast-leave {
   animation: toast-out 0.25s ease-in forwards;
@@ -2022,6 +2056,90 @@ code {
   padding-left: 20px;
   line-height: 1.7;
   color: var(--text);
+}
+
+.onboarding-panel {
+  border: 1px solid var(--primary);
+  background: linear-gradient(180deg, var(--primary-dim), var(--bg2));
+  margin-bottom: 16px;
+}
+
+.onboarding-track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.onboarding-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.onboarding-step.is-done {
+  opacity: 0.72;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.onboarding-step.is-current {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary-dim);
+}
+
+.onboarding-step-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.onboarding-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--bg3);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.onboarding-step.is-done .onboarding-step-num {
+  background: var(--success-dim);
+  color: var(--success);
+}
+
+.onboarding-step.is-current .onboarding-step-num {
+  background: var(--primary-dim);
+  color: var(--primary);
+}
+
+.onboarding-step-actions {
+  flex-shrink: 0;
+}
+
+/* While first-run guide is active, de-emphasize secondary dash sections */
+body.onboarding-focus #todayUsageRow,
+body.onboarding-focus #budgetAlerts,
+body.onboarding-focus #dashHealthSection,
+body.onboarding-focus #dashTodosSection,
+body.onboarding-focus #view-dashboard .dash-section:not(.onboarding-panel) {
+  opacity: 0.55;
+}
+
+body.onboarding-focus .onboarding-panel {
+  opacity: 1;
 }
 #authGate.open, #authGate[style*="flex"] {
   display: flex !important;

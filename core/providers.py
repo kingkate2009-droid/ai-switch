@@ -329,12 +329,103 @@ def probe_openai_chat(url: str, api_key: str, models_to_try: Optional[list[str]]
         discovered = _scan_models_openai(url, headers)
         if "volces.com" in url or "volcengine" in url.lower():
             models_to_try = discovered + _VOLCENGINE_MODELS + [""]
-        elif discovered:
-            models_to_try = discovered + [""]
         else:
-            models_to_try = _MODEL_CANDIDATES
+            models_to_try = discovered + [""] if discovered else _MODEL_CANDIDATES
     
     return _probe_chat_completions(url, headers, models_to_try)
+
+
+def _responses_url(url: str) -> str:
+    base = (url or "").rstrip("/")
+    if base.endswith(("/v1", "/v2", "/v3", "/v4")):
+        return base + "/responses"
+    if re.search(r"/v\d+/", base + "/"):
+        # already has a version path mid-url; append responses under same host path
+        return base + "/responses"
+    return base + "/v1/responses"
+
+
+def _probe_responses(url: str, headers: dict, models_to_try: Optional[list[str]] = None) -> tuple:
+    """Probe OpenAI Responses API (Codex wire_api=responses).
+
+    Prefer streaming SSE so we verify the path Codex actually uses.
+    """
+    resp_url = _responses_url(url)
+    candidates = models_to_try if models_to_try is not None else [
+        "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "o4-mini", "o3-mini", "gpt-5-mini",
+    ]
+    if isinstance(candidates, str):
+        candidates = [candidates]
+    candidates = [m for m in (candidates or []) if m] or [""]
+    try:
+        last_err = ""
+        for model in candidates:
+            payload = {
+                "input": "hi",
+                "stream": True,
+            }
+            if model:
+                payload["model"] = model
+            r = _new_session().post(
+                resp_url, json=payload, headers=headers, timeout=PROBE_TIMEOUT, stream=True,
+            )
+            if r.status_code == 200:
+                # Read a small chunk of SSE to ensure stream works
+                try:
+                    chunk = next(r.iter_content(chunk_size=256), b"")
+                    text = chunk.decode("utf-8", errors="replace") if isinstance(chunk, (bytes, bytearray)) else str(chunk)
+                except Exception:
+                    text = ""
+                finally:
+                    try:
+                        r.close()
+                    except Exception:
+                        pass
+                preview = (text or "stream ok")[:160].replace("\n", " ")
+                return True, f"[responses:{model or 'default'}] {preview}"
+            body = ""
+            try:
+                body = (r.text or "")[:400]
+            except Exception:
+                body = ""
+            last_err = f"HTTP {r.status_code}: {body}"
+            if r.status_code == 401:
+                return False, "Auth failed (HTTP 401) on /responses"
+            if r.status_code == 403:
+                bl = body.lower()
+                if "quota" in bl or "balance" in bl or "insufficient" in bl or "额度" in body:
+                    return False, f"Quota/billing on /responses: {body}"
+                # may be model/group issue — try next model
+                if _is_model_error(body):
+                    continue
+                return False, f"Access denied on /responses: {body}"
+            if r.status_code == 429:
+                bl = body.lower()
+                if "quota" in bl or "exhausted" in bl:
+                    return False, f"Quota exhausted on /responses: {body}"
+                return True, f"Rate limited on /responses: {body}"
+            if r.status_code == 404:
+                return False, "Responses API not found (HTTP 404) — endpoint may only support chat"
+            if _is_model_error(body):
+                continue
+            # non-model hard error
+            if r.status_code >= 500:
+                return False, last_err
+            continue
+        return False, last_err or "No compatible model for /responses"
+    except requests.exceptions.Timeout:
+        return False, "Timeout on /responses"
+    except Exception as e:
+        return False, str(e)[:200]
+
+
+def probe_openai_responses(url: str, api_key: str, models_to_try: Optional[list[str]] = None) -> tuple:
+    """OpenAI-compatible Responses API probe (Bearer auth)."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    return _probe_responses(url, headers, models_to_try)
 
 
 def probe_openai_chat_apikey(url: str, api_key: str, models_to_try: Optional[list[str]] = None) -> tuple:
@@ -511,6 +602,7 @@ def probe_gemini(url: str, api_key: str, models_to_try: Optional[list[str]] = No
 _PROBE_FUNCS = {
     "openai_chat": probe_openai_chat,
     "openai_chat_apikey": probe_openai_chat_apikey,
+    "openai_responses": probe_openai_responses,
     "anthropic": probe_anthropic,
     "gemini": probe_gemini,
 }
@@ -534,6 +626,8 @@ def probe_single_model(check_type: str, url: str, api_key: str, model: str) -> t
         headers["api-key"] = api_key
     else:
         headers["Authorization"] = f"Bearer {api_key}"
+    if check_type == "openai_responses":
+        return _probe_responses(url, headers, [model])
     return _probe_chat_completions(url, headers, [model])
 
 

@@ -68,12 +68,136 @@ class ClaudeCodeAdapter(BackendAdapter):
                 settings.pop("env", None)
             self._save_settings(settings)
 
+    def _is_anthropic_vendor(self, vendor: dict) -> bool:
+        ep = (vendor.get("endpoint_type") or "").lower()
+        prov = (vendor.get("provider") or "").lower()
+        return ep == "anthropic" or prov in ("anthropic", "claude")
+
+    def _pick_key(self, vendor: dict, key_id: str = ""):
+        keys = vendor.get("keys") or []
+        if key_id:
+            for k in keys:
+                if str(k.get("id")) == str(key_id) and k.get("api_key"):
+                    return k
+            return None
+        for k in keys:
+            if k.get("enabled") is False:
+                continue
+            if k.get("api_key") and self.should_sync(vendor, k):
+                return k
+        for k in keys:
+            if k.get("enabled") is not False and k.get("api_key"):
+                return k
+        return None
+
+    @property
+    def supports_active_switch(self) -> bool:
+        return True
+
+    def list_providers(self) -> list[dict]:
+        from core.data import get_vendors
+        settings = self._load_settings()
+        env = settings.get("env") or {}
+        active_key = (env.get("ANTHROPIC_API_KEY") or "").strip()
+        active_url = (env.get("ANTHROPIC_BASE_URL") or "").rstrip("/")
+        out = []
+        for v in get_vendors():
+            if not self._is_anthropic_vendor(v):
+                continue
+            k = self._pick_key(v)
+            if not k:
+                continue
+            pid = f"aiswitch-{v.get('id')}"
+            url = (v.get("proxy_target") or v.get("api_url") or "").rstrip("/")
+            models = []
+            for m in (k.get("models") or []):
+                mid = m.get("id") if isinstance(m, dict) else str(m or "")
+                if mid:
+                    models.append(mid)
+            is_active = bool(active_key) and (
+                (k.get("api_key") or "").strip() == active_key
+                or (active_url and url and active_url == url)
+            )
+            out.append({
+                "id": pid,
+                "name": v.get("name") or v.get("provider") or pid,
+                "base_url": url,
+                "vendor_id": str(v.get("id") or ""),
+                "vendor_name": v.get("name") or "",
+                "key_id": str(k.get("id") or ""),
+                "key_name": k.get("name") or "",
+                "models": models[:20],
+                "model_preview": ", ".join(models[:6]) + ("…" if len(models) > 6 else ""),
+                "active": is_active,
+                "managed": True,
+            })
+        out.sort(key=lambda x: (0 if x.get("active") else 1, (x.get("name") or "").lower()))
+        return out
+
+    def get_active_provider(self) -> dict:
+        settings = self._load_settings()
+        env = settings.get("env") or {}
+        api_key = (env.get("ANTHROPIC_API_KEY") or "").strip()
+        base = (env.get("ANTHROPIC_BASE_URL") or "").strip()
+        if not api_key:
+            return {"active_provider": "", "name": "", "base_url": ""}
+        for p in self.list_providers():
+            if p.get("active"):
+                return {
+                    "active_provider": p.get("id") or "",
+                    "name": p.get("name") or "",
+                    "base_url": p.get("base_url") or base,
+                }
+        return {"active_provider": "env", "name": "Claude Code env", "base_url": base}
+
+    def switch_provider(self, provider_id: str = "", vendor_id: str = "", key_id: str = "") -> dict:
+        from core.data import get_vendor, get_vendors
+        vendor = None
+        if vendor_id:
+            vendor = get_vendor(vendor_id)
+        elif provider_id and str(provider_id).startswith("aiswitch-"):
+            vendor = get_vendor(str(provider_id)[len("aiswitch-"):])
+        if not vendor:
+            # match by name/id in list
+            for p in self.list_providers():
+                if p.get("id") == provider_id:
+                    vendor = get_vendor(str(p.get("vendor_id") or ""))
+                    if not key_id:
+                        key_id = str(p.get("key_id") or "")
+                    break
+        if not vendor:
+            return {"success": False, "message": "Vendor not found"}
+        if not self._is_anthropic_vendor(vendor):
+            return {"success": False, "message": "Only Anthropic-compatible vendors can be active for Claude Code"}
+        key = self._pick_key(vendor, key_id)
+        if not key or not key.get("api_key"):
+            return {"success": False, "message": "No enabled key on vendor"}
+        if not self.is_installed():
+            return {"success": False, "message": "Claude Code not installed"}
+        # write env slot
+        settings = self._load_settings()
+        settings.setdefault("env", {})
+        settings["env"]["ANTHROPIC_API_KEY"] = key["api_key"]
+        api_url = (vendor.get("proxy_target") or vendor.get("api_url") or "").strip()
+        if api_url:
+            settings["env"]["ANTHROPIC_BASE_URL"] = api_url
+        else:
+            settings["env"].pop("ANTHROPIC_BASE_URL", None)
+        self._save_settings(settings)
+        pid = f"aiswitch-{vendor.get('id')}"
+        return {
+            "success": True,
+            "active_provider": pid,
+            "message": f"Claude Code active → {vendor.get('name') or pid}",
+            "vendor_id": str(vendor.get("id") or ""),
+            "key_id": str(key.get("id") or ""),
+        }
+
     def reconcile(self) -> None:
         from core.data import get_vendors
         has_active = False
         for v in get_vendors():
-            ep = v.get("endpoint_type", "")
-            if ep != "anthropic" and v.get("provider", "").lower() != "anthropic":
+            if not self._is_anthropic_vendor(v):
                 continue
             for k in v.get("keys", []):
                 if k.get("enabled", True) and k.get("api_key"):

@@ -10,10 +10,11 @@ from typing import Optional
 
 from core.data import (
     _all_key_models,
-    _load_data,
+    _load_usage_raw,
     _normalize_model_name,
-    _save_data,
+    _save_usage_raw,
     get_vendors,
+    update_settings,
 )
 
 log = logging.getLogger(__name__)
@@ -30,8 +31,7 @@ _FAKE_MODELS = {
 
 def purge_synthetic_usage() -> int:
     """Remove clearly synthetic demo usage (identical sub-second stamps + fake model set)."""
-    data = _load_data()
-    records = data.get("usage") or []
+    records = _load_usage_raw()
     if not records:
         return 0
 
@@ -59,8 +59,7 @@ def purge_synthetic_usage() -> int:
             continue
         kept.append(r)
     if removed:
-        data["usage"] = kept
-        _save_data(data)
+        _save_usage_raw(kept)
         log.info("Purged %d synthetic/sample usage records", removed)
     return removed
 
@@ -230,8 +229,7 @@ def import_openclaw_usage(sessions_dir: Optional[Path] = None, max_files: int = 
     purge_synthetic_usage()
 
     root = sessions_dir or OPENCLAW_SESSIONS_DIR
-    data = _load_data()
-    records = data.setdefault("usage", [])
+    records = _load_usage_raw()
     seen = {str(r.get("source_id")) for r in records if r.get("source_id")}
     # also fingerprint older records without source_id
     for r in records:
@@ -303,9 +301,11 @@ def import_openclaw_usage(sessions_dir: Optional[Path] = None, max_files: int = 
             log.warning("Failed reading session %s: %s", path, e)
 
     if added:
-        data["usage"] = records
-        data.setdefault("settings", {})["usage_imported_at"] = datetime.now(timezone.utc).isoformat()
-        _save_data(data)
+        _save_usage_raw(records)
+        try:
+            update_settings(usage_imported_at=datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
         log.info("Imported %d OpenClaw usage records (scanned lines w/ usage: %d)", added, scanned)
 
     return {"added": added, "scanned": scanned, "files": len(files), "total": len(records)}
@@ -451,8 +451,7 @@ def import_opencode_usage(db_path: Optional[Path] = None, max_messages: int = 20
         return {"added": 0, "scanned": 0, "db": None, "total": 0, "skipped": "db_not_found"}
 
     purge_synthetic_usage()
-    data = _load_data()
-    records = data.setdefault("usage", [])
+    records = _load_usage_raw()
     seen = {str(r.get("source_id")) for r in records if r.get("source_id")}
     for r in records:
         if r.get("source") == "opencode" and r.get("source_id"):
@@ -500,9 +499,11 @@ def import_opencode_usage(db_path: Optional[Path] = None, max_messages: int = 20
         return {"added": 0, "scanned": scanned, "db": str(path), "total": len(records), "error": str(e)}
 
     if added:
-        data["usage"] = records
-        data.setdefault("settings", {})["usage_imported_at"] = datetime.now(timezone.utc).isoformat()
-        _save_data(data)
+        _save_usage_raw(records)
+        try:
+            update_settings(usage_imported_at=datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
         log.info("Imported %d OpenCode usage records (scanned %d messages from %s)", added, scanned, path)
 
     return {

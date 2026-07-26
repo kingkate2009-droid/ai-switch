@@ -11,9 +11,11 @@ DATA_DIR = Path.home() / ".ai-switch"
 
 log = logging.getLogger(__name__)
 DATA_PATH = DATA_DIR / "data.json"
+USAGE_PATH = DATA_DIR / "usage.json"
 _OLD_DATA_DIR = Path.home() / ".openclaw-auto-manager"
 _OLD_DATA_PATH = _OLD_DATA_DIR / "data.json"
 _DATA_LOCK = threading.RLock()
+_USAGE_LOCK = threading.RLock()
 _DEFAULT_DATA = {
     "vendors": [],
     "settings": {
@@ -68,6 +70,21 @@ def _quarantine_corrupt(path: Path) -> Path:
     return dest
 
 
+def _mark_data_recovery(data: dict, *, source: str, vendors: int, empty: bool = False) -> dict:
+    """Attach a one-shot UI notice that data was restored from backup."""
+    if not isinstance(data, dict):
+        data = dict(_DEFAULT_DATA)
+    settings = data.setdefault("settings", {})
+    settings["data_recovery"] = {
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "source": source or "",
+        "vendors": int(vendors or 0),
+        "empty": bool(empty),
+        "acked": False,
+    }
+    return data
+
+
 def _recover_data_from_backups(err: Exception) -> dict:
     """Quarantine corrupt data.json and restore the newest valid backup."""
     corrupt = _quarantine_corrupt(DATA_PATH) if DATA_PATH.exists() else None
@@ -77,20 +94,140 @@ def _recover_data_from_backups(err: Exception) -> dict:
             continue
         try:
             data = _read_json_file(bak)
-            # restore recovered file as active data.json
+            n = len(data.get("vendors") or [])
+            data = _mark_data_recovery(data, source=bak.name, vendors=n, empty=False)
+            # restore recovered file as active data.json (include recovery notice)
             tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".recover-tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
             tmp.replace(DATA_PATH)
-            n = len(data.get("vendors") or [])
             log.warning("Restored data.json from %s (%s vendors)", bak.name, n)
             return data
         except Exception as e:
             log.warning("backup %s unusable: %s", bak.name, e)
     log.error("No valid backup found; starting with empty data")
-    return dict(_DEFAULT_DATA)
+    data = _mark_data_recovery(dict(_DEFAULT_DATA), source="", vendors=0, empty=True)
+    try:
+        tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".recover-tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(DATA_PATH)
+    except Exception:
+        pass
+    return data
+
+
+def _atomic_write_json(path: Path, payload) -> None:
+    """Atomic JSON write with fsync (no rotating backups)."""
+    _ensure_dirs()
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
+
+
+def _load_usage_raw() -> list:
+    """Load usage records from usage.json (empty list if missing/corrupt)."""
+    with _USAGE_LOCK:
+        _ensure_dirs()
+        if not USAGE_PATH.exists():
+            return []
+        try:
+            raw = _read_json_file(USAGE_PATH)
+            recs = raw.get("records") if isinstance(raw, dict) else raw
+            if not isinstance(recs, list):
+                return []
+            return recs
+        except Exception as e:
+            log.warning("usage.json unreadable (%s); starting empty", e)
+            return []
+
+
+def _save_usage_raw(records: list) -> None:
+    with _USAGE_LOCK:
+        if not isinstance(records, list):
+            raise TypeError("usage records must be a list")
+        # light rotate: keep one bak
+        try:
+            if USAGE_PATH.exists():
+                bak = USAGE_PATH.with_suffix(USAGE_PATH.suffix + ".bak")
+                try:
+                    shutil.copy2(USAGE_PATH, bak)
+                except OSError:
+                    pass
+        except Exception:
+            pass
+        _atomic_write_json(USAGE_PATH, {
+            "format": "ai-switch-usage",
+            "version": 1,
+            "records": records,
+        })
+
+
+def _migrate_usage_out_of_data(data: dict) -> dict:
+    """Move legacy data['usage'] into usage.json and strip from main config."""
+    if not isinstance(data, dict) or "usage" not in data:
+        return data
+    legacy = data.get("usage")
+    if not isinstance(legacy, list):
+        data = dict(data)
+        data.pop("usage", None)
+        return data
+    try:
+        existing = _load_usage_raw()
+        if legacy:
+            # merge: prefer existing usage.json, append legacy not already present
+            seen = set()
+            for r in existing:
+                if not isinstance(r, dict):
+                    continue
+                sid = str(r.get("source_id") or "")
+                if sid:
+                    seen.add("sid:" + sid)
+                else:
+                    seen.add("fp:%s|%s|%s|%s" % (
+                        r.get("timestamp"), r.get("model"), r.get("total_tokens"), r.get("provider"),
+                    ))
+            merged = list(existing)
+            for r in legacy:
+                if not isinstance(r, dict):
+                    continue
+                sid = str(r.get("source_id") or "")
+                key = ("sid:" + sid) if sid else ("fp:%s|%s|%s|%s" % (
+                    r.get("timestamp"), r.get("model"), r.get("total_tokens"), r.get("provider"),
+                ))
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(r)
+            # re-id sequentially for stability
+            for i, r in enumerate(merged, start=1):
+                if isinstance(r, dict):
+                    r["id"] = str(i)
+            _save_usage_raw(merged)
+            log.info(
+                "Migrated usage out of data.json → usage.json (%d legacy + %d existing → %d)",
+                len(legacy), len(existing), len(merged),
+            )
+        elif not existing and not USAGE_PATH.exists():
+            _save_usage_raw([])
+    except Exception as e:
+        log.warning("usage migration failed: %s", e)
+        return data
+    data = dict(data)
+    data.pop("usage", None)
+    try:
+        # persist stripped main config immediately so next load stays lean
+        _save_data_core(data)
+    except Exception as e:
+        log.warning("failed to strip usage from data.json: %s", e)
+    return data
 
 
 def _load_data() -> dict:
@@ -98,56 +235,70 @@ def _load_data() -> dict:
         _migrate_old_data()
         _ensure_dirs()
         if not DATA_PATH.exists():
-            return dict(_DEFAULT_DATA)
-        try:
-            return _read_json_file(DATA_PATH)
-        except Exception as e:
-            return _recover_data_from_backups(e)
+            data = dict(_DEFAULT_DATA)
+        else:
+            try:
+                data = _read_json_file(DATA_PATH)
+            except Exception as e:
+                data = _recover_data_from_backups(e)
+        # one-time / residual: split usage out of main config
+        if isinstance(data, dict) and "usage" in data:
+            data = _migrate_usage_out_of_data(data)
+        return data
+
+
+def _save_data_core(data: dict) -> None:
+    """Atomic write with rotating backups (data.json.bak, .bak.1, .bak.2)."""
+    _ensure_dirs()
+    # never persist clearly broken payload
+    if not isinstance(data, dict):
+        raise TypeError("data must be a dict")
+    # never keep usage in main config (separate usage.json)
+    if "usage" in data:
+        data = dict(data)
+        data.pop("usage", None)
+    # rotate backups before overwrite
+    try:
+        if DATA_PATH.exists():
+            # only back up if current file is valid JSON
+            try:
+                _read_json_file(DATA_PATH)
+                bak0 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak")
+                bak1 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.1")
+                bak2 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.2")
+                if bak1.exists():
+                    try:
+                        if bak2.exists():
+                            bak2.unlink()
+                        bak1.replace(bak2)
+                    except OSError:
+                        pass
+                if bak0.exists():
+                    try:
+                        bak0.replace(bak1)
+                    except OSError:
+                        pass
+                try:
+                    shutil.copy2(DATA_PATH, bak0)
+                except OSError:
+                    pass
+            except Exception:
+                # current data.json is already corrupt — don't rotate it into backups
+                pass
+    except Exception:
+        pass
+    tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(DATA_PATH)
 
 
 def _save_data(data: dict) -> None:
     """Atomic write with rotating backups (data.json.bak, .bak.1, .bak.2)."""
     with _DATA_LOCK:
-        _ensure_dirs()
-        # never persist clearly broken payload
-        if not isinstance(data, dict):
-            raise TypeError("data must be a dict")
-        # rotate backups before overwrite
-        try:
-            if DATA_PATH.exists():
-                # only back up if current file is valid JSON
-                try:
-                    _read_json_file(DATA_PATH)
-                    bak0 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak")
-                    bak1 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.1")
-                    bak2 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.2")
-                    if bak1.exists():
-                        try:
-                            if bak2.exists():
-                                bak2.unlink()
-                            bak1.replace(bak2)
-                        except OSError:
-                            pass
-                    if bak0.exists():
-                        try:
-                            bak0.replace(bak1)
-                        except OSError:
-                            pass
-                    try:
-                        shutil.copy2(DATA_PATH, bak0)
-                    except OSError:
-                        pass
-                except Exception:
-                    # current data.json is already corrupt — don't rotate it into backups
-                    pass
-        except Exception:
-            pass
-        tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(DATA_PATH)
+        _save_data_core(data)
 
 
 def _next_id(items: list) -> str:
@@ -529,6 +680,28 @@ def get_settings() -> dict:
     return _load_data().get("settings", {})
 
 
+def get_data_recovery_notice() -> Optional[dict]:
+    """Return unacked data recovery notice, or None."""
+    rec = (get_settings() or {}).get("data_recovery")
+    if not isinstance(rec, dict) or rec.get("acked"):
+        return None
+    return dict(rec)
+
+
+def ack_data_recovery() -> dict:
+    """Mark recovery notice as acknowledged."""
+    data = _load_data()
+    settings = data.setdefault("settings", {})
+    rec = settings.get("data_recovery")
+    if isinstance(rec, dict):
+        rec = dict(rec)
+        rec["acked"] = True
+        settings["data_recovery"] = rec
+        _save_data(data)
+        return rec
+    return {}
+
+
 _SETTINGS_KEYS = (
     "check_interval_seconds",
     "health_check_enabled",  # bool, default False — optional scheduled health checks
@@ -543,9 +716,12 @@ _SETTINGS_KEYS = (
     "budget_monthly_cost",  # float USD, 0 = off
     "budget_daily_tokens",  # int, 0 = off
     "budget_monthly_tokens",# int, 0 = off
+    "budget_action",        # "" | "alert" | "read_only" | "disable_keys"
+    "budget_enforced_at",   # iso timestamp of last enforcement
     "gateway",
     "last_push",
     "usage_imported_at",
+    "data_recovery",  # one-shot notice after corrupt data.json restore
 )
 
 
@@ -672,15 +848,14 @@ def save_backend_config(backend_name: str, config: dict) -> None:
 
 
 def add_usage_record(record: dict) -> dict:
-    data = _load_data()
-    records = data.setdefault("usage", [])
+    records = _load_usage_raw()
     record["id"] = _next_id(records)
     if "success" not in record:
         record["success"] = True
     if "status_code" not in record:
         record["status_code"] = 200 if record.get("success", True) else 500
     records.append(record)
-    _save_data(data)
+    _save_usage_raw(records)
     return record
 
 
@@ -702,16 +877,14 @@ def _all_key_models() -> set:
 
 def _purge_stale_sample_usage() -> None:
     """Drop demo/sample usage. Detects old synthetic seed (same µs stamp + fake models)."""
-    data = _load_data()
-    records = data.get("usage") or []
+    records = _load_usage_raw()
     if not records:
         return
 
     kept = [r for r in records if not r.get("_sample") and not r.get("_synthetic")]
     if not kept:
         if len(kept) != len(records):
-            data["usage"] = []
-            _save_data(data)
+            _save_usage_raw([])
             log.info("Purged %d sample usage records", len(records))
         return
 
@@ -726,19 +899,15 @@ def _purge_stale_sample_usage() -> None:
     # Drop entire batch when it is clearly the old demo seed
     if synthetic_stamp and all_fake_models and no_real_model:
         removed = len(kept)
-        data["usage"] = [r for r in records if r.get("source") == "openclaw" or r.get("source") == "proxy"]
-        # if nothing real left, empty
-        if not data["usage"]:
-            data["usage"] = []
-        _save_data(data)
+        real = [r for r in records if r.get("source") == "openclaw" or r.get("source") == "proxy"]
+        _save_usage_raw(real)
         log.info("Purged %d synthetic demo usage records", removed)
         return
 
     if len(kept) == len(records):
         return
     removed = len(records) - len(kept)
-    data["usage"] = kept
-    _save_data(data)
+    _save_usage_raw(kept)
     log.info("Purged %d sample/stale usage records", removed)
 
 
@@ -810,7 +979,7 @@ def get_usage_records(from_ts: str = "", to_ts: str = "",
             # Throttle: import at most once per minute unless empty
             data0 = _load_data()
             last = (data0.get("settings") or {}).get("usage_imported_at", "")
-            need = not (data0.get("usage") or [])
+            need = not _load_usage_raw()
             if last:
                 try:
                     from datetime import datetime, timezone
@@ -828,8 +997,7 @@ def get_usage_records(from_ts: str = "", to_ts: str = "",
         except Exception as e:
             log.warning("Usage import skipped: %s", e)
 
-    data = _load_data()
-    records = data.get("usage", [])
+    records = _load_usage_raw()
     from_n = _norm_ts_for_compare(from_ts) if from_ts else ""
     to_n = _norm_ts_for_compare(to_ts) if to_ts else ""
     filtered = []
@@ -1500,6 +1668,62 @@ def undo_last_import() -> dict:
     return {"restored": True, "snapshot_meta": snap.get("meta") or {}, **result}
 
 
+def rollback_last_import_snapshot(*, keep_snapshot: bool = True) -> dict:
+    """Restore from last import snapshot without clearing it (transaction abort).
+
+    Used when a bulk import fails mid-way so the main data returns to pre-import state.
+    keep_snapshot=True leaves undo available; False clears after restore.
+    """
+    snap = load_import_snapshot()
+    if not snap or not isinstance(snap.get("backup"), dict):
+        raise ValueError("no import snapshot")
+    backup = snap["backup"]
+    result = import_backup(backup, mode="replace")
+    if not keep_snapshot:
+        clear_import_snapshot()
+    return {
+        "rolled_back": True,
+        "snapshot_meta": snap.get("meta") or {},
+        **result,
+    }
+
+
+class import_transaction:
+    """Context manager: snapshot before bulk import; auto-rollback on exception.
+
+    Usage:
+        with import_transaction({"source": "batch.import"}) as tx:
+            ... mutate vendors/keys ...
+            # on exception: restore snapshot automatically
+        # success: snapshot kept for user Undo toast
+    """
+
+    def __init__(self, meta: Optional[dict] = None, *, rollback_on_error: bool = True):
+        self.meta = meta or {}
+        self.rollback_on_error = rollback_on_error
+        self._entered = False
+        self.rolled_back = False
+
+    def __enter__(self):
+        save_import_snapshot(self.meta)
+        self._entered = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None and self.rollback_on_error and self._entered:
+            try:
+                rollback_last_import_snapshot(keep_snapshot=False)
+                self.rolled_back = True
+                log.warning(
+                    "import transaction rolled back (%s): %s",
+                    (self.meta or {}).get("source") or "import",
+                    exc,
+                )
+            except Exception as e:
+                log.error("import transaction rollback failed: %s", e)
+        return False
+
+
 def find_empty_vendors() -> list[dict]:
     """Vendors with zero keys."""
     out = []
@@ -1631,6 +1855,127 @@ def switch_profile(name: str) -> dict:
     except Exception:
         pass
     return load_profile(name, mode="replace")
+
+
+def export_profile(name: str = "", *, password: str = "") -> dict:
+    """Export a named profile (or current workspace) as shareable backup.
+
+    If password is set, wrap with encrypted envelope (same format as backup).
+    """
+    from datetime import datetime, timezone
+    name = _sanitize_profile_name(name) if name else ""
+    if name:
+        path = PROFILES_DIR / f"{name}.json"
+        if not path.exists():
+            raise FileNotFoundError(f"profile not found: {name}")
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            raise ValueError("invalid profile file")
+    else:
+        payload = export_backup()
+        name = get_active_profile_name() or "workspace"
+        payload["label"] = name
+        payload["saved_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Normalize to shareable profile envelope
+    out = {
+        "format": "ai-switch-profile",
+        "version": 1,
+        "profile_name": name,
+        "label": payload.get("label") or name,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "data": payload.get("data") if isinstance(payload.get("data"), dict) else {
+            "vendors": payload.get("vendors") or (payload.get("data") or {}).get("vendors") or [],
+            "settings": payload.get("settings") or (payload.get("data") or {}).get("settings") or {},
+            "backends": payload.get("backends") or (payload.get("data") or {}).get("backends") or {},
+        },
+    }
+    # If original was already a full backup export, prefer its data block
+    if payload.get("format") == "ai-switch-backup" and isinstance(payload.get("data"), dict):
+        out["data"] = payload["data"]
+    elif isinstance(payload.get("data"), dict) and ("vendors" in payload["data"] or "settings" in payload["data"]):
+        out["data"] = payload["data"]
+
+    pwd = (password or "").strip()
+    if pwd:
+        from core.crypto_backup import encrypt_payload
+        return encrypt_payload(out, pwd)
+    return out
+
+
+def import_profile_file(
+    payload: dict,
+    *,
+    password: str = "",
+    name: str = "",
+    activate: bool = False,
+    mode: str = "replace",
+) -> dict:
+    """Import a shared profile file into local profiles store.
+
+    - Decrypt if encrypted
+    - Save as named profile under ~/.ai-switch/profiles/
+    - Optionally activate (replace current workspace)
+    """
+    from datetime import datetime, timezone
+    from core.crypto_backup import is_encrypted_backup, maybe_decrypt
+
+    if not isinstance(payload, dict):
+        raise ValueError("invalid profile payload")
+    if is_encrypted_backup(payload):
+        payload = maybe_decrypt(payload, (password or "").strip() or None)
+
+    # Accept profile envelope, plain backup, or raw data
+    if payload.get("format") in ("ai-switch-profile", "ai-switch-backup") and isinstance(payload.get("data"), dict):
+        data_block = payload["data"]
+        default_name = str(payload.get("profile_name") or payload.get("label") or "imported")
+        label = str(payload.get("label") or default_name)
+    elif isinstance(payload.get("data"), dict):
+        data_block = payload["data"]
+        default_name = str(payload.get("name") or payload.get("label") or "imported")
+        label = str(payload.get("label") or default_name)
+    elif isinstance(payload.get("vendors"), list) or isinstance(payload.get("settings"), dict):
+        data_block = {
+            "vendors": payload.get("vendors") or [],
+            "settings": payload.get("settings") or {},
+            "backends": payload.get("backends") or {},
+        }
+        default_name = str(payload.get("name") or "imported")
+        label = default_name
+    else:
+        raise ValueError("unrecognized profile format")
+
+    profile_name = _sanitize_profile_name(name or default_name)
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    stored = {
+        "format": "ai-switch-backup",
+        "version": 1,
+        "label": (label or profile_name)[:80],
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "imported_at": datetime.now(timezone.utc).isoformat(),
+        "data": {
+            "vendors": data_block.get("vendors") or [],
+            "settings": data_block.get("settings") or {},
+            "backends": data_block.get("backends") or {},
+        },
+    }
+    path = PROFILES_DIR / f"{profile_name}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(stored, f, ensure_ascii=False, indent=2)
+
+    result = {
+        "name": profile_name,
+        "label": stored["label"],
+        "path": str(path),
+        "vendors": len(stored["data"]["vendors"]),
+        "activated": False,
+    }
+    if activate:
+        load_result = load_profile(profile_name, mode=mode or "replace")
+        result["activated"] = True
+        result["load"] = load_result
+    return result
 
 
 # ── Check-in (签到) ──────────────────────────────────────────

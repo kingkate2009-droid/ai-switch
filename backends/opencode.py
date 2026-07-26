@@ -340,6 +340,152 @@ class OpenCodeAdapter(BackendAdapter):
             self._save_config(cfg)
             log.info("OpenCode: removed managed provider '%s'", pid)
 
+    @property
+    def supports_active_switch(self) -> bool:
+        return True
+
+    def list_providers(self) -> list[dict]:
+        """List OpenCode providers (system vendors + managed config entries)."""
+        from core.data import get_enabled_models, get_vendors
+        cfg = self._load_config()
+        auth = self._load_auth()
+        providers_cfg = cfg.get("provider") or {}
+        # preferred default provider if present in config
+        preferred = ""
+        try:
+            preferred = str((cfg.get("model") or "").split("/")[0] or "")
+        except Exception:
+            preferred = ""
+        if not preferred:
+            preferred = str((cfg.get("provider_id") or cfg.get("default_provider") or "") or "")
+
+        out = []
+        seen = set()
+        for v in get_vendors():
+            pid = self._provider_id(v)
+            k = self._pick_best_key(v)
+            if not k or not self.should_sync(v, k):
+                continue
+            if (k.get("models") or k.get("disabled_models")) and not get_enabled_models(k):
+                continue
+            seen.add(pid)
+            models = get_enabled_models(k) or []
+            pcfg = providers_cfg.get(pid) or {}
+            opts = pcfg.get("options") or {}
+            base = opts.get("baseURL") or opts.get("baseUrl") or (v.get("proxy_target") or v.get("api_url") or "")
+            out.append({
+                "id": pid,
+                "name": v.get("name") or pcfg.get("name") or pid,
+                "base_url": base,
+                "vendor_id": str(v.get("id") or ""),
+                "vendor_name": v.get("name") or "",
+                "key_id": str(k.get("id") or ""),
+                "key_name": k.get("name") or "",
+                "models": list(models)[:20],
+                "model_preview": ", ".join(list(models)[:6]) + ("…" if len(models) > 6 else ""),
+                "active": bool(preferred and preferred == pid) or (not preferred and pid in auth),
+                "managed": True,
+                "has_auth": pid in auth,
+            })
+
+        # config-only managed providers not in system
+        for pid, pcfg in providers_cfg.items():
+            if pid in seen:
+                continue
+            opts = pcfg.get("options") or {}
+            if opts.get("_managed") != self.MANAGED_TAG and pid not in auth:
+                continue
+            models = list((pcfg.get("models") or {}).keys())
+            out.append({
+                "id": pid,
+                "name": pcfg.get("name") or pid,
+                "base_url": opts.get("baseURL") or opts.get("baseUrl") or "",
+                "vendor_id": "",
+                "vendor_name": "",
+                "models": models[:20],
+                "model_preview": ", ".join(models[:6]) + ("…" if len(models) > 6 else ""),
+                "active": bool(preferred and preferred == pid),
+                "managed": opts.get("_managed") == self.MANAGED_TAG,
+                "has_auth": pid in auth,
+            })
+
+        # if nothing marked active, mark first with auth
+        if out and not any(x.get("active") for x in out):
+            for x in out:
+                if x.get("has_auth"):
+                    x["active"] = True
+                    break
+        out.sort(key=lambda x: (0 if x.get("active") else 1, (x.get("name") or "").lower()))
+        return out
+
+    def get_active_provider(self) -> dict:
+        for p in self.list_providers():
+            if p.get("active"):
+                return {
+                    "active_provider": p.get("id") or "",
+                    "name": p.get("name") or "",
+                    "base_url": p.get("base_url") or "",
+                }
+        return {"active_provider": "", "name": "", "base_url": ""}
+
+    def switch_provider(self, provider_id: str = "", vendor_id: str = "", key_id: str = "") -> dict:
+        """Make a vendor/provider the preferred OpenCode slot (auth + managed provider + default model)."""
+        from core.data import get_enabled_models, get_vendor, get_vendors
+
+        vendor = None
+        if vendor_id:
+            vendor = get_vendor(vendor_id)
+        if not vendor and provider_id:
+            # match by provider id
+            for v in get_vendors():
+                if self._provider_id(v) == provider_id:
+                    vendor = v
+                    break
+        if not vendor:
+            return {"success": False, "message": "Vendor not found for OpenCode switch"}
+
+        pid = self._provider_id(vendor)
+        key = None
+        if key_id:
+            for k in vendor.get("keys") or []:
+                if str(k.get("id")) == str(key_id) and k.get("api_key"):
+                    key = k
+                    break
+        if not key:
+            key = self._pick_best_key(vendor)
+        if not key or not key.get("api_key"):
+            return {"success": False, "message": "No enabled key on vendor"}
+        if not self.is_installed():
+            return {"success": False, "message": "OpenCode not installed"}
+
+        # Write auth + provider block
+        auth = self._load_auth()
+        auth[pid] = self._auth_entry(key["api_key"])
+        self._save_auth(auth)
+
+        cfg = self._load_config()
+        cfg.setdefault("provider", {})
+        existing = cfg["provider"].get(pid) or {}
+        if not existing or (existing.get("options") or {}).get("_managed") == self.MANAGED_TAG or self._is_custom(vendor):
+            cfg["provider"][pid] = self._build_provider_block(vendor, key, existing)
+
+        # Set default model to first enabled model on this provider
+        models = get_enabled_models(key) or []
+        if not models and key.get("default_model"):
+            models = [str(key.get("default_model"))]
+        if models:
+            cfg["model"] = f"{pid}/{models[0]}"
+        self._save_config(cfg)
+
+        return {
+            "success": True,
+            "active_provider": pid,
+            "message": f"OpenCode active → {vendor.get('name') or pid}",
+            "model": cfg.get("model") or "",
+            "vendor_id": str(vendor.get("id") or ""),
+            "key_id": str(key.get("id") or ""),
+        }
+
     def reconcile(self) -> None:
         """Rebuild managed providers from the best active key per provider."""
         from core.data import get_backend_config, get_enabled_models, get_vendors

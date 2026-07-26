@@ -243,7 +243,68 @@ def api_auth_logout():
 @app.route("/api/diagnostics", methods=["GET"])
 def api_diagnostics():
     from core.diagnostics import collect_diagnostics
-    return jsonify(collect_diagnostics())
+    for_issue = request.args.get("for_issue", "0") in ("1", "true", "yes")
+    pack = collect_diagnostics(for_issue=for_issue)
+    if request.args.get("download", "0") in ("1", "true", "yes"):
+        import json as _json
+        body = _json.dumps(pack, ensure_ascii=False, indent=2)
+        from core.version import get_version
+        fname = f"ai-switch-diagnostics-v{get_version()}.json"
+        resp = app.response_class(body, mimetype="application/json; charset=utf-8")
+        resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return resp
+    return jsonify(pack)
+
+
+@app.route("/api/updates/check", methods=["GET"])
+def api_updates_check():
+    """Compare local version with latest GitHub release (best-effort)."""
+    from core.version import get_version
+    import re
+    local = (get_version() or "").strip().lstrip("v")
+    repo = "kingkate2009-droid/ai-switch"
+    latest = ""
+    notes = ""
+    html_url = f"https://github.com/{repo}/releases/latest"
+    error = ""
+    try:
+        r = py_requests.get(
+            f"https://api.github.com/repos/{repo}/releases/latest",
+            timeout=8,
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "ai-switch-update-check"},
+        )
+        if r.status_code == 200:
+            data = r.json() or {}
+            latest = str(data.get("tag_name") or data.get("name") or "").strip().lstrip("v")
+            notes = str(data.get("body") or "")[:2000]
+            html_url = str(data.get("html_url") or html_url)
+        else:
+            error = f"GitHub HTTP {r.status_code}"
+    except Exception as e:
+        error = str(e)[:200]
+
+    def _parts(v: str):
+        nums = [int(x) for x in re.findall(r"\d+", v or "")]
+        while len(nums) < 3:
+            nums.append(0)
+        return tuple(nums[:3])
+
+    update_available = False
+    if latest and local:
+        try:
+            update_available = _parts(latest) > _parts(local)
+        except Exception:
+            update_available = latest != local
+
+    return jsonify({
+        "local": local,
+        "latest": latest,
+        "update_available": update_available,
+        "html_url": html_url,
+        "notes": notes,
+        "error": error,
+        "repo": repo,
+    })
 
 
 @app.route("/api/audit", methods=["GET"])
@@ -284,6 +345,7 @@ def api_list_backends():
             "version": adapter.get_version(),
             "config_files": adapter.config_files,
             "supports_byok": adapter.supports_byok,
+            "supports_active_switch": bool(getattr(adapter, "supports_active_switch", False)),
             "config": get_backend_config(adapter.name),
         })
     return jsonify({"backends": backends})
@@ -303,6 +365,7 @@ def api_get_backend(name):
         "version": adapter.get_version(),
         "config_files": adapter.config_files,
         "supports_byok": adapter.supports_byok,
+        "supports_active_switch": bool(getattr(adapter, "supports_active_switch", False)),
         "config": config,
     })
 
@@ -373,52 +436,77 @@ def api_write_backend_config(name):
         return jsonify({"error": str(e)}), 500
 
 
-# ── Codex CLI Provider Switch ─────────────────────────────
+# ── Active provider switch (Codex / OpenCode / Claude Code / …) ──
 
-@app.route("/api/backends/codex-cli/providers", methods=["GET"])
-def api_codex_list_providers():
-    """List all configured providers for Codex CLI."""
-    adapter = get_backend("codex-cli")
+@app.route("/api/backends/<name>/providers", methods=["GET"])
+def api_backend_list_providers(name):
+    """List switchable providers/slots for a backend that supports active switch."""
+    adapter = get_backend(name)
     if not adapter:
-        return jsonify({"error": "codex-cli backend not available"}), 404
-    providers = adapter.list_providers()
-    active = adapter.get_active_provider()
+        return jsonify({"error": "backend not found"}), 404
+    if not getattr(adapter, "supports_active_switch", False):
+        return jsonify({"error": "active switch not supported", "supports_active_switch": False}), 400
+    try:
+        providers = adapter.list_providers() or []
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    try:
+        active = adapter.get_active_provider() or {}
+    except Exception:
+        active = {}
     return jsonify({
+        "backend": name,
+        "supports_active_switch": True,
         "providers": providers,
         "active_provider": active.get("active_provider", ""),
+        "active": active,
     })
 
 
-@app.route("/api/backends/codex-cli/switch-provider", methods=["POST"])
-def api_codex_switch_provider():
-    """Switch the active provider for Codex CLI.
+@app.route("/api/backends/<name>/switch-provider", methods=["POST"])
+def api_backend_switch_provider(name):
+    """Switch active provider/slot.
 
-    Body: { "provider_id": "aiswitch-2" }
-    or:   { "vendor_id": "2", "key_id": "optional" }
+    Body: { "provider_id": "..." } or { "vendor_id": "...", "key_id": "optional" }
     """
-    adapter = get_backend("codex-cli")
+    adapter = get_backend(name)
     if not adapter:
-        return jsonify({"error": "codex-cli backend not available"}), 404
+        return jsonify({"error": "backend not found"}), 404
+    if not getattr(adapter, "supports_active_switch", False):
+        return jsonify({"error": "active switch not supported", "supports_active_switch": False}), 400
 
     body = request.get_json() or {}
     provider_id = body.get("provider_id", "")
     vendor_id = body.get("vendor_id", "")
     key_id = body.get("key_id", "")
-
     if not provider_id and not vendor_id:
         return jsonify({"error": "provider_id or vendor_id required"}), 400
 
-    result = adapter.switch_provider(
-        provider_id=provider_id,
-        vendor_id=vendor_id,
-        key_id=key_id,
-    )
+    try:
+        result = adapter.switch_provider(
+            provider_id=provider_id,
+            vendor_id=vendor_id,
+            key_id=key_id,
+        ) or {}
+    except Exception as e:
+        log.exception("switch_provider failed for %s", name)
+        return jsonify({"success": False, "error": str(e)}), 500
 
     if result.get("success"):
-        log_event("codex.switch_provider", provider=result.get("active_provider"))
+        log_event("backend.switch_provider", backend=name, provider=result.get("active_provider"))
         return jsonify(result)
-    else:
-        return jsonify(result), 400
+    return jsonify(result if "error" in result else {**result, "error": result.get("message") or "switch failed"}), 400
+
+
+# Legacy Codex aliases
+@app.route("/api/backends/codex-cli/providers", methods=["GET"])
+def api_codex_list_providers():
+    return api_backend_list_providers("codex-cli")
+
+
+@app.route("/api/backends/codex-cli/switch-provider", methods=["POST"])
+def api_codex_switch_provider():
+    return api_backend_switch_provider("codex-cli")
 
 
 # ── Vendors ────────────────────────────────────────────────
@@ -1130,14 +1218,25 @@ def api_batch_apply():
         entries = parse_batch_text(data.get("text", ""))
     if not entries:
         return jsonify({"error": "no entries to import"}), 400
-    # Snapshot for undo
-    try:
-        from core.data import save_import_snapshot
-        save_import_snapshot({"source": "batch.import", "entries": len(entries)})
-    except Exception as e:
-        log.warning("import snapshot failed: %s", e)
+    from core.data import import_transaction
     created = []
     errors = []
+    try:
+        with import_transaction({"source": "batch.import", "entries": len(entries)}):
+            return _batch_import_apply(entries, created, errors)
+    except Exception as e:
+        log.exception("batch import aborted and rolled back")
+        return jsonify({
+            "error": str(e),
+            "rolled_back": True,
+            "created": [],
+            "errors": [{"entry": "transaction", "error": str(e)}],
+            "count": 0,
+            "focus_vendor_id": "",
+        }), 500
+
+
+def _batch_import_apply(entries, created, errors):
     used_names = {(v.get("name") or "").lower() for v in get_vendors()}
     for entry in entries:
         provider = (entry.get("provider") or "custom").strip() or "custom"
@@ -1274,7 +1373,8 @@ def api_batch_apply():
                     })
         except Exception as e:
             log.error("Batch import entry failed: %s", e)
-            errors.append({"entry": name, "error": str(e)})
+            # hard failure → abort whole transaction (context manager rolls back)
+            raise RuntimeError(f"batch import failed at entry {name!r}: {e}") from e
 
     focus_vendor_id = None
     for c in reversed(created):
@@ -1301,6 +1401,7 @@ def api_batch_apply():
         "errors": errors,
         "count": len(created),
         "focus_vendor_id": focus_vendor_id or "",
+        "undo_available": True,
     })
 
 
@@ -1447,11 +1548,30 @@ def api_sync():
     body = request.get_json(silent=True) or {}
     selected = body.get("items")
 
+    from core.data import import_transaction
     try:
-        from core.data import save_import_snapshot
-        save_import_snapshot({"source": "sync.import", "selective": isinstance(selected, list)})
+        with import_transaction({"source": "sync.import", "selective": isinstance(selected, list)}):
+            return _sync_import_apply(selected)
     except Exception as e:
-        log.warning("import snapshot failed: %s", e)
+        log.exception("sync import aborted and rolled back")
+        return jsonify({
+            "error": str(e),
+            "rolled_back": True,
+            "synced": 0,
+            "skipped": 0,
+            "results": {},
+            "manual_only": True,
+            "focus_vendor_id": None,
+            "focus_vendor_ids": [],
+        }), 500
+
+
+def _sync_import_apply(selected):
+    from backends import get_all as get_all_backends
+    from core.data import (
+        add_vendor, add_key, find_vendor_for_import, find_key_anywhere,
+        _norm_secret, update_key_data,
+    )
 
     total_added = 0
     total_skipped = 0
@@ -1542,7 +1662,8 @@ def api_sync():
                 results[name] = {"added": added, "skipped": skipped, "candidates": len(candidates)}
             except Exception as e:
                 log.exception("sync_from_backend failed for %s", name)
-                results[name] = {"error": str(e)}
+                # hard failure after partial writes → abort transaction
+                raise RuntimeError(f"sync import failed for backend {name}: {e}") from e
 
     log_event("sync.import", added=total_added, skipped=total_skipped)
     focus_vendor_id = focus_vendor_ids[-1] if focus_vendor_ids else None
@@ -1553,7 +1674,19 @@ def api_sync():
         "manual_only": True,
         "focus_vendor_id": focus_vendor_id,
         "focus_vendor_ids": focus_vendor_ids,
+        "undo_available": True,
     })
+
+
+@app.route("/api/sync/push/preview", methods=["GET", "POST"])
+def api_sync_push_preview():
+    """Dry-run push: list backends that would be written or skipped (no writes)."""
+    try:
+        from backends import preview_push_all
+        return jsonify(preview_push_all())
+    except Exception as e:
+        log.exception("push preview failed")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/sync/push", methods=["POST"])
@@ -1564,12 +1697,14 @@ def api_sync_push():
         log_event("sync.push", backends=len(results or {}))
         ok = sum(1 for r in (results or {}).values() if r.get("ok"))
         fail = sum(1 for r in (results or {}).values() if not r.get("ok") and not r.get("skipped"))
+        skipped = sum(1 for r in (results or {}).values() if r.get("skipped"))
         return jsonify({
             "success": fail == 0,
-            "message": f"Pushed: {ok} ok, {fail} failed",
+            "message": f"Pushed: {ok} ok, {fail} failed, {skipped} skipped",
             "results": results or {},
             "ok": ok,
             "fail": fail,
+            "skipped": skipped,
         })
     except Exception as e:
         log.exception("push failed")
@@ -1580,6 +1715,19 @@ def api_sync_push():
 def api_last_push():
     from core.data import get_settings
     return jsonify(get_settings().get("last_push") or {})
+
+
+@app.route("/api/data/recovery", methods=["GET"])
+def api_data_recovery():
+    from core.data import get_data_recovery_notice
+    notice = get_data_recovery_notice()
+    return jsonify({"notice": notice})
+
+
+@app.route("/api/data/recovery/ack", methods=["POST"])
+def api_data_recovery_ack():
+    from core.data import ack_data_recovery
+    return jsonify({"success": True, "notice": ack_data_recovery()})
 
 
 @app.route("/api/backup/export", methods=["GET", "POST"])
@@ -1612,18 +1760,19 @@ def api_backup_export():
 
 @app.route("/api/backup/import", methods=["POST"])
 def api_backup_import():
-    from core.data import import_backup
+    from core.data import import_backup, import_transaction
     body = request.get_json(silent=True) or {}
     mode = (body.get("mode") or request.args.get("mode") or "merge").lower()
     password = str(body.get("password") or "")
     # allow either full payload or {backup: {...}, mode}
     payload = body.get("backup") if isinstance(body.get("backup"), dict) else body
     try:
-        result = import_backup(payload, mode=mode, password=password)
+        with import_transaction({"source": "backup_import", "mode": mode}):
+            result = import_backup(payload, mode=mode, password=password)
         log_event("backup.import", mode=mode, **{k: result.get(k) for k in result if k != "items"})
-        return jsonify({"success": True, **result})
+        return jsonify({"success": True, "undo_available": True, **result})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
+        return jsonify({"success": False, "error": str(e), "rolled_back": True}), 400
 
 
 @app.route("/api/policies", methods=["GET"])
@@ -1697,7 +1846,7 @@ def api_gateway_status():
         health = get_all_health_status()
         status["health"] = health
         status["openclaw_version"] = ocp.get_version()
-        status["manager_version"] = "2.0.3"
+        status["manager_version"] = "2.0.4"
         status["min_openclaw_version"] = "2026.3.0"
         status["recommended_openclaw_version"] = "2026.6.11"
         return jsonify(status)
@@ -1819,6 +1968,76 @@ def api_delete_profile(name):
         return jsonify({"error": "not found"}), 404
     log_event("profile.delete", name=name)
     return jsonify({"ok": True})
+
+
+@app.route("/api/profiles/export", methods=["GET", "POST"])
+def api_export_profile():
+    """Export named profile or current workspace. Optional password encrypts file."""
+    from core.data import export_profile
+    from core.crypto_backup import is_encrypted_backup
+    import json as _json
+    password = ""
+    name = ""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        password = str(body.get("password") or "")
+        name = str(body.get("name") or "")
+    else:
+        password = str(request.args.get("password") or "")
+        name = str(request.args.get("name") or "")
+    try:
+        payload = export_profile(name, password=password)
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+    encrypted = is_encrypted_backup(payload)
+    label = name or "workspace"
+    fname = f"ai-switch-profile-{label}{'.enc' if encrypted else ''}.json"
+    body = _json.dumps(payload, ensure_ascii=False, indent=2)
+    resp = app.response_class(body, mimetype="application/json; charset=utf-8")
+    resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+    log_event("profile.export", name=label or "workspace", encrypted=encrypted)
+    return resp
+
+
+@app.route("/api/profiles/import", methods=["POST"])
+def api_import_profile():
+    """Import shared profile file (optionally encrypted).
+
+    Body: { profile|backup, password?, name?, activate?, mode? }
+    """
+    from core.data import import_profile_file
+    body = request.get_json(silent=True) or {}
+    password = str(body.get("password") or "")
+    name = str(body.get("name") or "")
+    activate = bool(body.get("activate"))
+    mode = str(body.get("mode") or "replace")
+    payload = body.get("profile") if isinstance(body.get("profile"), dict) else body.get("backup")
+    if not isinstance(payload, dict):
+        payload = body if isinstance(body, dict) else None
+    if not isinstance(payload, dict):
+        return jsonify({"error": "profile payload required"}), 400
+    # strip control fields if full body was used as payload
+    if "profile" in payload or "backup" in payload:
+        payload = payload.get("profile") or payload.get("backup") or payload
+    try:
+        result = import_profile_file(
+            payload,
+            password=password,
+            name=name,
+            activate=activate,
+            mode=mode,
+        )
+        log_event(
+            "profile.import",
+            name=result.get("name"),
+            activated=bool(result.get("activated")),
+            vendors=result.get("vendors"),
+        )
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
 
 # ── Downstream keys (routing aggregate) ─────────────────────
@@ -2505,6 +2724,7 @@ def api_dashboard_overview():
         "monthly_cost": _f("budget_monthly_cost"),
         "daily_tokens": _i("budget_daily_tokens"),
         "monthly_tokens": _i("budget_monthly_tokens"),
+        "action": str(s.get("budget_action") or "alert").strip() or "alert",
     }
     alerts = []
     if budgets["daily_cost"] > 0 and today_s["total_cost"] >= budgets["daily_cost"]:
@@ -2523,6 +2743,37 @@ def api_dashboard_overview():
         alerts.append({"type": "monthly_tokens", "limit": budgets["monthly_tokens"], "used": month_s["total_tokens"], "level": "crit"})
     elif budgets["monthly_tokens"] > 0 and month_s["total_tokens"] >= budgets["monthly_tokens"] * 0.8:
         alerts.append({"type": "monthly_tokens", "limit": budgets["monthly_tokens"], "used": month_s["total_tokens"], "level": "warn"})
+
+    # Enforce budget action once when any critical alert is present
+    enforcement = {"applied": False, "action": budgets["action"], "disabled_keys": 0, "read_only": False}
+    crit = [a for a in alerts if a.get("level") == "crit"]
+    action = budgets["action"]
+    if crit and action in ("read_only", "disable_keys"):
+        last_enforced = str(s.get("budget_enforced_at") or "")
+        day_key = now.strftime("%Y-%m-%d")
+        # re-apply at most once per UTC day unless action changed
+        already = last_enforced.startswith(day_key) and str(s.get("budget_action") or "") == action
+        if not already:
+            from core.data import update_settings, get_vendors, update_key
+            if action == "read_only":
+                update_settings(read_only=True, budget_enforced_at=now.isoformat())
+                enforcement = {"applied": True, "action": "read_only", "disabled_keys": 0, "read_only": True}
+                log_event("budget.enforce", action="read_only", alerts=len(crit))
+            elif action == "disable_keys":
+                n = 0
+                for v in get_vendors():
+                    for k in v.get("keys") or []:
+                        if k.get("enabled") is False:
+                            continue
+                        if update_key(str(v["id"]), str(k["id"]), enabled=False):
+                            n += 1
+                            try:
+                                on_key_removed(v, k)
+                            except Exception:
+                                pass
+                update_settings(budget_enforced_at=now.isoformat())
+                enforcement = {"applied": True, "action": "disable_keys", "disabled_keys": n, "read_only": False}
+                log_event("budget.enforce", action="disable_keys", disabled_keys=n, alerts=len(crit))
 
     # last health-check summary from cache
     from core.health_checker import get_all_health_status
@@ -2550,6 +2801,7 @@ def api_dashboard_overview():
         "month": month_s,
         "budgets": budgets,
         "alerts": alerts,
+        "enforcement": enforcement,
         "as_of": now.isoformat(),
         "last_health": {
             "checked_at": last_at,

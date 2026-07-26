@@ -104,6 +104,15 @@
         <p class="page-desc" data-i18n="dashboard.desc">{{ t('dashboard.desc') }}</p>
       </div>
 
+      <div class="dash-section onboarding-panel" id="onboardingPanel" style="display:none">
+        <div class="dash-section-head">
+          <h3 data-i18n="onboarding.panelTitle">{{ t('onboarding.panelTitle') }}</h3>
+          <button class="btn btn-sm" onclick="skipOnboardingPanel()" data-i18n="onboarding.skip">{{ t('onboarding.skip') }}</button>
+        </div>
+        <p class="form-hint" data-i18n="onboarding.panelDesc">{{ t('onboarding.panelDesc') }}</p>
+        <ol class="onboarding-track" id="onboardingTrack"></ol>
+      </div>
+
       <div class="stats-row" id="statsRow">
         <div class="stat-card"><div class="stat-value" id="statVendors">-</div><div class="stat-label" data-i18n="dashboard.vendors">{{ t('dashboard.vendors') }}</div></div>
         <div class="stat-card"><div class="stat-value" id="statKeys">-</div><div class="stat-label" data-i18n="dashboard.keys">{{ t('dashboard.keys') }}</div></div>
@@ -807,8 +816,15 @@
           <button class="btn btn-sm" onclick="copyDiagnostics()">
             <span data-i18n="diagnostics.copy">{{ t('diagnostics.copy') }}</span>
           </button>
+          <button class="btn btn-sm btn-primary" onclick="downloadDiagnosticsPack()" title="{{ t('diagnostics.downloadHint') }}">
+            <span data-i18n="diagnostics.download">{{ t('diagnostics.download') }}</span>
+          </button>
+          <button class="btn btn-sm" onclick="checkForUpdates()">
+            <span data-i18n="updates.check">{{ t('updates.check') }}</span>
+          </button>
         </div>
       </div>
+      <div id="updateCheckBanner" class="budget-alerts" style="display:none"></div>
       <div class="dash-section">
         <pre id="diagnosticsOut" class="diagnostics-out">{{ t('common.loading') }}</pre>
       </div>
@@ -901,6 +917,15 @@
               <input type="number" id="setBudgetMonthlyTokens" min="0" step="1000" value="0" oninput="onSettingsDirty()">
             </div>
           </div>
+          <div class="form-group" style="margin-top:12px">
+            <label data-i18n="settings.budgetAction">{{ t('settings.budgetAction') }}</label>
+            <select id="setBudgetAction" onchange="onSettingsDirty()">
+              <option value="alert" data-i18n="settings.budgetActionAlert">{{ t('settings.budgetActionAlert') }}</option>
+              <option value="read_only" data-i18n="settings.budgetActionReadOnly">{{ t('settings.budgetActionReadOnly') }}</option>
+              <option value="disable_keys" data-i18n="settings.budgetActionDisableKeys">{{ t('settings.budgetActionDisableKeys') }}</option>
+            </select>
+            <p class="form-hint" data-i18n="settings.budgetActionHint">{{ t('settings.budgetActionHint') }}</p>
+          </div>
         </div>
         <div class="settings-card">
           <h3 data-i18n="settings.pricingTitle">{{ t('settings.pricingTitle') }}</h3>
@@ -948,6 +973,16 @@
               <input type="text" id="profileNameInput" data-i18n-placeholder="profiles.namePh" placeholder="{{ t('profiles.namePh') }}">
               <button class="btn btn-sm" onclick="saveCurrentProfile()" data-i18n="profiles.save">{{ t('profiles.save') }}</button>
             </div>
+          </div>
+          <div class="form-group">
+            <label data-i18n="profiles.sharePassword">{{ t('profiles.sharePassword') }}</label>
+            <input type="password" id="profileSharePassword" autocomplete="new-password" data-i18n-placeholder="profiles.sharePasswordPh" placeholder="{{ t('profiles.sharePasswordPh') }}">
+            <p class="form-hint" data-i18n="profiles.sharePasswordHint">{{ t('profiles.sharePasswordHint') }}</p>
+          </div>
+          <div class="action-row" style="margin-bottom:12px">
+            <button class="btn btn-sm" onclick="exportCurrentProfile()" data-i18n="profiles.exportCurrent">{{ t('profiles.exportCurrent') }}</button>
+            <button class="btn btn-sm" onclick="triggerImportProfile()" data-i18n="profiles.importFile">{{ t('profiles.importFile') }}</button>
+            <input type="file" id="profileFileInput" accept="application/json,.json" style="display:none" onchange="onProfileFileSelected(event)">
           </div>
           <div id="profilesList" class="profiles-list"></div>
         </div>
@@ -1167,6 +1202,30 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="pushPreviewModal" onclick="if(event.target===this)closePushPreviewModal()">
+  <div class="modal modal-wide" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 data-i18n="sync.pushPreviewTitle">{{ t('sync.pushPreviewTitle') }}</h3>
+      <button class="btn-close" onclick="closePushPreviewModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="form-hint" data-i18n="sync.pushPreviewDesc">{{ t('sync.pushPreviewDesc') }}</p>
+      <div class="batch-toolbar" id="pushPreviewToolbar" style="display:none">
+        <span class="batch-toolbar-hint" id="pushPreviewSummary"></span>
+      </div>
+      <div class="batch-table-scroll" id="pushPreviewTableWrap">
+        <p style="color:var(--text3);padding:16px" data-i18n="common.loading">{{ t('common.loading') }}</p>
+      </div>
+      <div id="pushPreviewError" class="error-message" style="display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closePushPreviewModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
+      <button class="btn" onclick="loadPushPreview()" data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</button>
+      <button class="btn btn-primary" id="pushPreviewConfirmBtn" onclick="confirmPushToBackends()" disabled data-i18n="sync.pushConfirm">{{ t('sync.pushConfirm') }}</button>
+    </div>
+  </div>
+</div>
+
 
 <div class="modal-overlay" id="authGate" style="display:none">
   <div class="modal" onclick="event.stopPropagation()" style="max-width:400px">
@@ -1379,16 +1438,36 @@ function copyStatusText(el) {
   copyText(t.trim());
 }
 
-function showToast(msg, type) {
+function showToast(msg, type, opts) {
   type = type || 'info';
+  opts = opts || {};
   const el = document.createElement('div');
   el.className = 'toast toast-' + type;
-  el.textContent = msg;
+  if (opts.actionLabel && typeof opts.onAction === 'function') {
+    var text = document.createElement('span');
+    text.className = 'toast-text';
+    text.textContent = msg;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = opts.actionLabel;
+    btn.onclick = function(e) {
+      e.stopPropagation();
+      try { opts.onAction(); } catch (err) {}
+      el.remove();
+    };
+    el.appendChild(text);
+    el.appendChild(btn);
+  } else {
+    el.textContent = msg;
+  }
   $('toastContainer').appendChild(el);
+  var ms = opts.duration != null ? opts.duration : (opts.actionLabel ? 8000 : 3000);
   setTimeout(function() {
+    if (!el.parentNode) return;
     el.classList.add('toast-leave');
     setTimeout(function() { el.remove(); }, 250);
-  }, 3000);
+  }, ms);
 }
 
 // ── View Switching ───────────────────────
@@ -1473,7 +1552,144 @@ async function loadDashboard() {
 
   renderBackendCards((backends.backends || []), 'dashBackendCards');
   await renderDashboardTodos(backends.backends || []);
+  renderOnboardingPanel(backends.backends || []);
   loadDashboardRecent();
+}
+
+function _onboardingProgress(backendsList) {
+  var vendors = _allVendorsData || [];
+  var health = _allHealthData || {};
+  var hasVendor = vendors.length > 0;
+  var hasKey = false;
+  var healthyKey = false;
+  vendors.forEach(function(v) {
+    (v.keys || []).forEach(function(k) {
+      if (k.enabled === false) return;
+      hasKey = true;
+      var h = health[v.id + ':' + k.id] || {};
+      if (h.healthy === true) healthyKey = true;
+    });
+  });
+  var list = backendsList || [];
+  var installed = 0;
+  list.forEach(function(b) {
+    var info = getBackendStatusInfo(b.status || {}, b.config || {}, b.supports_byok !== false);
+    if (info.installed && !info.disabled) installed += 1;
+  });
+  var lastPush = null;
+  try {
+    // sync filled by loadLastPushPanel / settings; optional
+  } catch (e) {}
+  var pushed = false;
+  // treat any successful last_sync on an installed backend as progress
+  list.forEach(function(b) {
+    var ls = (b.config || {}).last_sync;
+    if (ls && ls.ok && !ls.skipped) pushed = true;
+  });
+  return {
+    hasVendor: hasVendor,
+    hasKey: hasKey,
+    healthyKey: healthyKey,
+    installed: installed,
+    pushed: pushed,
+    done: hasVendor && hasKey && healthyKey && (installed === 0 || pushed),
+  };
+}
+
+function renderOnboardingPanel(backendsList) {
+  var panel = $('onboardingPanel');
+  var track = $('onboardingTrack');
+  if (!panel || !track) return;
+  var skipped = false;
+  try { skipped = localStorage.getItem('aiswitch_onboarding_skip') === '1'; } catch (e) {}
+  var prog = _onboardingProgress(backendsList || []);
+  // hide when fully done or user skipped and already has data
+  if (prog.done || (skipped && prog.hasVendor)) {
+    panel.style.display = 'none';
+    document.body.classList.remove('onboarding-focus');
+    return;
+  }
+  panel.style.display = '';
+  document.body.classList.add('onboarding-focus');
+
+  var steps = [
+    {
+      id: 1,
+      done: prog.hasVendor && prog.hasKey,
+      title: _('onboarding.step1Title') || 'Add vendor + key',
+      desc: _('onboarding.step1Desc') || 'Add one vendor and at least one API key.',
+      action: function() {
+        switchView('vendors');
+        if (!prog.hasVendor) showAddVendorModal();
+        else if (typeof showBatchImportModal === 'function' && !prog.hasKey) showBatchImportModal();
+      },
+      btn: prog.hasVendor && prog.hasKey ? '' : (_('onboarding.doStep') || 'Do this'),
+    },
+    {
+      id: 2,
+      done: prog.healthyKey,
+      title: _('onboarding.step2Title') || 'Pass health check',
+      desc: _('onboarding.step2Desc') || 'Run a health check until at least one key is healthy.',
+      action: function() {
+        if (!prog.hasKey) {
+          switchView('vendors');
+          return;
+        }
+        checkAllHealth();
+      },
+      btn: prog.healthyKey ? '' : (_('dashboard.checkAll') || 'Check all'),
+    },
+    {
+      id: 3,
+      done: prog.installed > 0,
+      title: _('onboarding.step3Title') || 'Pick installed backends',
+      desc: _('onboarding.step3Desc') || 'Only installed tools will receive sync. Open Backends to verify status.',
+      action: function() { switchView('backends'); },
+      btn: _('onboarding.openBackends') || 'Open backends',
+    },
+    {
+      id: 4,
+      done: prog.pushed || prog.installed === 0,
+      title: _('onboarding.step4Title') || 'Push & verify',
+      desc: _('onboarding.step4Desc') || 'Push healthy keys, then send a test message in OpenCode / Codex.',
+      action: function() { pushToBackends(); },
+      btn: prog.pushed ? '' : (_('sync.push') || 'Push'),
+    },
+  ];
+
+  track.innerHTML = steps.map(function(st) {
+    var cls = 'onboarding-step' + (st.done ? ' is-done' : '') + (!st.done && steps.filter(function(x){return !x.done;})[0] === st ? ' is-current' : '');
+    var btn = st.btn
+      ? '<button class="btn btn-sm btn-primary" data-ob-step="' + st.id + '">' + esc(st.btn) + '</button>'
+      : '<span class="badge badge-ok">' + esc(_('onboarding.stepDone') || 'Done') + '</span>';
+    return '<li class="' + cls + '">' +
+      '<div class="onboarding-step-main">' +
+        '<div class="onboarding-step-num">' + st.id + '</div>' +
+        '<div><strong>' + esc(st.title) + '</strong>' +
+        '<div class="form-hint">' + esc(st.desc) + '</div></div>' +
+      '</div>' +
+      '<div class="onboarding-step-actions">' + btn + '</div>' +
+      '</li>';
+  }).join('');
+
+  track.querySelectorAll('[data-ob-step]').forEach(function(btn) {
+    btn.onclick = function() {
+      var id = parseInt(btn.getAttribute('data-ob-step'), 10);
+      var st = steps.filter(function(x){ return x.id === id; })[0];
+      if (st && st.action) st.action();
+    };
+  });
+}
+
+async function skipOnboardingPanel() {
+  try { localStorage.setItem('aiswitch_onboarding_skip', '1'); } catch (e) {}
+  try {
+    await api('/api/settings', { method: 'POST', body: JSON.stringify({ onboarding_done: true }) });
+  } catch (e) {}
+  var panel = $('onboardingPanel');
+  if (panel) panel.style.display = 'none';
+  document.body.classList.remove('onboarding-focus');
+  showToast(_('onboarding.skipped') || 'Guide hidden. You can reopen it from Settings.', 'info');
 }
 
 async function loadDashHealthSummary() {
@@ -1534,7 +1750,8 @@ async function loadDashboardUsage() {
   var box = $('budgetAlerts');
   if (!box) return;
   var alerts = res.alerts || [];
-  if (!alerts.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var enf = res.enforcement || {};
+  if (!alerts.length && !enf.applied) { box.style.display = 'none'; box.innerHTML = ''; return; }
   box.style.display = '';
   var html = '';
   alerts.forEach(function(a) {
@@ -1549,6 +1766,13 @@ async function loadDashboardUsage() {
       esc((_('dashboard.budgetAlert') || '{label}: {used} / {limit}').replace('{label}', label).replace('{used}', used).replace('{limit}', limit)) +
       ' <button class="btn btn-sm" onclick="switchView(\'settings\')">' + esc(_('nav.settings') || 'Settings') + '</button></div>';
   });
+  if (enf.applied) {
+    var emsg = _('dashboard.budgetEnforced') || 'Budget action applied: {action}';
+    if (enf.action === 'read_only') emsg = _('dashboard.budgetEnforcedReadOnly') || 'Budget exceeded: switched to read-only.';
+    else if (enf.action === 'disable_keys') emsg = (_('dashboard.budgetEnforcedDisable') || 'Budget exceeded: disabled {n} keys.').replace('{n}', String(enf.disabled_keys || 0));
+    html += '<div class="budget-alert crit">' + esc(emsg) + '</div>';
+    showToast(emsg, 'error', { duration: 10000 });
+  }
   box.innerHTML = html;
 }
 
@@ -1760,16 +1984,19 @@ function getBackendStatusInfo(s, config, supportsByok) {
     if (!installed && running) installed = true;
   }
   var form = formatInstallKinds((s && s.install_kinds) || []);
+  var lastSync = (config && config.last_sync) || null;
 
-  var status, badgeClass, dotClass;
+  var status, badgeClass, dotClass, tooltip = '';
   if (disabled) {
     status = _('backends.syncDisabled');
     badgeClass = 'badge-disabled';
     dotClass = 'dot-off';
+    tooltip = _('backends.syncDisabledTip') || 'Sync disabled for this backend';
   } else if (!installed) {
     status = _('backends.notInstalled');
     badgeClass = 'badge-off';
     dotClass = 'dot-off';
+    tooltip = _('backends.notInstalledTip') || 'Not installed — will not sync';
   } else if (running) {
     if (!supportsByok) {
       status = _('backends.readonly');
@@ -1784,12 +2011,37 @@ function getBackendStatusInfo(s, config, supportsByok) {
     status = _('backends.stopped');
     badgeClass = 'badge-off';
     dotClass = 'dot-off';
+    tooltip = _('backends.stoppedTip') || 'Installed, stopped (can sync)';
   }
   if (form && installed && !disabled) {
     status = status + ' · ' + form;
   }
 
-  return { status: status, badgeClass: badgeClass, dotClass: dotClass, installed: installed, running: running && installed, form: form };
+  return {
+    status: status,
+    badgeClass: badgeClass,
+    dotClass: dotClass,
+    installed: installed,
+    running: running && installed,
+    form: form,
+    disabled: !!disabled,
+    tooltip: tooltip,
+    lastSync: lastSync,
+  };
+}
+
+function formatLastSyncLine(ls) {
+  if (!ls || !ls.at) return '';
+  var at = String(ls.at || '').replace('T', ' ').slice(0, 19);
+  var st;
+  if (ls.skipped) st = _('sync.skipLabel') || 'skipped';
+  else if (ls.ok) st = _('health.healthy') || 'ok';
+  else st = _('health.unhealthy') || 'fail';
+  var err = ls.error ? (' — ' + String(ls.error).slice(0, 60)) : '';
+  return (_('sync.lastSyncLine') || 'Last sync: {at} · {st}{err}')
+    .replace('{at}', at)
+    .replace('{st}', st)
+    .replace('{err}', err);
 }
 
 function renderBackendCards(list, containerId) {
@@ -1807,9 +2059,14 @@ function renderBackendCards(list, containerId) {
     var icon = getBackendIcon(b.name);
     var iconClass = getIconClass(b.name);
     var activeIcon = info.running === true;
+    var lastLine = formatLastSyncLine(info.lastSync);
+    var cardClass = 'backend-card';
+    if (!info.installed) cardClass += ' backend-card-missing';
+    if (info.disabled) cardClass += ' backend-card-disabled';
 
     var card = document.createElement('div');
-    card.className = 'backend-card';
+    card.className = cardClass;
+    if (info.tooltip) card.title = info.tooltip;
     card.onclick = function() { showBackendDetail(b.name); };
     card.innerHTML = [
       '<div class="backend-card-head">',
@@ -1820,13 +2077,15 @@ function renderBackendCards(list, containerId) {
           '<div class="backend-name">' + esc(b.display_name || b.name) + '</div>',
           '<div class="backend-version">' + esc(version) + '</div>',
         '</div>',
-        '<span class="backend-badge ' + info.badgeClass + '">' + info.status + '</span>',
+        '<span class="backend-badge ' + info.badgeClass + '"' + (info.tooltip ? ' title="' + esc(info.tooltip) + '"' : '') + '>' + info.status + '</span>',
       '</div>',
       '<div class="backend-card-body">',
         '<div class="backend-msg">',
           '<span class="msg-dot ' + info.dotClass + '"></span>',
           esc(msg.slice(0, 120)),
         '</div>',
+        (lastLine ? '<div class="backend-last-sync muted">' + esc(lastLine) + '</div>' : ''),
+        (!info.installed ? '<div class="backend-no-sync muted">' + esc(_('backends.notInstalledTip') || 'Not installed — will not sync') + '</div>' : ''),
       '</div>',
     ].join('');
     container.appendChild(card);
@@ -1896,8 +2155,12 @@ async function showBackendDetail(name) {
   }
   _currentBackendData = data;
   var s = data.status || {};
-  var info = data.display_name + ' v' + (data.version || '?') + ' — ' + (s.running ? _('gateway.yes') : _('gateway.stopped'));
+  var stInfo = getBackendStatusInfo(s, data.config || {}, data.supports_byok !== false);
+  var info = data.display_name + ' v' + (data.version || '?') + ' — ' + stInfo.status;
   if (s.message) info += ' | ' + s.message;
+  var lastLine = formatLastSyncLine(stInfo.lastSync);
+  if (lastLine) info += ' | ' + lastLine;
+  if (!stInfo.installed) info += ' | ' + (_('backends.notInstalledTip') || 'Not installed — will not sync');
   $('backendDetailInfo').textContent = info;
 
   var tabs = $('backendConfigTabs');
@@ -1910,6 +2173,9 @@ async function showBackendDetail(name) {
     syncBtn.textContent = '⚙ ' + _('backends.syncConfig');
     syncBtn.className = 'btn btn-sm btn-primary';
     syncBtn.id = 'syncTabBtn';
+    if (!stInfo.installed) {
+      syncBtn.title = _('backends.notInstalledTip') || 'Not installed — will not sync';
+    }
     syncBtn.onclick = function() {
       _currentSyncTabActive = true;
       document.querySelectorAll('#backendConfigTabs .btn').forEach(function(b) { b.className = 'btn btn-sm'; });
@@ -1919,17 +2185,17 @@ async function showBackendDetail(name) {
     tabs.appendChild(syncBtn);
   }
 
-  // "Providers" tab (only for codex-cli)
-  if (name === 'codex-cli') {
+  // Active provider switch tab (Codex / OpenCode / Claude Code / …)
+  if (data.supports_active_switch || name === 'codex-cli' || name === 'opencode' || name === 'claude-code') {
     var provBtn = document.createElement('button');
-    provBtn.textContent = '🔄 ' + _('backends.providers') || 'Providers';
+    provBtn.textContent = '🔄 ' + (_('backends.providers') || 'Providers');
     provBtn.className = 'btn btn-sm';
     provBtn.id = 'providersTabBtn';
     provBtn.onclick = function() {
       _currentSyncTabActive = false;
       document.querySelectorAll('#backendConfigTabs .btn').forEach(function(b) { b.className = 'btn btn-sm'; });
       provBtn.className = 'btn btn-sm btn-primary';
-      renderCodexProviders();
+      renderBackendProviders(name);
     };
     tabs.appendChild(provBtn);
   }
@@ -2050,40 +2316,47 @@ async function saveSyncConfig(name) {
   }
 }
 
-// ── Codex CLI Provider Switch ─────────────────────────────
+// ── Active provider switch (generic) ─────────────────────
 
-async function renderCodexProviders() {
+var _providersBackendName = '';
+
+async function renderBackendProviders(backendName) {
+  _providersBackendName = backendName || _currentBackendDetail || '';
   _currentConfigPath = null;
   $('backendSaveConfigBtn').style.display = 'none';
   $('backendConfigPane').innerHTML = '<p style="color:var(--text3);padding:20px">' + esc(_('common.loading') || 'Loading...') + '</p>';
 
-  var data = await api('/api/backends/codex-cli/providers');
+  var data = await api('/api/backends/' + encodeURIComponent(_providersBackendName) + '/providers');
   if (data.error) {
-    $('backendConfigPane').innerHTML = '<p class="error-message">' + data.error + '</p>';
+    $('backendConfigPane').innerHTML = '<p class="error-message">' + esc(data.error) + '</p>';
     return;
   }
 
   var providers = data.providers || [];
   var activeProvider = data.active_provider || '';
+  var isCodex = _providersBackendName === 'codex-cli';
 
   var html = '<div style="padding:8px 0">';
   html += '<div style="margin-bottom:16px">';
-  html += '<h4 style="margin:0 0 8px 0">' + esc(_('backends.codexProviders') || 'Configured Providers') + '</h4>';
-  html += '<p class="form-hint">' + esc(_('backends.codexProvidersDesc') || 'Switch the active provider for Codex CLI. The selected provider will be used when running codex commands.') + '</p>';
+  html += '<h4 style="margin:0 0 8px 0">' + esc(_('backends.activeSlot') || 'Active provider') + '</h4>';
+  html += '<p class="form-hint">' + esc(
+    isCodex
+      ? (_('backends.codexProvidersDesc') || 'Switch the active provider for Codex CLI.')
+      : (_('backends.activeSlotDesc') || 'Select backend → vendor/key → switch. Failed switches are not marked success.')
+  ) + '</p>';
   html += '</div>';
 
-  // Only GPT-capable providers (backend already filters; keep client safety net)
-  providers = providers.filter(function(p) {
-    if (p.has_gpt_models === false && !(p.models && p.models.length)) return false;
-    if (p.models && p.models.length) return true;
-    if (p.has_gpt_models) return true;
-    // allow empty-inventory OpenAI fallback from backend
-    return true;
-  });
+  if (isCodex) {
+    // Codex keeps GPT-oriented filtering
+    providers = providers.filter(function(p) {
+      if (p.has_gpt_models === false && !(p.models && p.models.length)) return false;
+      return true;
+    });
+  }
 
   if (providers.length === 0) {
     html += '<div class="empty-state" style="padding:24px;text-align:center">';
-    html += '<p>' + esc(_('backends.noGptProviders') || 'No vendors with GPT-related models. Scan key models (gpt-*, o1/o3/o4) then refresh.') + '</p>';
+    html += '<p>' + esc(_('backends.noProviders') || 'No switchable providers. Add a vendor + key and sync first.') + '</p>';
     html += '</div>';
   } else {
     html += '<div class="provider-list" style="display:flex;flex-direction:column;gap:8px">';
@@ -2097,13 +2370,14 @@ async function renderCodexProviders() {
         : '';
       var models = p.models || [];
       var modelPreview = p.model_preview || models.slice(0, 6).join(', ') + (models.length > 6 ? '…' : '');
+      var pidSafe = esc(String(p.id || '')).replace(/'/g, "\\'");
 
-      html += '<div class="provider-card" style="' + cardStyle + ';border-radius:var(--radius-sm);padding:12px;cursor:pointer" onclick="switchCodexProvider(\'' + esc(p.id) + '\')">';
+      html += '<div class="provider-card" style="' + cardStyle + ';border-radius:var(--radius-sm);padding:12px;cursor:pointer" onclick="switchBackendProvider(\'' + pidSafe + '\')">';
       html += '<div style="display:flex;align-items:center;gap:12px">';
       html += '<div style="flex:1;min-width:0">';
       html += '<div style="font-weight:600;margin-bottom:4px">' + esc(p.name || p.id);
       if (models.length) {
-        html += ' <span style="font-weight:500;font-size:11px;color:var(--text3)">GPT ×' + models.length + '</span>';
+        html += ' <span style="font-weight:500;font-size:11px;color:var(--text3)">×' + models.length + '</span>';
       }
       html += '</div>';
       html += '<div style="font-size:12px;color:var(--text2)">';
@@ -2113,19 +2387,20 @@ async function renderCodexProviders() {
       if (p.vendor_name && p.vendor_name !== p.name) {
         html += ' · ' + esc(p.vendor_name);
       }
+      if (p.key_name) {
+        html += ' · ' + esc(p.key_name);
+      }
       html += '</div>';
       if (modelPreview) {
         html += '<div style="margin-top:6px;font-size:11px;color:var(--text2);line-height:1.4">';
-        html += '<span style="color:var(--text3)">' + esc(_('backends.gptModels') || 'GPT models') + ': </span>';
+        html += '<span style="color:var(--text3)">' + esc(_('backends.models') || 'Models') + ': </span>';
         html += esc(modelPreview);
         html += '</div>';
-      } else {
-        html += '<div style="margin-top:6px;font-size:11px;color:var(--text3)">' + esc(_('backends.gptModelsEmpty') || 'OpenAI vendor (models not scanned yet)') + '</div>';
       }
       html += '</div>';
       html += badgeHtml;
       if (!isActive) {
-        html += '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();switchCodexProvider(\'' + esc(p.id) + '\')">' + esc(_('backends.switchTo') || 'Switch') + '</button>';
+        html += '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();switchBackendProvider(\'' + pidSafe + '\')">' + esc(_('backends.switchTo') || 'Switch') + '</button>';
       }
       html += '</div>';
       html += '</div>';
@@ -2137,24 +2412,30 @@ async function renderCodexProviders() {
   $('backendConfigPane').innerHTML = html;
 }
 
-async function switchCodexProvider(providerId) {
-  if (!providerId) return;
+// legacy alias
+function renderCodexProviders() { return renderBackendProviders('codex-cli'); }
 
-  var res = await api('/api/backends/codex-cli/switch-provider', {
+async function switchBackendProvider(providerId, backendName) {
+  if (!providerId) return;
+  var name = backendName || _providersBackendName || _currentBackendDetail || 'codex-cli';
+  showToast(_('action.checking') || 'Working...', 'info');
+  var res = await api('/api/backends/' + encodeURIComponent(name) + '/switch-provider', {
     method: 'POST',
-    body: JSON.stringify({provider_id: providerId}),
+    body: JSON.stringify({ provider_id: providerId }),
   });
 
-  if (res.error) {
-    showToast(res.error || _('toast.error') || 'Error', 'error');
+  if (res.error || res.success === false) {
+    showToast(res.error || res.message || (_('toast.error') || 'Error'), 'error', { duration: 8000 });
     return;
   }
 
-  showToast(_('toast.saved') || 'Switched successfully', 'success');
-  // Refresh the providers list
-  renderCodexProviders();
-  // Refresh backend status
+  showToast(res.message || (_('backends.switchOk') || 'Switched successfully'), 'success');
+  renderBackendProviders(name);
   refreshBackendStatus();
+}
+
+function switchCodexProvider(providerId) {
+  return switchBackendProvider(providerId, 'codex-cli');
 }
 
 async function loadBackendConfig(name, path) {
@@ -2404,33 +2685,69 @@ function getVendorHealthStatus(vendor) {
   return Object.assign({ status: 'unknown', label: _('health.notChecked') }, base);
 }
 
-function classifyHealthError(err) {
+function classifyHealthErrorCode(err, codeHint) {
+  if (codeHint) return String(codeHint);
   var s = (err || '').toLowerCase();
-  if (!s) return _('health.reasonOther') || 'Other';
+  if (!s) return 'other';
   if (s.indexOf('auth') >= 0 || s.indexOf('401') >= 0 || s.indexOf('403') >= 0 || s.indexOf('invalid api') >= 0 || s.indexOf('unauthorized') >= 0 || s.indexOf('forbidden') >= 0)
-    return _('health.reasonAuth') || 'Auth failed';
+    return 'auth';
   if (s.indexOf('quota') >= 0 || s.indexOf('balance') >= 0 || s.indexOf('insufficient') >= 0 || s.indexOf('billing') >= 0 || s.indexOf('payment') >= 0)
-    return _('health.reasonQuota') || 'Quota / billing';
-  if (s.indexOf('model') >= 0 || s.indexOf('not found') >= 0 || s.indexOf('compatible') >= 0 || s.indexOf('unsupported') >= 0)
-    return _('health.reasonModel') || 'Model issue';
+    return 'quota';
+  if (s.indexOf('429') >= 0 || s.indexOf('rate limit') >= 0 || s.indexOf('too many requests') >= 0)
+    return 'rate';
+  if (s.indexOf('ssl') >= 0 || s.indexOf('tls') >= 0 || s.indexOf('certificate') >= 0 || s.indexOf('ssleof') >= 0 || s.indexOf('wrong version number') >= 0)
+    return 'ssl';
   if (s.indexOf('timeout') >= 0 || s.indexOf('timed out') >= 0)
-    return _('health.reasonTimeout') || 'Timeout';
-  // SSL / TLS handshake failures (often intermittent proxy issues)
-  if (
-    s.indexOf('ssl') >= 0 || s.indexOf('tls') >= 0 || s.indexOf('certificate') >= 0 ||
-    s.indexOf('ssleof') >= 0 || s.indexOf('eof occurred') >= 0 ||
-    s.indexOf('wrong version number') >= 0 || s.indexOf('unexpected_eof') >= 0
-  )
-    return _('health.reasonNetwork') || 'Network';
-  if (
-    s.indexOf('connect') >= 0 || s.indexOf('network') >= 0 || s.indexOf('dns') >= 0 ||
-    s.indexOf('refused') >= 0 || s.indexOf('max retries') >= 0 ||
-    s.indexOf('httpsconnectionpool') >= 0 || s.indexOf('connectionpool') >= 0
-  )
-    return _('health.reasonNetwork') || 'Network';
-  if (s.indexOf('429') >= 0 || s.indexOf('rate') >= 0)
-    return _('health.reasonRate') || 'Rate limited';
-  return _('health.reasonOther') || 'Other';
+    return 'timeout';
+  if (s.indexOf('connect') >= 0 || s.indexOf('network') >= 0 || s.indexOf('dns') >= 0 || s.indexOf('refused') >= 0 || s.indexOf('max retries') >= 0 || s.indexOf('httpsconnectionpool') >= 0)
+    return 'network';
+  if (s.indexOf('model') >= 0 || s.indexOf('not found') >= 0 || s.indexOf('compatible') >= 0 || s.indexOf('unsupported') >= 0)
+    return 'model';
+  return 'other';
+}
+
+function healthErrorLabel(code) {
+  var map = {
+    auth: _('health.reasonAuth') || 'Auth failed',
+    quota: _('health.reasonQuota') || 'Quota / billing',
+    model: _('health.reasonModel') || 'Model issue',
+    timeout: _('health.reasonTimeout') || 'Timeout',
+    network: _('health.reasonNetwork') || 'Network',
+    rate: _('health.reasonRate') || 'Rate limited',
+    ssl: _('health.reasonSsl') || 'SSL / TLS',
+    other: _('health.reasonOther') || 'Other',
+  };
+  return map[code] || map.other;
+}
+
+function healthErrorSuggestion(code, serverSuggestion) {
+  if (serverSuggestion) return serverSuggestion;
+  var map = {
+    auth: _('health.hintAuth') || 'Check API key and endpoint URL.',
+    quota: _('health.hintQuota') || 'Top up balance or wait for quota reset.',
+    model: _('health.hintModel') || 'Pick another check model or rescan models.',
+    timeout: _('health.hintTimeout') || 'Retry later or check proxy/network.',
+    network: _('health.hintNetwork') || 'Check internet, DNS, firewall, and proxy.',
+    rate: _('health.hintRate') || 'Slow down or switch to another key.',
+    ssl: _('health.hintSsl') || 'Check proxy/MITM, system time, and HTTPS URL.',
+    other: _('health.hintOther') || 'See error detail and re-check.',
+  };
+  return map[code] || map.other;
+}
+
+function classifyHealthError(err, codeHint) {
+  return healthErrorLabel(classifyHealthErrorCode(err, codeHint));
+}
+
+function formatHealthFailToast(res) {
+  var raw = (res && (res.error || res.message)) || '';
+  var code = classifyHealthErrorCode(raw, res && res.error_code);
+  var label = (res && res.error_label) || healthErrorLabel(code);
+  var hint = healthErrorSuggestion(code, res && res.suggestion);
+  var msg = (_('toast.checkFail') || 'Health check failed') + ': ' + label;
+  if (raw) msg += ' — ' + String(raw).slice(0, 120);
+  if (hint) msg += ' · ' + hint;
+  return msg;
 }
 
 function vendorStatusRank(status) {
@@ -3218,17 +3535,18 @@ async function deleteKey(vendorId, keyId) {
 
 async function checkKeyHealth(vendorId, keyId) {
   const res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/health');
-  if (res.error) showToast(res.error, 'error');
+  if (res.error && res.healthy == null) showToast(res.error, 'error');
   else if (res.healthy) showToast(_('toast.checkOk'), 'success');
-  else showToast(_('toast.checkFail') + ': ' + (res.error || ''), 'error');
+  else showToast(formatHealthFailToast(res), 'error', { duration: 8000 });
   // Immediate local patch: status + enabled + models (before full reload)
-  if (res && !res.error) {
+  if (res && !(res.error && res.healthy == null)) {
     _applyHealthToLocalKey(vendorId, keyId, res);
   }
   if (typeof renderVendorList === 'function') renderVendorList();
   if (selectedVendorId) { await selectVendor(selectedVendorId); }
   else { await loadVendors(); }
   if (typeof renderVendorList === 'function') renderVendorList();
+  if (typeof renderOnboardingPanel === 'function') renderOnboardingPanel();
 }
 
 async function enableKey(vendorId, keyId) {
@@ -3375,21 +3693,30 @@ async function checkAllHealth() {
     Object.keys(_allHealthData || {}).forEach(function(ck) {
       var h = _allHealthData[ck] || {};
       if (h.healthy === false) {
-        var cat = (typeof classifyHealthError === 'function') ? classifyHealthError(h.error || h.message || '') : 'other';
-        reasonMap[cat] = (reasonMap[cat] || 0) + 1;
+        var cat = (typeof classifyHealthErrorCode === 'function')
+          ? classifyHealthErrorCode(h.error || h.message || '', h.error_code)
+          : 'other';
+        var lab = (typeof healthErrorLabel === 'function') ? healthErrorLabel(cat) : cat;
+        reasonMap[lab] = (reasonMap[lab] || 0) + 1;
       }
     });
     var summary = Object.keys(reasonMap).sort(function(a,b){ return reasonMap[b]-reasonMap[a]; })
       .map(function(k){ return k + '×' + reasonMap[k]; }).join(' · ');
     var msg = _('toast.checkAllDone').replace('{ok}', ok).replace('{fail}', fail);
     if (fail > 0 && summary) msg += ' — ' + summary;
-    showToast(msg, fail > 0 ? 'error' : 'success');
+    showToast(msg, fail > 0 ? 'error' : 'success', { duration: fail > 0 ? 8000 : 3000 });
     await loadVendors();
     if (selectedVendorId) {
       var still = (_sortedVendorsForSelect || []).some(function(v) { return v.id === selectedVendorId; });
       if (still) await selectVendor(selectedVendorId);
     }
     if (typeof loadDashHealthSummary === 'function') loadDashHealthSummary();
+    if (typeof renderOnboardingPanel === 'function') {
+      try {
+        var b = await api('/api/backends');
+        renderOnboardingPanel((b && b.backends) || []);
+      } catch (e) { renderOnboardingPanel(); }
+    }
   } finally {
     _healthCheckRunning = false;
     setTimeout(function() { setHealthProgress(0, 0); }, 1200);
@@ -3625,7 +3952,10 @@ async function checkSingleModel(vendorId, keyId, modelId) {
   else {
     var hit = (res.results || []).find(function(r) { return r.model === modelId; });
     if (hit && hit.healthy) showToast(_('toast.checkOk') + ': ' + modelId, 'success');
-    else showToast(_('toast.checkFail') + ': ' + modelId + (hit && hit.error ? ' — ' + hit.error : ''), 'error');
+    else {
+      var failRes = hit || { error: 'failed', healthy: false };
+      showToast(formatHealthFailToast(failRes) + ': ' + modelId, 'error', { duration: 8000 });
+    }
   }
   await selectVendor(vendorId);
   if (_modelsModalCtx.vendorId === vendorId && _modelsModalCtx.keyId === keyId) {
@@ -4009,7 +4339,11 @@ async function applyBatchImport() {
       .replace('{ok}', imported)
       .replace('{skip}', skipped)
       .replace('{err}', errN);
-    showToast(msg, errN ? 'error' : 'success');
+    showToast(msg, errN ? 'error' : 'success', {
+      duration: 10000,
+      actionLabel: _('importUndo.btn') || 'Undo import',
+      onAction: function() { undoLastImport(); },
+    });
     if (errN && res.errors) {
       $('batchImportError').textContent = res.errors.map(function(x) {
         return (x.entry || '') + ': ' + (x.error || '');
@@ -4061,17 +4395,103 @@ function showBatchImportModal() {
 var _syncImportItems = [];
 
 function pushToBackends() {
-  showToast(_('action.checking') || 'Working...', 'info');
-  api('/api/sync/push', { method: 'POST' }).then(function(res) {
-    if (res.error) {
-      showToast(res.error, 'error');
-      return;
+  showPushPreviewModal();
+}
+
+function showPushPreviewModal() {
+  var m = $('pushPreviewModal');
+  if (!m) {
+    confirmPushToBackends();
+    return;
+  }
+  m.classList.add('open');
+  loadPushPreview();
+}
+
+function closePushPreviewModal() {
+  var m = $('pushPreviewModal');
+  if (m) m.classList.remove('open');
+}
+
+async function loadPushPreview() {
+  var wrap = $('pushPreviewTableWrap');
+  var errEl = $('pushPreviewError');
+  var btn = $('pushPreviewConfirmBtn');
+  var sum = $('pushPreviewSummary');
+  var bar = $('pushPreviewToolbar');
+  if (wrap) wrap.innerHTML = '<p style="color:var(--text3);padding:16px">' + esc(_('common.loading') || 'Loading...') + '</p>';
+  if (btn) btn.disabled = true;
+  if (errEl) errEl.style.display = 'none';
+  if (bar) bar.style.display = 'none';
+  var res = await api('/api/sync/push/preview');
+  if (!res || res.error) {
+    if (wrap) wrap.innerHTML = '';
+    if (errEl) {
+      errEl.style.display = '';
+      errEl.textContent = (res && res.error) || 'preview failed';
     }
-    var msg = res.message || (_('sync.pushDone') || 'Pushed to backends');
-    showToast(msg, (res.fail > 0) ? 'error' : 'success');
-    if (typeof loadLastPushPanel === 'function') loadLastPushPanel();
-    if (typeof loadBackends === 'function' && document.querySelector('#view-backends.active')) loadBackends();
+    return;
+  }
+  var items = res.items || [];
+  if (bar) bar.style.display = '';
+  if (sum) {
+    sum.textContent = (_('sync.pushPreviewSummary') || 'Write: {w} · Skip: {s} · Total: {t}')
+      .replace('{w}', String(res.will_write || 0))
+      .replace('{s}', String(res.skipped || 0))
+      .replace('{t}', String(res.total || items.length));
+  }
+  if (!items.length) {
+    if (wrap) wrap.innerHTML = '<p class="vendor-list-empty">' + esc(_('sync.noPushTargets') || 'No backends') + '</p>';
+    return;
+  }
+  var html = '<table class="batch-edit-table sync-import-table"><thead><tr>'
+    + '<th>' + esc(_('sync.colBackend') || 'Backend') + '</th>'
+    + '<th>' + esc(_('table.status') || 'Status') + '</th>'
+    + '<th>' + esc(_('sync.colFiles') || 'Files') + '</th>'
+    + '</tr></thead><tbody>';
+  items.forEach(function(it) {
+    var will = it.action === 'write';
+    var reasonMap = {
+      not_installed: _('backends.notInstalled') || 'Not installed',
+      disabled: _('backends.syncDisabled') || 'Sync off',
+      readonly: _('backends.readonly') || 'Read-only',
+    };
+    var st = will
+      ? ('<span class="badge-status ok">' + esc(_('sync.willWrite') || 'Will write') + '</span>')
+      : ('<span class="badge-status fail">' + esc(_('sync.willSkip') || 'Skip') + '</span>'
+        + '<div class="muted" style="font-size:11px;margin-top:2px">' + esc(reasonMap[it.reason] || it.reason || '') + '</div>');
+    var files = (it.config_files || []).map(function(f) {
+      return (f.label || f.path || '');
+    }).filter(Boolean);
+    var filesHtml = files.length
+      ? files.map(function(p) { return '<div class="mono" style="font-size:11px">' + esc(p) + '</div>'; }).join('')
+      : '<span class="muted">—</span>';
+    html += '<tr class="' + (will ? '' : 'batch-row-warn') + '">'
+      + '<td><strong>' + esc(it.display_name || it.name || '') + '</strong><div class="muted" style="font-size:11px">' + esc(it.name || '') + '</div></td>'
+      + '<td>' + st + '</td>'
+      + '<td>' + filesHtml + '</td>'
+      + '</tr>';
   });
+  html += '</tbody></table>';
+  if (wrap) wrap.innerHTML = html;
+  if (btn) btn.disabled = !(res.will_write > 0);
+}
+
+async function confirmPushToBackends() {
+  var btn = $('pushPreviewConfirmBtn');
+  if (btn) btn.disabled = true;
+  showToast(_('action.checking') || 'Working...', 'info');
+  var res = await api('/api/sync/push', { method: 'POST' });
+  closePushPreviewModal();
+  if (res.error) {
+    showToast(res.error, 'error');
+    return;
+  }
+  var msg = res.message || (_('sync.pushDone') || 'Pushed to backends');
+  showToast(msg, (res.fail > 0) ? 'error' : 'success');
+  if (typeof loadLastPushPanel === 'function') loadLastPushPanel();
+  if (typeof loadBackends === 'function' && document.querySelector('#view-backends.active')) loadBackends();
+  if (typeof loadDashboard === 'function' && document.querySelector('#view-dashboard.active')) loadDashboard();
 }
 
 function showSyncImportModal() {
@@ -4194,7 +4614,11 @@ async function applySyncImport() {
   if (res.skipped) {
     msg += ' · ' + (_('sync.skipped') || 'skipped: {count}').replace('{count}', res.skipped);
   }
-  showToast(msg, 'success');
+  showToast(msg, 'success', {
+    duration: 10000,
+    actionLabel: _('importUndo.btn') || 'Undo import',
+    onAction: function() { undoLastImport(); },
+  });
   closeSyncImportModal();
   if (typeof loadVendors === 'function') {
     var focusId = res.focus_vendor_id != null && res.focus_vendor_id !== ''
@@ -4325,7 +4749,12 @@ async function onBackupFileSelected(ev) {
         .replace('{k}', res.keys_added || 0)
         .replace('{s}', res.keys_skipped || 0);
   }
-  showToast(msg, 'success');
+  showToast(msg, 'success', {
+    duration: 10000,
+    actionLabel: _('importUndo.btn') || 'Undo import',
+    onAction: function() { undoLastImport(); },
+  });
+  if (typeof refreshUndoImportBtn === 'function') refreshUndoImportBtn();
   if (typeof loadVendors === 'function') loadVendors();
   if (typeof loadDashboard === 'function') loadDashboard();
   if (typeof loadCheckinPage === 'function' && document.querySelector('#view-checkin.active')) loadCheckinPage();
@@ -4358,8 +4787,15 @@ async function loadLastPushPanel() {
   var results = res.results || {};
   Object.keys(results).forEach(function(name) {
     var r = results[name] || {};
-    var st = r.skipped ? (_('backends.syncDisabled') || 'off')
-      : (r.ok ? (_('health.healthy') || 'ok') : (_('health.unhealthy') || 'fail'));
+    var st;
+    if (r.skipped) {
+      var errL = String(r.error || '').toLowerCase();
+      if (errL.indexOf('not installed') !== -1) st = _('backends.notInstalled') || 'not installed';
+      else if (errL.indexOf('disabled') !== -1) st = _('backends.syncDisabled') || 'off';
+      else st = _('sync.skipLabel') || 'skipped';
+    } else {
+      st = r.ok ? (_('health.healthy') || 'ok') : (_('health.unhealthy') || 'fail');
+    }
     var err = r.error ? (' — ' + r.error) : '';
     lines.push('<li><strong>' + esc(name) + '</strong>: ' + esc(st) + esc(err) + '</li>');
   });
@@ -5210,17 +5646,123 @@ async function loadProfilesList() {
   }
   list.innerHTML = profiles.map(function(p) {
     var act = p.active ? ' is-active' : '';
+    var nameSafe = esc(p.name).replace(/'/g, "\\'");
     return '<div class="profile-row' + act + '">' +
       '<div class="profile-meta"><strong>' + esc(p.label || p.name) + '</strong>' +
       (p.active ? ' <span class="badge role-primary">' + esc(_('profiles.current') || 'Current') + '</span>' : '') +
       '<div class="muted">' + esc(p.name) + (p.vendors != null ? ' · ' + p.vendors + ' vendors' : '') +
       (p.saved_at ? ' · ' + esc(String(p.saved_at).replace('T', ' ').slice(0, 19)) : '') + '</div></div>' +
       '<div class="profile-actions">' +
-      (!p.active ? '<button class="btn btn-sm btn-primary" onclick="switchToProfile(\'' + esc(p.name).replace(/'/g, "\\'") + '\')">' + esc(_('profiles.switch') || 'Switch') + '</button>' : '') +
-      '<button class="btn btn-sm" onclick="overwriteProfile(\'' + esc(p.name).replace(/'/g, "\\'") + '\')">' + esc(_('profiles.overwrite') || 'Save here') + '</button>' +
-      '<button class="btn btn-sm btn-danger" onclick="removeProfile(\'' + esc(p.name).replace(/'/g, "\\'") + '\')">' + esc(_('action.delete') || 'Delete') + '</button>' +
+      (!p.active ? '<button class="btn btn-sm btn-primary" onclick="switchToProfile(\'' + nameSafe + '\')">' + esc(_('profiles.switch') || 'Switch') + '</button>' : '') +
+      '<button class="btn btn-sm" onclick="overwriteProfile(\'' + nameSafe + '\')">' + esc(_('profiles.overwrite') || 'Save here') + '</button>' +
+      '<button class="btn btn-sm" onclick="exportNamedProfile(\'' + nameSafe + '\')">' + esc(_('profiles.export') || 'Export') + '</button>' +
+      '<button class="btn btn-sm btn-danger" onclick="removeProfile(\'' + nameSafe + '\')">' + esc(_('action.delete') || 'Delete') + '</button>' +
       '</div></div>';
   }).join('');
+}
+
+function _profileSharePassword() {
+  var el = $('profileSharePassword');
+  return el ? String(el.value || '') : '';
+}
+
+async function exportNamedProfile(name) {
+  var password = _profileSharePassword();
+  try {
+    if (password) {
+      var res = await fetch('/api/profiles/export', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name || '', password: password }),
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function(){ return {}; });
+        showToast(err.error || 'Export failed', 'error');
+        return;
+      }
+      var blob = await res.blob();
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ai-switch-profile-' + (name || 'workspace') + '.enc.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showToast(_('profiles.exportEncrypted') || 'Encrypted profile downloaded', 'success');
+    } else {
+      var q = name ? ('?name=' + encodeURIComponent(name)) : '';
+      window.location.href = '/api/profiles/export' + q;
+      showToast(_('profiles.exportStarted') || 'Downloading profile…', 'info');
+    }
+  } catch (e) {
+    showToast(String(e.message || e), 'error');
+  }
+}
+
+function exportCurrentProfile() {
+  return exportNamedProfile('');
+}
+
+function triggerImportProfile() {
+  var inp = $('profileFileInput');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+async function onProfileFileSelected(ev) {
+  var file = ev && ev.target && ev.target.files && ev.target.files[0];
+  if (!file) return;
+  var text = '';
+  try {
+    text = await file.text();
+  } catch (e) {
+    showToast(_('backup.readFail') || 'Failed to read file', 'error');
+    return;
+  }
+  var payload;
+  try {
+    payload = JSON.parse(text);
+  } catch (e) {
+    showToast(_('backup.invalidJson') || 'Invalid JSON', 'error');
+    return;
+  }
+  var password = _profileSharePassword();
+  if (payload && payload.format === 'ai-switch-backup-encrypted' && !password) {
+    password = prompt(_('profiles.passwordRequired') || 'Enter profile password:') || '';
+    if (!password) {
+      showToast(_('profiles.passwordRequired') || 'Password required', 'error');
+      return;
+    }
+  }
+  var name = prompt(_('profiles.importNamePh') || 'Save as profile name (optional):', '') || '';
+  var activate = confirm(_('profiles.importActivate') || 'OK = import and switch to this profile now. Cancel = save only.');
+  var res = await api('/api/profiles/import', {
+    method: 'POST',
+    body: JSON.stringify({
+      profile: payload,
+      password: password,
+      name: name,
+      activate: activate,
+      mode: 'replace',
+    }),
+  });
+  if (res.error || res.success === false) {
+    showToast(res.error || 'Import failed', 'error');
+    return;
+  }
+  showToast(
+    (_('profiles.importDone') || 'Profile imported: {name} ({v} vendors)')
+      .replace('{name}', res.name || name || 'profile')
+      .replace('{v}', String(res.vendors || 0)),
+    'success'
+  );
+  loadProfilesList();
+  if (activate) {
+    if (typeof loadVendors === 'function') loadVendors();
+    if (typeof loadDashboard === 'function') loadDashboard();
+  }
 }
 
 async function saveCurrentProfile() {
@@ -5278,6 +5820,7 @@ async function loadSettingsPage() {
   if ($('setBudgetMonthlyCost')) $('setBudgetMonthlyCost').value = s.budget_monthly_cost || 0;
   if ($('setBudgetDailyTokens')) $('setBudgetDailyTokens').value = s.budget_daily_tokens || 0;
   if ($('setBudgetMonthlyTokens')) $('setBudgetMonthlyTokens').value = s.budget_monthly_tokens || 0;
+  if ($('setBudgetAction')) $('setBudgetAction').value = s.budget_action || 'alert';
   if ($('setReadOnly')) $('setReadOnly').checked = !!s.read_only;
   _readOnlyMode = !!s.read_only;
   if (tok) tok.value = '';
@@ -5346,6 +5889,7 @@ async function saveCurrentPolicy() {
     budget_monthly_cost: parseFloat(($('setBudgetMonthlyCost') && $('setBudgetMonthlyCost').value) || '0') || 0,
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
     budget_monthly_tokens: parseInt(($('setBudgetMonthlyTokens') && $('setBudgetMonthlyTokens').value) || '0', 10) || 0,
+    budget_action: (($('setBudgetAction') && $('setBudgetAction').value) || 'alert'),
     read_only: !!( $('setReadOnly') && $('setReadOnly').checked ),
   };
   var res = await api('/api/policies', {
@@ -5393,6 +5937,7 @@ async function saveSettingsPage() {
     budget_monthly_cost: parseFloat(($('setBudgetMonthlyCost') && $('setBudgetMonthlyCost').value) || '0') || 0,
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
     budget_monthly_tokens: parseInt(($('setBudgetMonthlyTokens') && $('setBudgetMonthlyTokens').value) || '0', 10) || 0,
+    budget_action: (($('setBudgetAction') && $('setBudgetAction').value) || 'alert'),
     read_only: !!( $('setReadOnly') && $('setReadOnly').checked ),
   };
   var tokEl = $('setAccessToken');
@@ -5893,8 +6438,14 @@ function renderHealthKeys() {
   body.innerHTML = rows.map(function(r) {
     var st;
     if (r.healthy === true) st = '<span class="badge badge-ok">' + esc(_('health.healthy') || 'Healthy') + '</span>';
-    else if (r.healthy === false) st = '<span class="badge badge-fail" title="' + esc(r.error || '') + '">' + esc(_('health.unhealthy') || 'Unhealthy') + '</span>';
-    else st = '<span class="badge">' + esc(_('health.notChecked') || 'Not checked') + '</span>';
+    else if (r.healthy === false) {
+      var code = classifyHealthErrorCode(r.error || '', r.error_code);
+      var label = healthErrorLabel(code);
+      var hint = healthErrorSuggestion(code, r.suggestion);
+      var tip = (r.error || label) + (hint ? ' · ' + hint : '');
+      st = '<span class="badge badge-fail" title="' + esc(tip) + '">' + esc(label) + '</span>';
+      if (hint) st += '<div class="form-hint">' + esc(hint) + '</div>';
+    } else st = '<span class="badge">' + esc(_('health.notChecked') || 'Not checked') + '</span>';
     if (r.enabled === false) st += ' <span class="badge badge-readonly">' + esc(_('badge.disabled') || 'Disabled') + '</span>';
     var lat = r.latency_ms != null && r.healthy != null ? (r.latency_ms + ' ms') : '—';
     var vid = esc(String(r.vendor_id || '')).replace(/'/g, "\\'");
@@ -5912,9 +6463,11 @@ function renderHealthKeys() {
 
 async function healthCheckOne(vendorId, keyId) {
   var res = await api('/api/vendors/' + encodeURIComponent(vendorId) + '/keys/' + encodeURIComponent(keyId) + '/health');
-  if (res.error) { showToast(res.error, 'error'); return; }
-  showToast(res.healthy ? (_('health.healthy') || 'Healthy') : (res.error || _('health.unhealthy') || 'Unhealthy'), res.healthy ? 'success' : 'error');
+  if (res.error && res.healthy == null) { showToast(res.error, 'error'); return; }
+  if (res.healthy) showToast(_('health.healthy') || 'Healthy', 'success');
+  else showToast(formatHealthFailToast(res), 'error', { duration: 8000 });
   loadHealthMonitor();
+  if (typeof renderOnboardingPanel === 'function') renderOnboardingPanel();
 }
 
 async function healthMonitorStart() {
@@ -6046,7 +6599,7 @@ async function loadDiagnostics() {
   var el = $('diagnosticsOut');
   if (!el) return;
   el.textContent = _('common.loading') || 'Loading...';
-  var res = await api('/api/diagnostics');
+  var res = await api('/api/diagnostics?for_issue=1');
   if (res.error) { el.textContent = res.error; return; }
   _diagCache = res;
   el.textContent = JSON.stringify(res, null, 2);
@@ -6100,6 +6653,54 @@ function copyDiagnostics() {
   }
 }
 
+function downloadDiagnosticsPack() {
+  // issue-safe pack (no secrets)
+  window.location.href = '/api/diagnostics?for_issue=1&download=1';
+  showToast(_('diagnostics.downloadStarted') || 'Downloading diagnostics pack…', 'info');
+}
+
+async function checkForUpdates() {
+  var banner = $('updateCheckBanner');
+  showToast(_('updates.checking') || 'Checking for updates…', 'info');
+  var res = await api('/api/updates/check');
+  if (!res || res.error) {
+    showToast((res && res.error) || (_('updates.checkFail') || 'Update check failed'), 'error');
+    return;
+  }
+  var local = res.local || '?';
+  var latest = res.latest || '';
+  var html = '';
+  if (res.error && !latest) {
+    html = '<div class="budget-alert warn">' + esc((_('updates.networkError') || 'Could not reach GitHub: {err}').replace('{err}', res.error)) +
+      ' <a class="btn btn-sm" href="' + esc(res.html_url || 'https://github.com/kingkate2009-droid/ai-switch/releases') + '" target="_blank" rel="noopener">' +
+      esc(_('updates.openReleases') || 'Releases') + '</a></div>';
+  } else if (res.update_available) {
+    html = '<div class="budget-alert crit">' +
+      esc((_('updates.available') || 'Update available: v{latest} (you have v{local})')
+        .replace('{latest}', latest).replace('{local}', local)) +
+      ' <a class="btn btn-sm btn-primary" href="' + esc(res.html_url || '#') + '" target="_blank" rel="noopener">' +
+      esc(_('updates.openRelease') || 'Open release') + '</a></div>';
+    if (res.notes) {
+      html += '<div class="form-hint" style="white-space:pre-wrap;max-height:160px;overflow:auto">' + esc(String(res.notes).slice(0, 800)) + '</div>';
+    }
+  } else {
+    html = '<div class="budget-alert warn">' +
+      esc((_('updates.upToDate') || 'You are on the latest version (v{local})').replace('{local}', local || latest || '?')) +
+      ' <a class="btn btn-sm" href="' + esc(res.html_url || 'https://github.com/kingkate2009-droid/ai-switch/releases') + '" target="_blank" rel="noopener">' +
+      esc(_('updates.openReleases') || 'Releases') + '</a></div>';
+  }
+  if (banner) {
+    banner.style.display = '';
+    banner.innerHTML = html;
+  }
+  showToast(
+    res.update_available
+      ? ((_('updates.available') || 'Update available: v{latest}').replace('{latest}', latest))
+      : ((_('updates.upToDate') || 'Up to date (v{local})').replace('{local}', local)),
+    res.update_available ? 'info' : 'success'
+  );
+}
+
 function showAuthGate() {
   var g = $('authGate');
   if (g) {
@@ -6150,10 +6751,29 @@ async function checkAuthOnBoot() {
 }
 
 function showOnboarding(force) {
-  var m = $('onboardingModal');
-  if (!m) return;
-  m.classList.add('open');
-  m.style.display = 'flex';
+  // Prefer dashboard 4-step panel; modal kept as lightweight welcome
+  try { localStorage.removeItem('aiswitch_onboarding_skip'); } catch (e) {}
+  try {
+    api('/api/settings', { method: 'POST', body: JSON.stringify({ onboarding_done: false }) });
+  } catch (e) {}
+  switchView('dashboard');
+  var panel = $('onboardingPanel');
+  if (panel) {
+    panel.style.display = '';
+    document.body.classList.add('onboarding-focus');
+  }
+  if (typeof renderOnboardingPanel === 'function') {
+    api('/api/backends').then(function(b) {
+      renderOnboardingPanel((b && b.backends) || []);
+    }).catch(function() { renderOnboardingPanel(); });
+  }
+  if (force) {
+    var m = $('onboardingModal');
+    if (m) {
+      m.classList.add('open');
+      m.style.display = 'flex';
+    }
+  }
 }
 
 function closeOnboarding(markDone) {
@@ -6168,20 +6788,24 @@ function closeOnboarding(markDone) {
 }
 
 async function finishOnboarding() {
-  await api('/api/settings', { method: 'POST', body: JSON.stringify({ onboarding_done: true }) });
   closeOnboarding(true);
+  // Keep panel until steps done; jump to step 1
+  try { localStorage.removeItem('aiswitch_onboarding_skip'); } catch (e) {}
   switchView('vendors');
   showAddVendorModal();
+  if (typeof renderOnboardingPanel === 'function') renderOnboardingPanel();
 }
 
 async function maybeShowOnboarding() {
   try {
+    var skipped = false;
+    try { skipped = localStorage.getItem('aiswitch_onboarding_skip') === '1'; } catch (e) {}
     var s = await api('/api/settings');
-    if (s && !s.error && !s.onboarding_done) {
-      // only when no vendors yet
-      var v = await api('/api/vendors');
-      var n = ((v && v.vendors) || []).length;
-      if (n === 0) showOnboarding(true);
+    var v = await api('/api/vendors');
+    var n = ((v && v.vendors) || []).length;
+    // first-run modal only when empty + not done
+    if (s && !s.error && !s.onboarding_done && n === 0 && !skipped) {
+      showOnboarding(true);
     }
   } catch (e) {}
 }
@@ -6294,6 +6918,8 @@ async function loadAppVersion() {
     if (el && res && res.version) {
       el.textContent = 'v' + res.version + (res.frozen ? ' · app' : '');
       el.title = (res.platform || '') + ' · py ' + (res.python || '');
+      el.style.cursor = 'pointer';
+      el.onclick = function() { checkForUpdates(); };
     }
   } catch (e) {}
 }
@@ -6388,11 +7014,40 @@ function exportVendorsCsv() {
 
 // ── Init ─────────────────────────────────
 
+async function maybeShowDataRecovery() {
+  try {
+    var res = await api('/api/data/recovery');
+    var n = res && res.notice;
+    if (!n || n.acked) return;
+    var msg;
+    if (n.empty) {
+      msg = _('dataRecovery.empty') || 'data.json was corrupt and no backup was usable. Started with empty data.';
+    } else {
+      msg = (_('dataRecovery.restored') || 'data.json was corrupt; restored from backup {src} ({v} vendors).')
+        .replace('{src}', n.source || 'backup')
+        .replace('{v}', String(n.vendors != null ? n.vendors : '?'));
+    }
+    showToast(msg, 'error', {
+      duration: 15000,
+      actionLabel: _('dataRecovery.ack') || 'Got it',
+      onAction: function() {
+        api('/api/data/recovery/ack', { method: 'POST', body: '{}' });
+      },
+    });
+    // auto-ack after display so refresh does not spam forever if user ignores
+    setTimeout(function() {
+      api('/api/data/recovery/ack', { method: 'POST', body: '{}' });
+    }, 20000);
+  } catch (e) {}
+}
+
 (async function boot() {
   await checkAuthOnBoot();
   loadAppVersion();
   switchView(getInitialView(), { skipHash: false });
   maybeShowOnboarding();
+  maybeShowDataRecovery();
+  if (typeof refreshUndoImportBtn === 'function') refreshUndoImportBtn();
 })();
 
 window.addEventListener('hashchange', function() {

@@ -46,6 +46,8 @@ python3 run.py
 # → 浏览器打开 http://127.0.0.1:8787
 ```
 
+图文四步：[docs/quickstart.md](docs/quickstart.md) · Codex 排障：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
+
 **要求**: Python 3.9+
 
 **兼容**: OpenClaw 2026.6.11+、OpenCode、Claude Code、Codex CLI、Cline 3.x+、Aider、Continue.dev、Hermes Agent、QwenCode、Kimi Code、TRAE Work

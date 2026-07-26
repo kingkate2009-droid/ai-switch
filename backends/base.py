@@ -523,7 +523,7 @@ class BackendAdapter:
             if not self.is_installed():
                 return False
         except Exception:
-            pass
+            return False
         try:
             from core.health_checker import is_key_backend_syncable
             if not is_key_backend_syncable(str(vendor.get("id") or ""), key):
@@ -568,6 +568,27 @@ class BackendAdapter:
     def get_config_template(self) -> list[dict]:
         """Return schema for UI config form. Each item: {key, label, type, default, help}"""
         return []
+
+    @property
+    def supports_active_switch(self) -> bool:
+        """Whether this backend has a single/default active provider slot that can be switched."""
+        return False
+
+    def list_providers(self) -> list[dict]:
+        """List switchable providers/slots for UI.
+
+        Each item ideally:
+          {id, name, base_url, vendor_id, vendor_name, models, active, managed}
+        """
+        return []
+
+    def get_active_provider(self) -> dict:
+        """Return {active_provider, name, base_url, model?} for the current slot."""
+        return {"active_provider": "", "name": "", "base_url": ""}
+
+    def switch_provider(self, provider_id: str = "", vendor_id: str = "", key_id: str = "") -> dict:
+        """Switch the active provider/slot. Return {success, active_provider, message, ...}."""
+        return {"success": False, "message": "Active provider switch not supported for this backend"}
 
     @property
     def config_files(self) -> list[dict]:

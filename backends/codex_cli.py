@@ -521,6 +521,10 @@ class CodexCliAdapter(BackendAdapter):
                 if auth.pop("OPENAI_API_KEY", None):
                     self._save_auth(auth)
 
+    @property
+    def supports_active_switch(self) -> bool:
+        return True
+
     def switch_provider(self, provider_id: str = "", vendor_id: str = "", key_id: str = "") -> dict:
         """Switch the active provider for Codex CLI.
 

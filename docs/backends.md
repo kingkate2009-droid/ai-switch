@@ -3,6 +3,8 @@
 本文说明 AI Switch 各后端引擎适配器的配置路径、同步行为与能力差异。  
 English summary tables follow the Chinese sections.
 
+相关：[快速入门](./quickstart.md) · [Codex 排障](./troubleshoot-codex.md) · [适配器贡献](./adapter-contribution.md)
+
 ---
 
 ## 总览
