@@ -118,6 +118,7 @@ Also included when you need them: check-in URLs, budgets, encrypted profile expo
 - [#1 Install & start](https://github.com/kingkate2009-droid/ai-switch/issues/1)
 - [#2 Codex connectivity](https://github.com/kingkate2009-droid/ai-switch/issues/2)
 - [#3 Import & merge](https://github.com/kingkate2009-droid/ai-switch/issues/3)
+- Latest: [v2.0.5 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.0.5) · [notes](docs/release-notes-2.0.5.md)
 
 ---
 

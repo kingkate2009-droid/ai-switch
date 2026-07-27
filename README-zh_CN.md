@@ -110,6 +110,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 - [#1 安装与启动](https://github.com/kingkate2009-droid/ai-switch/issues/1)
 - [#2 Codex 连不上](https://github.com/kingkate2009-droid/ai-switch/issues/2)
 - [#3 导入与合并](https://github.com/kingkate2009-droid/ai-switch/issues/3)
+- 最新版说明：[v2.0.5 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.0.5) · [变更要点](docs/release-notes-2.0.5.md)
 
 ---
 
