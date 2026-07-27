@@ -7,185 +7,181 @@
 <h1 align="center">AI Switch</h1>
 
 <p align="center">
-  <strong>Unified AI API Key &amp; Backend Management</strong>
+  <strong>Local AI API Key hub — change once, every tool works</strong>
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#features">Features</a> •
-  <a href="#supported-providers">Providers</a> •
-  <a href="#supported-backends">Backends</a> •
-  <a href="#configuration">Config</a> •
+  <a href="https://github.com/kingkate2009-droid/ai-switch/releases"><img alt="release" src="https://img.shields.io/github/v/release/kingkate2009-droid/ai-switch?include_prereleases"></a>
+  <a href="https://github.com/kingkate2009-droid/ai-switch/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/kingkate2009-droid/ai-switch?style=social"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"></a>
+  <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-blue">
+</p>
+
+<p align="center">
+  <a href="#why">Why</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#docs">Docs</a> ·
+  <a href="#supported-backends">Backends</a> ·
   <a href="#license">License</a>
 </p>
 
 ---
 
-A unified management platform for AI provider API keys and development tool backends. Add, detect, and sync your API keys across OpenClaw, OpenCode, Claude Code, Codex CLI, Cline, Aider, Continue.dev, Hermes Agent, QwenCode, Kimi Code — all from one place.
+## Why
 
-## Features
+If you juggle **relay / multi-vendor API keys** across **OpenClaw, OpenCode, Codex CLI, Claude Code**… you already know the pain:
 
-- **Multi-vendor Management** — Vendor list + key table layout
-- **26+ Built-in Providers** — OpenAI, Anthropic, DeepSeek, Groq, Google Gemini, xAI, Together AI, and more
-- **Provider-specific Health Checks** — Each provider uses correct API format for probing
-- **Multi-backend Auto-Sync** — Healthy keys auto-sync to all supported AI tools
-- **Enable/Disable Keys** — Toggle keys to control backend sync
-- **Batch Import** — Paste text to auto-parse URL + API Key + provider (Base64 auto-decode)
-- **Config File Editor** — View and edit backend configuration files with backup
-- **Dashboard View** — Stats cards, backend status, quick actions
-- **Light/Dark Theme** — One-click toggle, saves preference
-- **Multi-language** — English / 简体中文 / 繁體中文
-- **Adapter Architecture** — Add new backends by dropping in one Python file
+| Pain | Without AI Switch | With AI Switch |
+|------|-------------------|----------------|
+| Rotate one key | Edit 5 config files by hand | Change once → push to installed tools |
+| Bad key | Tool hangs / weird 401s | Health check → strip from backends |
+| Wrong write | Silent overwrite | **Sync preview** · uninstalled = no write |
+| Onboarding | “Where do I put the key?” | **3-minute path**: add → check → push → test |
+
+**Positioning:** a local **Key hub** (manage · probe · push) — not another chat client.
+
+> One key change. Every installed tool updates. Broken keys don’t take your stack down.
+
+---
 
 ## Quick Start
 
-3-minute guide: [docs/quickstart.md](docs/quickstart.md) · Codex issues: [docs/troubleshoot-codex.md](docs/troubleshoot-codex.md) · New backend: [docs/adapter-contribution.md](docs/adapter-contribution.md)
+**Easiest:** download a build from [Releases](https://github.com/kingkate2009-droid/ai-switch/releases)  
+(Windows / macOS Intel / Apple Silicon / Linux) → extract → run `ai-switch` / `start.bat` / `start.sh`  
+→ open **http://127.0.0.1:8787**
+
+**From source:**
 
 ```bash
-# Clone
 git clone https://github.com/kingkate2009-droid/ai-switch.git
 cd ai-switch
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Start
 python3 run.py
-# → Open http://127.0.0.1:8787
+# → http://127.0.0.1:8787
 ```
 
-**Requirements**: Python 3.9+
-
-**Compatible with**: OpenClaw 2026.6.11+, OpenCode, Claude Code, Codex CLI, Cline 3.x+, Aider, Continue.dev, Hermes Agent, QwenCode, Kimi Code, TRAE Work
-
-### Docker
+**Docker:**
 
 ```bash
 docker compose up -d
-# → Open http://127.0.0.1:8787
+# → http://127.0.0.1:8787
 ```
 
-## Usage
+Requires **Python 3.9+** for source installs.
 
-### Add a Provider
+**3-minute loop:** [docs/quickstart.md](docs/quickstart.md)
 
-Click **Vendors** → **+ Add Vendor** → Select provider (auto-fills URL) → Enter name → Save
+1. Add vendor + key (or smart import)  
+2. Health check passes  
+3. Push to backends (**preview first**)  
+4. Send `hi` in OpenCode / Codex / Claude Code  
 
-### Add an API Key
+---
 
-Select vendor → Click **+ Add Key** → Enter name and key → Save
+## What it does
 
-### Health Check
+Only three outcomes matter day-to-day:
 
-- Single check: Click **Check** on the key row
-- Check all: Click **Check All Health** on Dashboard
-- Healthy key → auto-sync to all backend tools
+1. **One place for keys** — vendors, tags, batch import, MetaAPI merge, dedupe  
+2. **Know what’s alive** — layered probes (Chat + Codex Responses), readable errors, adaptive interval  
+3. **Safe sync** — preview · last-sync summary · never write to uninstalled tools · active provider switch  
 
-### Batch Import
+Also included when you need them: check-in URLs, budgets, encrypted profile export, diagnostics pack, downstream routes, desktop packages.
 
-Drag or paste key text. Supports multi-line, JSON, and Base64 formats:
+<details>
+<summary><strong>Feature list (expand)</strong></summary>
 
-```
-openai https://api.openai.com/v1 sk-proj-xxxx...
-deepseek https://api.deepseek.com/v1 sk-xxxx...
-```
+- Multi-vendor + key table, search / tags / batch enable-disable-delete  
+- 26+ built-in providers + custom OpenAI-compatible endpoints  
+- Health monitor (scheduled), auto-disable / failover (optional)  
+- Sync to OpenClaw, OpenCode, Claude Code, Codex, Cline, Aider, Continue, …  
+- Batch / backup / MetaAPI import with undo  
+- Light/dark theme, EN / 简体 / 繁中  
+- Drop-in backend adapters ([contribution guide](docs/adapter-contribution.md))
 
-Auto-detects URL → matches provider → preview → one-click import
+</details>
 
-## Supported Providers
+---
 
-| Check Type | Providers |
-|---|---|
-| `openai_chat` | OpenAI, DeepSeek, OpenRouter, Groq, Together AI, xAI, Perplexity, Mistral, Cohere, Moonshot, Z.AI, MiniMax, Alibaba (Qwen), Volcengine, Fireworks, StepFun, DeepInfra, Cerebras, Novita, Venice, 01.AI, Ollama, Qianfan, Xiaomi |
-| `anthropic` | Anthropic |
+## Docs
+
+| Doc | For |
+|-----|-----|
+| [3-minute quickstart](docs/quickstart.md) | First run |
+| [Codex won’t connect](docs/troubleshoot-codex.md) | Responses / env / models |
+| [Backends](docs/backends.md) | What each engine supports |
+| [Adapter contribution](docs/adapter-contribution.md) | Add a backend |
+
+**Issues / help:** [open an issue](https://github.com/kingkate2009-droid/ai-switch/issues)
+
+- [#1 Install & start](https://github.com/kingkate2009-droid/ai-switch/issues/1)
+- [#2 Codex connectivity](https://github.com/kingkate2009-droid/ai-switch/issues/2)
+- [#3 Import & merge](https://github.com/kingkate2009-droid/ai-switch/issues/3)
+
+---
+
+## Supported backends
+
+| Backend | Notes |
+|---------|--------|
+| OpenClaw | `openclaw.json`, auth profiles, models |
+| OpenCode | `auth.json`, `opencode.jsonc` |
+| Claude Code | `settings.json`, `~/.claude.json` |
+| Codex CLI | `auth.json`, `config.toml` + Responses health |
+| Cline / Aider / Continue.dev | IDE / CLI configs |
+| Hermes Agent, QwenCode, Kimi Code, TRAE Work | See [backends.md](docs/backends.md) |
+
+Status on the Backends page: **Not installed** · **Stopped (syncable)** · **Running** — uninstalled tools are never written.
+
+### Providers (probe types)
+
+| Type | Examples |
+|------|----------|
+| `openai_chat` | OpenAI, DeepSeek, OpenRouter, Groq, Moonshot, Qwen, … |
+| `anthropic` | Anthropic-compatible |
 | `gemini` | Google Gemini |
+| `openai_responses` | Codex-oriented `/v1/responses` path |
 
-Unknown providers default to `openai_chat` probe.
+---
 
-## Supported Backends
+## Desktop packages
 
-| Backend | Config Files |
-|---|---|
-| OpenClaw | `openclaw.json`, `auth-profiles.json`, `models.json` |
-| OpenCode | `auth.json`, `opencode.jsonc`, `tui.jsonc` |
-| Claude Code | `settings.json`, `~/.claude.json`, `keybindings.json` |
-| Codex CLI | `auth.json`, `config.toml` |
-| Cline | `secrets.json`, `config.json`, `globalState.json`, `cline_mcp_settings.json` |
-| Aider | `.aider.conf.yml`, `.aider.model.settings.yml`, `.aider.model.metadata.json` |
-| Continue.dev | `config.json`, `config.yaml`, `.continuerc.json` |
-| Hermes Agent | `config.yaml`, `.env` |
-| QwenCode | `settings.json`, `.env` |
-| Kimi Code | `~/.kimi-code/config.toml`, `tui.toml` |
-| TRAE Work | `~/.trae-work/ai-switch-models.json`; Windows `%APPDATA%\\ai-switch\\trae-work\\`; TRAE app data dirs |
-
-
-
-## Desktop Packages (Windows / macOS / Linux)
-
-Prebuilt binaries are published on [GitHub Releases](https://github.com/kingkate2009-droid/ai-switch/releases).
-
-### Download
-
-| Platform | Asset name pattern |
-|---|---|
+| Platform | Asset pattern on Releases |
+|----------|---------------------------|
 | Windows x64 | `ai-switch-<ver>-windows-amd64.zip` |
 | macOS Intel | `ai-switch-<ver>-macos-amd64.tar.gz` |
 | macOS Apple Silicon | `ai-switch-<ver>-macos-arm64.tar.gz` |
 | Linux x64 | `ai-switch-<ver>-linux-amd64.tar.gz` |
 
-Extract, then run `ai-switch` (or `start.sh` / `start.bat`). UI opens at http://127.0.0.1:8787
-
-### Build locally
-
 ```bash
-# Current platform
+# Local package
 bash scripts/build_package.sh
-# Output: dist/packages/ai-switch-*-*.tar.gz (or .zip on Windows)
+# Multi-platform release via CI
+./release.sh v2.0.4
 ```
 
-### Release (CI builds all platforms)
+---
 
-```bash
-./release.sh v1.3.0
-# GitHub Actions builds Win/macOS/Linux and attaches packages to the release
-```
-
-## Configuration
+## Configuration & security
 
 | Item | Path |
-|---|---|
-| Manager data | `~/.ai-switch/data.json` (auto-migrated from `~/.openclaw-auto-manager`) |
-| Health cache | `~/.ai-switch/health_cache.json` |
-| Port | `8787` (env: `AI_SWITCH_PORT`) |
+|------|------|
+| Data | `~/.ai-switch/data.json` |
+| Usage | `~/.ai-switch/usage.json` |
+| Port | `8787` (`AI_SWITCH_PORT`) |
 
-## Security
+> **Keys live only under `~/.ai-switch/`.** Never commit that directory. Optional access token in Settings for LAN exposure.
 
-> **API Keys are stored in `~/.ai-switch/data.json`.**
-> This file is NOT inside the project directory.
-> Never commit it to version control.
+**Stack:** Python + Flask · vanilla JS · JSON storage · pluggable adapters · Apache 2.0
 
-## Tech Stack
-
-- **Backend**: Python + Flask
-- **Frontend**: Vanilla JS + CSS Variables theming
-- **Storage**: JSON file (no database needed)
-- **i18n**: Client-side locale switching
-- **Architecture**: Pluggable adapter pattern
-
-## Roadmap
-
-- [ ] Key search/filter
-- [ ] Batch operations (multi-select enable/disable/delete)
-- [ ] Webhook alerts on key failure
-- [ ] Key usage statistics
-- [ ] Export/import config
-- [ ] PWA support
-- [ ] Additional backend adapters
+---
 
 ## Links
 
-- [GitHub](https://github.com/kingkate2009-droid/ai-switch)
-- [Linux.do](https://linux.do/) — community & discussion
+- [Releases](https://github.com/kingkate2009-droid/ai-switch/releases)  
+- [Issues](https://github.com/kingkate2009-droid/ai-switch/issues)  
+- [Linux.do](https://linux.do/) — community discussion  
 
 ## License
 

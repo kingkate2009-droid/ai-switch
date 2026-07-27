@@ -1,181 +1,174 @@
+<p align="center">
+  <a href="README-zh_CN.md">简体中文</a> ·
+  <a href="README-zh_TW.md">繁體中文</a> ·
+  <a href="README.md">English</a>
+</p>
+
 <h1 align="center">AI Switch</h1>
 
 <p align="center">
-  <strong>统一 AI API Key 与后端管理平台</strong>
+  <strong>本地 AI Key 中枢 — 一把 Key 改完，多工具立刻能用</strong>
 </p>
 
 <p align="center">
-  <a href="#快速开始">快速开始</a> •
-  <a href="#功能特性">功能</a> •
-  <a href="#支持的供应商">供应商</a> •
-  <a href="#兼容的后端">后端</a> •
-  <a href="#配置说明">配置</a> •
+  <a href="https://github.com/kingkate2009-droid/ai-switch/releases"><img alt="release" src="https://img.shields.io/github/v/release/kingkate2009-droid/ai-switch?include_prereleases"></a>
+  <a href="https://github.com/kingkate2009-droid/ai-switch/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/kingkate2009-droid/ai-switch?style=social"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"></a>
+  <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-blue">
+</p>
+
+<p align="center">
+  <a href="#为什么需要">为什么需要</a> ·
+  <a href="#三分钟上手">三分钟上手</a> ·
+  <a href="#它到底解决什么">解决什么</a> ·
+  <a href="#文档">文档</a> ·
+  <a href="#兼容的后端">后端</a> ·
   <a href="#开源协议">协议</a>
 </p>
 
 ---
 
-统一管理 AI 供应商 API Key，自动同步到所有主流 AI 开发工具（OpenClaw、OpenCode、Claude Code、Codex CLI、Cline、Aider、Continue.dev、Hermes Agent、QwenCode、Kimi Code 等）。
+## 为什么需要
 
-## 功能特性
+中转站 / 多供应商 Key 一多，OpenClaw、OpenCode、Codex、Claude Code 配置就容易乱：
 
-- **多供应商管理** — 供应商列表 + Key 表格布局，一目了然
-- **26+ 内置供应商** — OpenAI、Anthropic、DeepSeek、Groq、Google Gemini、xAI、Together AI 等
-- **供应商专属健康检测** — 每种供应商用正确的 API 格式探测
-- **多后端自动同步** — 健康 Key 自动同步到所有支持的 AI 工具
-- **启用/禁用** — 开关 Key 控制后端同步
-- **批量导入** — 粘贴文本自动解析 URL + API Key + 供应商（Base64 自动解码）
-- **配置文件编辑器** — 查看和编辑后端配置文件，自动备份
-- **仪表盘视图** — 统计卡片、后端状态、快捷操作
-- **浅色/暗色主题** — 一键切换，保存偏好
-- **多语言** — English / 简体中文 / 繁體中文
-- **适配器架构** — 添加新后端只需创建一个 Python 文件
+| 痛点 | 自己改配置 | 用 AI Switch |
+|------|------------|--------------|
+| 换一把 Key | 改 5 个文件 | 改一处 → 推到已安装工具 |
+| 坏 Key | 工具挂、报错一堆 | 健康检测 → 从后端踢掉 |
+| 写错配置 | 静默覆盖 | **推送前 Preview** · 未安装不写 |
+| 新人上手 | 「Key 填哪？」 | **四步**：加 Key → 检测 → 推送 → 发一句测试 |
 
-## 快速开始
+**定位：** 本地 **Key 中枢**（管 Key、验健康、推配置），不是又一个聊天客户端。
+
+> 一把 Key 改完，多工具立刻能用；坏 Key 别把工具搞挂。
+
+---
+
+## 三分钟上手
+
+**推荐：** 从 [Releases](https://github.com/kingkate2009-droid/ai-switch/releases) 下对应平台包  
+（Windows / macOS Intel / Apple Silicon / Linux）→ 解压运行 → 打开 **http://127.0.0.1:8787**
+
+**源码：**
 
 ```bash
-# 克隆
 git clone https://github.com/kingkate2009-droid/ai-switch.git
 cd ai-switch
-
-# 安装依赖
 pip install -r requirements.txt
-
-# 启动
 python3 run.py
-# → 浏览器打开 http://127.0.0.1:8787
+# → http://127.0.0.1:8787
 ```
 
-图文四步：[docs/quickstart.md](docs/quickstart.md) · Codex 排障：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
-
-**要求**: Python 3.9+
-
-**兼容**: OpenClaw 2026.6.11+、OpenCode、Claude Code、Codex CLI、Cline 3.x+、Aider、Continue.dev、Hermes Agent、QwenCode、Kimi Code、TRAE Work
-
-### Docker
+**Docker：**
 
 ```bash
 docker compose up -d
-# → 浏览器打开 http://127.0.0.1:8787
 ```
 
-## 使用方法
+图文四步：[docs/quickstart.md](docs/quickstart.md)  
+Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 
-### 添加供应商
+---
 
-点击 **Vendors** → **+ Add Vendor** → 选择供应商（自动填入 URL）→ 输入名称 → 保存
+## 它到底解决什么
 
-### 添加 API Key
+日常只关心三件事：
 
-选中供应商 → 点击 **+ Add Key** → 输入名称和 Key → 保存
+1. **Key 集中管** — 供应商、标签、智能导入、MetaAPI 合并、去重  
+2. **知道谁还能用** — 分层探测（Chat + Codex Responses）、可读错误、连续成败自适应间隔  
+3. **同步别写错** — Preview · 上次同步摘要 · 未安装零写入 · 按后端切换活跃供应商  
 
-### 健康检测
+进阶能力（按需）：签到 URL、预算告警、加密 Profile、诊断包、下游路由、桌面安装包。
 
-- 单个检测：点击 Key 行中的 **Check**
-- 全部检测：点击 Dashboard 上的 **Check All Health**
-- 健康 Key → 自动同步到所有后端工具
+<details>
+<summary><strong>完整功能列表（展开）</strong></summary>
 
-### 批量导入
+- 多供应商 + Key 表，搜索 / 标签 / 批量启停删  
+- 26+ 内置供应商 + 自定义 OpenAI 兼容地址  
+- 定时健康监测，可选失败禁用 / 主备切换  
+- 同步 OpenClaw、OpenCode、Claude Code、Codex、Cline、Aider、Continue 等  
+- 批量 / 备份 / MetaAPI 导入可撤销  
+- 浅色/暗色、中英繁  
+- 适配器扩展：[贡献指南](docs/adapter-contribution.md)
 
-拖入或粘贴文本。支持多行、JSON 和 Base64 格式：
+</details>
 
-```
-openai https://api.openai.com/v1 sk-proj-xxxx...
-deepseek https://api.deepseek.com/v1 sk-xxxx...
-```
+---
 
-自动识别 URL → 匹配供应商 → 预览 → 一键导入
+## 文档
 
-## 支持的供应商
+| 文档 | 用途 |
+|------|------|
+| [3 分钟入门](docs/quickstart.md) | 第一次跑通 |
+| [Codex 连不上](docs/troubleshoot-codex.md) | Responses / 环境 / 模型 |
+| [后端说明](docs/backends.md) | 各引擎支持什么 |
+| [适配器贡献](docs/adapter-contribution.md) | 加一个后端 |
 
-| 检测类型 | 供应商 |
-|---|---|
-| `openai_chat` | OpenAI、DeepSeek、OpenRouter、Groq、Together AI、xAI、Perplexity、Mistral、Cohere、Moonshot、Z.AI、MiniMax、阿里云 (Qwen)、火山引擎、Fireworks、StepFun、DeepInfra、Cerebras、Novita、Venice、01.AI、Ollama、千帆、Xiaomi |
-| `anthropic` | Anthropic |
-| `gemini` | Google Gemini |
+有问题请直接 [开 Issue](https://github.com/kingkate2009-droid/ai-switch/issues)。已整理 FAQ：
 
-未知供应商默认使用 `openai_chat` 探测。
+- [#1 安装与启动](https://github.com/kingkate2009-droid/ai-switch/issues/1)
+- [#2 Codex 连不上](https://github.com/kingkate2009-droid/ai-switch/issues/2)
+- [#3 导入与合并](https://github.com/kingkate2009-droid/ai-switch/issues/3)
+
+---
 
 ## 兼容的后端
 
-| 后端 | 配置文件 |
-|---|---|
-| OpenClaw | `openclaw.json`、`auth-profiles.json`、`models.json` |
-| OpenCode | `auth.json`、`opencode.jsonc`、`tui.jsonc` |
-| Claude Code | `settings.json`、`~/.claude.json`、`keybindings.json` |
-| Codex CLI | `auth.json`、`config.toml` |
-| Cline | `secrets.json`、`config.json`、`globalState.json`、`cline_mcp_settings.json` |
-| Aider | `.aider.conf.yml`、`.aider.model.settings.yml`、`.aider.model.metadata.json` |
-| Continue.dev | `config.json`、`config.yaml`、`.continuerc.json` |
-| Hermes Agent | `config.yaml`、`.env` |
-| QwenCode | `settings.json`、`.env` |
-| Kimi Code | `~/.kimi-code/config.toml`、`tui.toml` |
-| TRAE Work | `~/.trae-work/ai-switch-models.json`；Windows `%APPDATA%\\ai-switch\\trae-work\\`；TRAE 应用数据目录 |
+| 后端 | 说明 |
+|------|------|
+| OpenClaw / OpenCode / Claude Code / Codex CLI | 主路径，含活跃切换与健康联动 |
+| Cline · Aider · Continue.dev | IDE / CLI 配置 |
+| Hermes · QwenCode · Kimi Code · TRAE Work | 详见 [backends.md](docs/backends.md) |
 
+后端页三态：**未安装** | **已停止（可同步）** | **运行中** — 未安装绝不会写配置。
 
+### 供应商探测类型
+
+| 类型 | 示例 |
+|------|------|
+| `openai_chat` | OpenAI、DeepSeek、OpenRouter、Groq、月之暗面、通义… |
+| `anthropic` | Anthropic 兼容 |
+| `gemini` | Google Gemini |
+| `openai_responses` | Codex 用的 `/v1/responses` |
+
+---
 
 ## 安装包（Windows / macOS / Linux）
 
-预编译安装包发布在 [GitHub Releases](https://github.com/kingkate2009-droid/ai-switch/releases)。
-
-| 平台 | 文件名模式 |
-|---|---|
+| 平台 | Releases 文件名模式 |
+|------|---------------------|
 | Windows x64 | `ai-switch-<ver>-windows-amd64.zip` |
 | macOS Intel | `ai-switch-<ver>-macos-amd64.tar.gz` |
 | macOS Apple Silicon | `ai-switch-<ver>-macos-arm64.tar.gz` |
 | Linux x64 | `ai-switch-<ver>-linux-amd64.tar.gz` |
 
-解压后运行 `ai-switch`（或 `start.sh` / `start.bat`），浏览器打开 http://127.0.0.1:8787
-
-### 本地打包
-
 ```bash
-bash scripts/build_package.sh
-# 产物：dist/packages/
+bash scripts/build_package.sh   # 本地打包
+./release.sh v2.0.4             # CI 多平台发版
 ```
 
-### 发版（自动打多平台包）
+---
 
-```bash
-./release.sh v1.3.0
-```
-
-## 配置说明
+## 配置与安全
 
 | 项目 | 路径 |
-|---|---|
-| 管理器数据 | `~/.ai-switch/data.json`（自动从 `~/.openclaw-auto-manager` 迁移） |
-| 健康缓存 | `~/.ai-switch/health_cache.json` |
-| 端口 | `8787`（环境变量：`AI_SWITCH_PORT`） |
+|------|------|
+| 主数据 | `~/.ai-switch/data.json` |
+| 用量 | `~/.ai-switch/usage.json` |
+| 端口 | `8787`（`AI_SWITCH_PORT`） |
 
-## 安全说明
+> **Key 只存在 `~/.ai-switch/`，不要提交进 Git。** 局域网暴露可在设置里开 access token。
 
-> **API Key 存储在 `~/.ai-switch/data.json` 中。**
-> 此文件不在项目目录内。
-> 请勿将其提交到版本控制。
+**技术栈：** Python + Flask · 原生前端 · JSON 存储 · 可插拔适配器 · Apache 2.0
 
-## 技术栈
+---
 
-- **后端**: Python + Flask
-- **前端**: 原生 JS + CSS Variables 主题
-- **存储**: JSON 文件（无需数据库）
-- **国际化**: 客户端语言切换
-- **架构**: 可插拔适配器模式
+## 友链 / 社区
 
-## 开发路线
-
-- [ ] Key 模糊搜索
-- [ ] 批量操作（多选启用/禁用/删除）
-- [ ] Webhook 告警
-- [ ] Key 使用统计
-- [ ] 导出/导入配置
-- [ ] PWA 支持
-- [ ] 更多后端适配器
-
-## 友链
-
-- [GitHub](https://github.com/kingkate2009-droid/ai-switch)
-- [Linux.do](https://linux.do/) — 社区讨论
+- [Releases](https://github.com/kingkate2009-droid/ai-switch/releases)  
+- [Issues](https://github.com/kingkate2009-droid/ai-switch/issues)  
+- [Linux.do](https://linux.do/)  
 
 ## 开源协议
 
