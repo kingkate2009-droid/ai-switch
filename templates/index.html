@@ -227,6 +227,9 @@
           <button class="btn" onclick="showDedupeModal()" title="{{ t('dedupe.hint') }}">
             <span data-i18n="dedupe.btn">{{ t('dedupe.btn') }}</span>
           </button>
+          <button class="btn" onclick="showMergeVendorsModal()" title="{{ t('mergeVendors.hint') }}">
+            <span data-i18n="mergeVendors.btn">{{ t('mergeVendors.btn') }}</span>
+          </button>
           <button class="btn" onclick="cleanEmptyVendors()" title="{{ t('emptyVendors.hint') }}">
             <span data-i18n="emptyVendors.btn">{{ t('emptyVendors.btn') }}</span>
           </button>
@@ -880,6 +883,32 @@
             </div>
             <p class="form-hint" data-i18n="settings.networkRetriesHint">{{ t('settings.networkRetriesHint') }}</p>
           </div>
+          <h4 style="margin:16px 0 8px;font-size:13px" data-i18n="settings.adaptiveTitle">{{ t('settings.adaptiveTitle') }}</h4>
+          <p class="form-hint" data-i18n="settings.adaptiveHint">{{ t('settings.adaptiveHint') }}</p>
+          <div class="settings-grid-2">
+            <div class="form-group">
+              <label data-i18n="settings.failStreak">{{ t('settings.failStreak') }}</label>
+              <input type="number" id="setHealthFailStreak" min="1" max="50" step="1" value="3" onchange="onSettingsDirty()" oninput="onSettingsDirty()">
+            </div>
+            <div class="form-group">
+              <label data-i18n="settings.failInterval">{{ t('settings.failInterval') }}</label>
+              <div class="input-group">
+                <input type="number" id="setHealthFailInterval" min="60" step="60" value="7200" onchange="onSettingsDirty()" oninput="onSettingsDirty()">
+                <span class="form-hint" style="margin:0;padding:8px" data-i18n="settings.seconds">{{ t('settings.seconds') }}</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label data-i18n="settings.okStreak">{{ t('settings.okStreak') }}</label>
+              <input type="number" id="setHealthOkStreak" min="1" max="50" step="1" value="3" onchange="onSettingsDirty()" oninput="onSettingsDirty()">
+            </div>
+            <div class="form-group">
+              <label data-i18n="settings.okInterval">{{ t('settings.okInterval') }}</label>
+              <div class="input-group">
+                <input type="number" id="setHealthOkInterval" min="60" step="60" value="3600" onchange="onSettingsDirty()" oninput="onSettingsDirty()">
+                <span class="form-hint" style="margin:0;padding:8px" data-i18n="settings.seconds">{{ t('settings.seconds') }}</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="settings-card">
           <h3 data-i18n="settings.accessTitle">{{ t('settings.accessTitle') }}</h3>
@@ -1282,6 +1311,24 @@
     <div class="modal-footer">
       <button class="btn" onclick="closeDedupeModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
       <button class="btn btn-primary" id="dedupeApplyBtn" onclick="applyDedupe()" disabled data-i18n="dedupe.apply">{{ t('dedupe.apply') }}</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="mergeVendorsModal" onclick="if(event.target===this)closeMergeVendorsModal()">
+  <div class="modal modal-wide" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 data-i18n="mergeVendors.title">{{ t('mergeVendors.title') }}</h3>
+      <button class="btn-close" onclick="closeMergeVendorsModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="form-hint" data-i18n="mergeVendors.desc">{{ t('mergeVendors.desc') }}</p>
+      <div id="mergeVendorsSummary" class="form-hint"></div>
+      <div id="mergeVendorsList" class="audit-log" style="margin-top:10px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMergeVendorsModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
+      <button class="btn btn-primary" id="mergeVendorsApplyBtn" onclick="applyMergeVendors()" disabled data-i18n="mergeVendors.apply">{{ t('mergeVendors.apply') }}</button>
     </div>
   </div>
 </div>
@@ -5816,6 +5863,10 @@ async function loadSettingsPage() {
     var nr = parseInt(s.health_network_retries, 10);
     $('setHealthNetworkRetries').value = (nr >= 1 && nr <= 10) ? nr : 3;
   }
+  if ($('setHealthFailStreak')) $('setHealthFailStreak').value = s.health_fail_streak || 3;
+  if ($('setHealthOkStreak')) $('setHealthOkStreak').value = s.health_ok_streak || 3;
+  if ($('setHealthFailInterval')) $('setHealthFailInterval').value = s.health_fail_interval_seconds || 7200;
+  if ($('setHealthOkInterval')) $('setHealthOkInterval').value = s.health_ok_interval_seconds || 3600;
   if ($('setBudgetDailyCost')) $('setBudgetDailyCost').value = s.budget_daily_cost || 0;
   if ($('setBudgetMonthlyCost')) $('setBudgetMonthlyCost').value = s.budget_monthly_cost || 0;
   if ($('setBudgetDailyTokens')) $('setBudgetDailyTokens').value = s.budget_daily_tokens || 0;
@@ -5885,6 +5936,10 @@ async function saveCurrentPolicy() {
     health_auto_failover: !!( $('setHealthAutoFailover') && $('setHealthAutoFailover').checked ),
     check_interval_seconds: parseInt(($('setHealthInterval') && $('setHealthInterval').value) || '300', 10) || 300,
     health_network_retries: Math.max(1, Math.min(10, parseInt(($('setHealthNetworkRetries') && $('setHealthNetworkRetries').value) || '3', 10) || 3)),
+    health_fail_streak: Math.max(1, parseInt(($('setHealthFailStreak') && $('setHealthFailStreak').value) || '3', 10) || 3),
+    health_ok_streak: Math.max(1, parseInt(($('setHealthOkStreak') && $('setHealthOkStreak').value) || '3', 10) || 3),
+    health_fail_interval_seconds: Math.max(60, parseInt(($('setHealthFailInterval') && $('setHealthFailInterval').value) || '7200', 10) || 7200),
+    health_ok_interval_seconds: Math.max(60, parseInt(($('setHealthOkInterval') && $('setHealthOkInterval').value) || '3600', 10) || 3600),
     budget_daily_cost: parseFloat(($('setBudgetDailyCost') && $('setBudgetDailyCost').value) || '0') || 0,
     budget_monthly_cost: parseFloat(($('setBudgetMonthlyCost') && $('setBudgetMonthlyCost').value) || '0') || 0,
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
@@ -5933,6 +5988,10 @@ async function saveSettingsPage() {
     health_auto_failover: !!( $('setHealthAutoFailover') && $('setHealthAutoFailover').checked ),
     check_interval_seconds: parseInt(($('setHealthInterval') && $('setHealthInterval').value) || '300', 10) || 300,
     health_network_retries: Math.max(1, Math.min(10, parseInt(($('setHealthNetworkRetries') && $('setHealthNetworkRetries').value) || '3', 10) || 3)),
+    health_fail_streak: Math.max(1, parseInt(($('setHealthFailStreak') && $('setHealthFailStreak').value) || '3', 10) || 3),
+    health_ok_streak: Math.max(1, parseInt(($('setHealthOkStreak') && $('setHealthOkStreak').value) || '3', 10) || 3),
+    health_fail_interval_seconds: Math.max(60, parseInt(($('setHealthFailInterval') && $('setHealthFailInterval').value) || '7200', 10) || 7200),
+    health_ok_interval_seconds: Math.max(60, parseInt(($('setHealthOkInterval') && $('setHealthOkInterval').value) || '3600', 10) || 3600),
     budget_daily_cost: parseFloat(($('setBudgetDailyCost') && $('setBudgetDailyCost').value) || '0') || 0,
     budget_monthly_cost: parseFloat(($('setBudgetMonthlyCost') && $('setBudgetMonthlyCost').value) || '0') || 0,
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
@@ -6890,6 +6949,70 @@ async function applyDedupe() {
   }
   showToast((_('dedupe.done') || 'Removed {n} duplicate keys').replace('{n}', res.removed || 0), 'success');
   closeDedupeModal();
+  await loadVendors();
+}
+
+async function showMergeVendorsModal() {
+  $('mergeVendorsModal').classList.add('open');
+  $('mergeVendorsList').innerHTML = '<div class="todo-empty">' + esc(_('common.loading') || 'Loading...') + '</div>';
+  $('mergeVendorsApplyBtn').disabled = true;
+  var res = await api('/api/vendors/merge-urls');
+  if (res.error) {
+    $('mergeVendorsList').innerHTML = '<div class="todo-empty">' + esc(res.error) + '</div>';
+    return;
+  }
+  var n = res.would_merge_vendors || 0;
+  $('mergeVendorsSummary').textContent = (_('mergeVendors.summary') || '{groups} URL groups · merge {n} vendors')
+    .replace('{groups}', res.groups || 0)
+    .replace('{n}', n);
+  var items = res.items || [];
+  if (!items.length) {
+    $('mergeVendorsList').innerHTML = '<div class="todo-empty">' + esc(_('mergeVendors.none') || 'No duplicate vendor URLs') + '</div>';
+    $('mergeVendorsApplyBtn').disabled = true;
+    return;
+  }
+  var html = '';
+  items.forEach(function(g) {
+    var keep = g.keep || {};
+    var merge = g.merge || [];
+    html += '<div style="margin:10px 0 6px;font-weight:600">' + esc(keep.name || keep.id || '') +
+      ' <span class="form-hint mono">← keep</span></div>';
+    html += '<div class="form-hint mono" style="margin-bottom:4px">' + esc((g.urls || []).join(' · ')) + '</div>';
+    html += '<table class="audit-table"><thead><tr>' +
+      '<th>' + esc(_('vendorModal.name') || 'Vendor') + '</th>' +
+      '<th>URL</th>' +
+      '<th>' + esc(_('dashboard.keys') || 'Keys') + '</th>' +
+      '<th></th></tr></thead><tbody>';
+    html += '<tr><td>' + esc(keep.name || '') + '</td><td class="mono">' + esc(keep.api_url || '') +
+      '</td><td>' + (keep.key_count || 0) + '</td><td><span class="badge-status ok">keep</span></td></tr>';
+    merge.forEach(function(m) {
+      html += '<tr><td>' + esc(m.name || '') + '</td><td class="mono">' + esc(m.api_url || '') +
+        '</td><td>' + (m.key_count || 0) + '</td><td><span class="badge-status fail">merge</span></td></tr>';
+    });
+    html += '</tbody></table>';
+  });
+  $('mergeVendorsList').innerHTML = html;
+  $('mergeVendorsApplyBtn').disabled = false;
+}
+
+function closeMergeVendorsModal() {
+  var m = $('mergeVendorsModal');
+  if (m) m.classList.remove('open');
+}
+
+async function applyMergeVendors() {
+  if (!confirm(_('mergeVendors.confirm') || 'Merge vendors with the same API URL? Keys will be moved into the kept vendor.')) return;
+  $('mergeVendorsApplyBtn').disabled = true;
+  var res = await api('/api/vendors/merge-urls', { method: 'POST', body: '{}' });
+  if (res.error) {
+    showToast(res.error, 'error');
+    $('mergeVendorsApplyBtn').disabled = false;
+    return;
+  }
+  showToast((_('mergeVendors.done') || 'Merged {n} vendors · moved {k} keys')
+    .replace('{n}', res.merged_vendors || 0)
+    .replace('{k}', res.keys_moved || 0), 'success');
+  closeMergeVendorsModal();
   await loadVendors();
 }
 

@@ -158,7 +158,7 @@ Status on the Backends page: **Not installed** · **Stopped (syncable)** · **Ru
 # Local package
 bash scripts/build_package.sh
 # Multi-platform release via CI
-./release.sh v2.0.4
+./release.sh v2.0.5
 ```
 
 ---

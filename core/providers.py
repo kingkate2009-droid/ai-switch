@@ -1,3 +1,4 @@
+import random
 import re
 import warnings
 
@@ -7,6 +8,24 @@ import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+
+# Short, low-cost probe texts — pick randomly so checks are not identical every run
+_PROBE_PROMPTS = (
+    "hi",
+    "hello",
+    "ping",
+    "ok?",
+    "1+1",
+    "test",
+    "hey",
+    "status",
+    "yo",
+    "check",
+)
+
+
+def probe_prompt() -> str:
+    return random.choice(_PROBE_PROMPTS)
 
 
 def _new_session() -> requests.Session:
@@ -258,7 +277,7 @@ def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[lis
         chat_url = base + "/v1/chat/completions"
 
     base_payload = {
-        "messages": [{"role": "user", "content": "hi"}],
+        "messages": [{"role": "user", "content": probe_prompt()}],
     }
     candidates = models_to_try if models_to_try is not None else _MODEL_CANDIDATES
     # Filter out empty strings if we have other candidates
@@ -269,6 +288,7 @@ def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[lis
         any_403 = False
         last_403_body = None
         last_model_name = None
+        last_model_err = ""
         for model in candidates:
             payload = dict(base_payload)
             if model:
@@ -294,6 +314,7 @@ def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[lis
             if body.lstrip().startswith("<") and "html" in body[:100].lower():
                 continue
             if _is_model_error(body):
+                last_model_err = f"[{model or '(none)'}] {body[:220]}"
                 continue
             if r.status_code == 401:
                 return False, f"Auth failed (HTTP 401)"
@@ -311,8 +332,11 @@ def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[lis
             msg = last_403_body or "Access denied"
             return False, f"Model '{last_model_name}': {msg}"
         if all_model_errors:
-            return False, "No compatible model found"
-        return False, "No compatible model found"
+            # Prefer last concrete channel/model error over generic phrase
+            if last_model_err:
+                return False, last_model_err
+            return False, "No compatible model found (key group may have no channel)"
+        return False, last_model_err or "No compatible model found"
         return False, "Connection refused"
     except requests.exceptions.Timeout:
         return False, "Timeout"
@@ -361,7 +385,7 @@ def _probe_responses(url: str, headers: dict, models_to_try: Optional[list[str]]
         last_err = ""
         for model in candidates:
             payload = {
-                "input": "hi",
+                "input": probe_prompt(),
                 "stream": True,
             }
             if model:
@@ -501,7 +525,7 @@ def probe_anthropic(url: str, api_key: str, models_to_try: Optional[list[str]] =
             r = _new_session().post(chat_url, json={
                 "model": model,
                 "max_tokens": 10,
-                "messages": [{"role": "user", "content": "hi"}],
+                "messages": [{"role": "user", "content": probe_prompt()}],
             }, headers=headers, timeout=PROBE_TIMEOUT)
             last_code = r.status_code
             last_body = r.text[:300]
@@ -566,7 +590,7 @@ def probe_gemini(url: str, api_key: str, models_to_try: Optional[list[str]] = No
         for model in candidates:
             chat_url = base + f"/models/{model}:generateContent?key={api_key}"
             r = _new_session().post(chat_url, json={
-                "contents": [{"parts": [{"text": "hi"}]}],
+                "contents": [{"parts": [{"text": probe_prompt()}]}],
             }, timeout=PROBE_TIMEOUT)
             last_code = r.status_code
             last_body = r.text[:300]

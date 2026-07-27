@@ -155,6 +155,11 @@ def _url_bases(api_url: str) -> set[str]:
 
 def _find_vendor_by_url(api_url: str):
     """Match vendor by normalized api_url only (not provider id)."""
+    from core.data import find_vendor_by_url
+    hit = find_vendor_by_url(api_url)
+    if hit:
+        return hit
+    # legacy ±/v1 set intersection for odd path variants
     from core.data import get_vendors
     want_bases = _url_bases(api_url)
     if not want_bases:
@@ -362,7 +367,10 @@ def import_metapi_backup(payload: dict, *, include_disabled: bool = True) -> dic
                 endpoint_type=endpoint_type,
                 checkin_url=checkin,
             )
-            added_v += 1
+            if existing.get("_existing"):
+                merged_v += 1
+            else:
+                added_v += 1
         else:
             merged_v += 1
             patch: dict[str, Any] = {}

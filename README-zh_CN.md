@@ -145,7 +145,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 
 ```bash
 bash scripts/build_package.sh   # 本地打包
-./release.sh v2.0.4             # CI 多平台发版
+./release.sh v2.0.5             # CI 多平台发版
 ```
 
 ---

@@ -119,9 +119,12 @@ def _read_all() -> list[dict]:
 
 
 def summarize_results(results: list[dict]) -> dict[str, Any]:
-    ok = fail = unknown = 0
+    ok = fail = unknown = skipped = 0
     failures = []
     for r in results or []:
+        if r.get("skipped"):
+            skipped += 1
+            continue
         h = r.get("healthy")
         if h is True:
             ok += 1
@@ -136,10 +139,13 @@ def summarize_results(results: list[dict]) -> dict[str, Any]:
                 })
         else:
             unknown += 1
+    probed = ok + fail + unknown
     return {
-        "total": len(results or []),
+        "total": probed + skipped,
+        "probed": probed,
         "ok": ok,
         "fail": fail,
         "unknown": unknown,
+        "skipped": skipped,
         "failures": failures,
     }

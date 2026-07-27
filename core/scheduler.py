@@ -45,8 +45,18 @@ def _set_next_run(seconds: float) -> None:
     ).isoformat()
 
 
-def run_health_check(*, source: str = "manual", include_disabled: bool = True) -> dict:
-    """Run a full health check once, record history. Thread-safe (skips if busy)."""
+def run_health_check(
+    *,
+    source: str = "manual",
+    include_disabled: bool = True,
+    only_due: bool = False,
+    force: bool = False,
+) -> dict:
+    """Run a health check once, record history. Thread-safe (skips if busy).
+
+    only_due: skip keys not yet due (adaptive interval). Scheduled runs use this.
+    force: ignore due schedule (manual full sweep).
+    """
     if not _run_lock.acquire(blocking=False):
         return {
             "ok": False,
@@ -62,7 +72,14 @@ def run_health_check(*, source: str = "manual", include_disabled: bool = True) -
         from core.health_checker import check_all_keys
         from core.health_history import append_run, summarize_results
 
-        results = check_all_keys(include_disabled=include_disabled)
+        # manual default = force full; scheduled = only_due
+        if source == "manual" and not only_due:
+            force = True
+        results = check_all_keys(
+            include_disabled=include_disabled,
+            only_due=only_due,
+            force=force,
+        )
         summary = summarize_results(results)
         elapsed_ms = int((_epoch() - started) * 1000)
         # compact per-key for history (no secrets / large model lists)
@@ -74,6 +91,10 @@ def run_health_check(*, source: str = "manual", include_disabled: bool = True) -
                 "healthy": r.get("healthy"),
                 "latency_ms": r.get("latency_ms"),
                 "error": (r.get("error") or "")[:200] if r.get("healthy") is False else None,
+                "skipped": bool(r.get("skipped")),
+                "ok_streak": r.get("ok_streak"),
+                "fail_streak": r.get("fail_streak"),
+                "schedule_mode": r.get("schedule_mode"),
             })
         rec = append_run({
             "source": source,
@@ -83,6 +104,8 @@ def run_health_check(*, source: str = "manual", include_disabled: bool = True) -
             "ok": summary["ok"],
             "fail": summary["fail"],
             "unknown": summary["unknown"],
+            "skipped": summary.get("skipped", 0),
+            "probed": summary.get("probed", summary["total"]),
             "total": summary["total"],
             "failures": summary["failures"],
             "results": compact,
@@ -92,6 +115,8 @@ def run_health_check(*, source: str = "manual", include_disabled: bool = True) -
             "ok": summary["ok"],
             "fail": summary["fail"],
             "unknown": summary["unknown"],
+            "skipped": summary.get("skipped", 0),
+            "probed": summary.get("probed", summary["total"]),
             "total": summary["total"],
             "duration_ms": elapsed_ms,
             "source": source,
@@ -147,10 +172,11 @@ def _loop() -> None:
                 _stop.wait(2)
                 continue
 
-            log.info("Scheduled health check starting (interval=%ss)", interval)
-            run_health_check(source="scheduled", include_disabled=True)
+            log.info("Scheduled health check starting (base interval=%ss, due-only)", interval)
+            # only_due: keys with consecutive ok/fail streaks use longer next_check_at
+            run_health_check(source="scheduled", include_disabled=True, only_due=True)
             _set_next_run(interval)
-            # wait interval, interruptible
+            # wait base interval, interruptible; per-key adaptive skips inside check_all_keys
             _stop.wait(interval)
         except Exception as e:
             log.warning("Scheduler loop error: %s", e)

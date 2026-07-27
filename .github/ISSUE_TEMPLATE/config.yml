@@ -1,0 +1,17 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 3 分钟快速入门
+    url: https://github.com/kingkate2009-droid/ai-switch/blob/main/docs/quickstart.md
+    about: 第一次安装与四步闭环
+  - name: Codex 排障
+    url: https://github.com/kingkate2009-droid/ai-switch/blob/main/docs/troubleshoot-codex.md
+    about: Responses / 模型 / 同步问题
+  - name: FAQ · 安装
+    url: https://github.com/kingkate2009-droid/ai-switch/issues/1
+    about: 启动、端口、数据目录
+  - name: FAQ · Codex
+    url: https://github.com/kingkate2009-droid/ai-switch/issues/2
+    about: 连不上、模型不全
+  - name: FAQ · 导入合并
+    url: https://github.com/kingkate2009-droid/ai-switch/issues/3
+    about: 智能导入、URL 合并

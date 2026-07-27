@@ -1,7 +1,8 @@
 import json
+import random
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from core.data import (
     get_enabled_models,
@@ -18,6 +19,9 @@ from core.providers import (
     probe_single_model,
     scan_models,
 )
+
+# Max models to try after primary check_model (performance cap)
+_MAX_FALLBACK_MODELS = 12
 from backends import reconcile_all, on_key_updated, on_key_removed
 
 DATA_DIR = Path.home() / ".ai-switch"
@@ -36,6 +40,86 @@ def _network_retry_attempts() -> int:
     except Exception:
         n = _DEFAULT_NETWORK_RETRIES
     return max(1, min(10, n))
+
+
+def _adaptive_cfg() -> dict:
+    """Consecutive-streak adaptive interval settings."""
+    s = get_settings() or {}
+    def _i(key, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(s.get(key, default))))
+        except Exception:
+            return default
+    base = _i("check_interval_seconds", 300, 60, 86400 * 7)
+    return {
+        "base": base,
+        "fail_streak": _i("health_fail_streak", 3, 1, 50),
+        "ok_streak": _i("health_ok_streak", 3, 1, 50),
+        "fail_interval": _i("health_fail_interval_seconds", 7200, 60, 86400 * 7),
+        "ok_interval": _i("health_ok_interval_seconds", 3600, 60, 86400 * 7),
+    }
+
+
+def _parse_iso(ts: str):
+    if not ts:
+        return None
+    try:
+        t = str(ts).strip()
+        if t.endswith("Z"):
+            t = t[:-1] + "+00:00"
+        return datetime.fromisoformat(t)
+    except Exception:
+        return None
+
+
+def key_is_due(cache_entry: dict, *, now: datetime = None) -> bool:
+    """Whether this key should be probed on a scheduled run (adaptive due time)."""
+    now = now or datetime.now(timezone.utc)
+    if not cache_entry:
+        return True
+    due = _parse_iso(cache_entry.get("next_check_at") or "")
+    if due is None:
+        return True
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=timezone.utc)
+    return now >= due
+
+
+def _apply_streak_and_schedule(result: dict, prev=None) -> dict:
+    """Update consecutive ok/fail streak and next_check_at on a health result."""
+    cfg = _adaptive_cfg()
+    prev = prev or {}
+    healthy = result.get("healthy") is True
+    if healthy:
+        ok = int(prev.get("ok_streak") or 0) + 1
+        fail = 0
+    else:
+        # unknown/None treated as fail for scheduling (still probed)
+        fail = int(prev.get("fail_streak") or 0) + 1
+        ok = 0
+    result["ok_streak"] = ok
+    result["fail_streak"] = fail
+
+    # Switch absolute interval when streak thresholds hit (not max with base)
+    if fail >= cfg["fail_streak"]:
+        interval = cfg["fail_interval"]
+        mode = "fail_slow"
+    elif ok >= cfg["ok_streak"]:
+        interval = cfg["ok_interval"]
+        mode = "ok_slow"
+    else:
+        interval = cfg["base"]
+        mode = "base"
+    result["check_interval_seconds"] = interval
+    result["schedule_mode"] = mode
+    try:
+        checked = _parse_iso(result.get("checked_at") or "") or datetime.now(timezone.utc)
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        result["next_check_at"] = (checked + timedelta(seconds=interval)).isoformat()
+    except Exception:
+        result["next_check_at"] = None
+    return result
 
 
 def _is_network_error(msg: str) -> bool:
@@ -115,11 +199,17 @@ def classify_health_error(msg: str) -> dict:
             "label": "Network error",
             "suggestion": "Check internet, DNS, firewall, and proxy settings.",
         }
-    if any(x in s for x in ("model", "not found", "compatible", "unsupported", "does not exist", "no such model")):
+    if any(x in s for x in (
+        "model", "not found", "compatible", "unsupported", "does not exist", "no such model",
+        "no available channel", "under group", "channel for model",
+    )):
         return {
             "code": "model",
             "label": "Model / channel issue",
-            "suggestion": "Pick another check model or rescan models for this key.",
+            "suggestion": (
+                "This key's group has no channel for the probed models. "
+                "Set check_model to a model allowed for this key group, or use a key with model access."
+            ),
         }
     return {
         "code": "other",
@@ -269,8 +359,120 @@ def _gptish_models(key_entry: dict) -> list[str]:
     return out
 
 
+def _merge_model_ids(*lists) -> list[str]:
+    out, seen = [], set()
+    for lst in lists:
+        for m in lst or []:
+            mid = m.get("id") if isinstance(m, dict) else str(m or "")
+            mid = (mid or "").strip()
+            if mid and mid not in seen:
+                seen.add(mid)
+                out.append(mid)
+    return out
+
+
+def _sibling_model_ids(vendor: dict, key_id: str) -> list[str]:
+    borrowed, seen = [], set()
+    for sk in vendor.get("keys") or []:
+        if str(sk.get("id")) == str(key_id):
+            continue
+        for mid in list_model_ids(sk):
+            if mid and mid not in seen:
+                seen.add(mid)
+                borrowed.append(mid)
+        dm = str(sk.get("default_model") or "").strip()
+        if dm and dm not in seen:
+            seen.add(dm)
+            borrowed.insert(0, dm)
+    return borrowed
+
+
+def _build_probe_order(
+    *,
+    check_model: str,
+    inventory: list[str],
+    default_model: str = "",
+    prefer_gptish: bool = False,
+) -> list[str]:
+    """Primary check_model first; remaining inventory shuffled (capped)."""
+    pool = list(inventory or [])
+    if prefer_gptish:
+        gpt = [m for m in pool if m.lower().startswith(("gpt-", "o1", "o3", "o4")) or "codex" in m.lower()]
+        if gpt:
+            pool = gpt
+    primary = (check_model or "").strip()
+    dm = (default_model or "").strip()
+    ordered = []
+    seen = set()
+    if primary:
+        ordered.append(primary)
+        seen.add(primary)
+    rest = [m for m in pool if m and m not in seen]
+    # prefer default next (before shuffle) so common path is stable-ish
+    if dm and dm in rest:
+        rest.remove(dm)
+        rest.insert(0, dm)
+    # randomize fallbacks so we don't always hit the same dead models
+    head = rest[:1]  # keep default sticky if present
+    tail = rest[1:]
+    random.shuffle(tail)
+    rest = head + tail
+    for m in rest:
+        if len(ordered) >= 1 + _MAX_FALLBACK_MODELS:
+            break
+        if m not in seen:
+            seen.add(m)
+            ordered.append(m)
+    return ordered
+
+
+def _probe_models_in_order(
+    check_type: str,
+    api_url: str,
+    api_key: str,
+    models: list[str],
+) -> tuple:
+    """Try models in order. Returns (healthy, msg, used_model, tried).
+
+    Auth/network hard failures stop early; model/channel errors continue.
+    """
+    if not models:
+        healthy, msg = _probe_with_retry(check_type, api_url, api_key, None)
+        return healthy, msg, None, []
+    tried = []
+    last_err = ""
+    for mid in models:
+        healthy, msg = _probe_model_with_retry(check_type, api_url, api_key, mid)
+        tried.append(mid)
+        if healthy:
+            if msg and not str(msg).startswith("["):
+                msg = f"[{mid}] {msg}"
+            elif not msg:
+                msg = f"[{mid}] ok"
+            return True, msg, mid, tried
+        last_err = msg or last_err
+        # hard stop: auth / blocked / quota — not a model pick issue
+        low = (msg or "").lower()
+        if any(x in low for x in (
+            "auth failed", "http 401", "unauthorized", "invalid api",
+            "access blocked", "quota exhausted", "billing", "payment required",
+            "http 402",
+        )):
+            return False, msg, mid, tried
+        # continue on model/channel/timeout for next candidate
+    detail = last_err or "No compatible model found"
+    if len(tried) > 1:
+        detail = f"{detail} (tried {len(tried)} models)"
+    return False, detail, None, tried
+
+
 def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True) -> dict:
-    """Key-level health check (list detection). Does not disable individual models."""
+    """Key-level health check.
+
+    - Always refresh model inventory when scan_models_flag (every check).
+    - Probe primary check_model first; on failure randomly try other models.
+    - Key is unhealthy only when no candidate model works (or hard auth/network fail).
+    """
     vendor = get_vendor(vendor_id)
     if not vendor:
         return {"key_id": key_id, "healthy": False, "latency_ms": 0, "error": "Vendor not found"}
@@ -287,97 +489,103 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
     api_key = key_entry["api_key"]
     check_type = _resolve_check_type(vendor)
     wants_responses = check_type == "openai_responses" or _vendor_wants_responses(vendor, key_entry)
-
-    # Primary check model (user-selected). If set, key-level / scheduled checks
-    # probe this model only. If empty, keep legacy multi-model / scan behavior.
     check_model = str(key_entry.get("check_model") or "").strip()
-    key_models = key_entry.get("models", [])
-    if check_model:
-        models_to_try = [check_model]
-    elif key_models:
-        # Legacy: try any known model (full inventory), not only enabled ones
-        models_to_try = [m["id"] if isinstance(m, dict) else m for m in key_models]
-        # Prefer default_model first when present in inventory
-        dm = str(key_entry.get("default_model") or "").strip()
-        if dm and dm in models_to_try:
-            models_to_try = [dm] + [m for m in models_to_try if m != dm]
-    else:
-        models_to_try = None
+    default_model = str(key_entry.get("default_model") or "").strip()
+    disabled = set(key_entry.get("disabled_models") or [])
 
     start = time.time()
-    layers = {}
-    if check_type == "openai_responses":
-        # Primary path is Responses (Codex)
-        gpt_models = _gptish_models(key_entry)
-        resp_models = [check_model] if check_model else (gpt_models or models_to_try)
-        healthy, error_msg = _probe_with_retry("openai_responses", api_url, api_key, resp_models)
-        layers["responses"] = {"healthy": healthy, "message": error_msg}
-        check_layer = "responses"
-    elif check_model:
-        healthy, error_msg = _probe_model_with_retry(check_type, api_url, api_key, check_model)
-        if healthy and error_msg and not str(error_msg).startswith("["):
-            error_msg = f"[{check_model}] {error_msg}"
-        elif healthy and not error_msg:
-            error_msg = f"[{check_model}] ok"
-        layers["connectivity"] = {"healthy": healthy, "message": error_msg}
-        check_layer = "model"
-        # Optional Responses secondary for Codex-suitable keys
-        if healthy and wants_responses:
-            gpt_models = _gptish_models(key_entry) or ([check_model] if check_model else None)
-            rh, rm = _probe_with_retry("openai_responses", api_url, api_key, gpt_models)
-            layers["responses"] = {"healthy": rh, "message": rm}
-            if not rh:
-                # keep connectivity success but surface responses failure as overall fail for Codex path
-                healthy = False
-                error_msg = f"Chat OK; Responses failed: {rm}"
-                check_layer = "responses"
-    else:
-        healthy, error_msg = _probe_with_retry(check_type, api_url, api_key, models_to_try)
-        layers["connectivity"] = {"healthy": healthy, "message": error_msg}
-        check_layer = "connectivity"
-        if healthy and wants_responses:
-            gpt_models = _gptish_models(key_entry) or models_to_try
-            rh, rm = _probe_with_retry("openai_responses", api_url, api_key, gpt_models)
-            layers["responses"] = {"healthy": rh, "message": rm}
-            if not rh:
-                healthy = False
-                error_msg = f"Chat OK; Responses failed: {rm}"
-                check_layer = "responses"
-    latency_ms = int((time.time() - start) * 1000)
 
-    models = []
-    default_model = key_entry.get("default_model", "")
-    # Still allow inventory scan when healthy (does not change check_model)
-    # Model list endpoints are chat-compatible; use openai_chat for scan when responses.
+    # 1) Always refresh model list (not only when healthy)
     scan_type = "openai_chat" if check_type == "openai_responses" else check_type
-    if healthy and scan_models_flag:
-        models = scan_models(scan_type, api_url, api_key)
-        # Merge scan results with existing inventory so we never wipe known models
-        if models:
-            existing = list_model_ids(key_entry)
-            merged, seen = [], set()
-            for mid in list(models) + existing:
-                if mid and mid not in seen:
-                    seen.add(mid)
-                    merged.append(mid)
-            models = merged
-        if not default_model and models:
-            default_model = pick_default_model(models)
-        elif default_model and models and default_model not in models:
-            # keep previous default if still in inventory after merge
-            pass
+    scanned = []
+    if scan_models_flag:
+        try:
+            scanned = scan_models(scan_type, api_url, api_key) or []
+        except Exception:
+            scanned = []
 
-    cache_key = f"{vendor_id}:{key_id}"
-    # When healthy and we scanned models, persist inventory immediately so
-    # models modal / vendor UI don't need a second round-trip to see them.
-    if healthy and models:
+    existing = list_model_ids(key_entry)
+    siblings = _sibling_model_ids(vendor, key_id)
+    models = _merge_model_ids(scanned, existing, siblings)
+    # drop disabled from probe pool but keep full inventory for storage
+    probe_pool = [m for m in models if m not in disabled] or list(models)
+
+    if not default_model and models:
+        default_model = pick_default_model(models)
+
+    # Persist inventory every check when we learned anything new
+    if models and (scanned or models != existing):
         try:
             updates = {"models": models}
             if default_model:
                 updates["default_model"] = default_model
             update_key_data(vendor_id, key_id, **updates)
+            # refresh local view
+            key_entry = get_key_entry_fresh(vendor_id, key_id) or key_entry
         except Exception:
             pass
+
+    # 2) Build probe order: primary check_model → shuffled fallbacks
+    layers = {}
+    used_model = None
+    tried_models = []
+
+    if check_type == "openai_responses":
+        order = _build_probe_order(
+            check_model=check_model,
+            inventory=probe_pool or _gptish_models(key_entry),
+            default_model=default_model,
+            prefer_gptish=True,
+        )
+        healthy, error_msg, used_model, tried_models = _probe_models_in_order(
+            "openai_responses", api_url, api_key, order,
+        )
+        layers["responses"] = {"healthy": healthy, "message": error_msg, "tried": tried_models}
+        check_layer = "responses"
+    else:
+        order = _build_probe_order(
+            check_model=check_model,
+            inventory=probe_pool,
+            default_model=default_model,
+            prefer_gptish=False,
+        )
+        healthy, error_msg, used_model, tried_models = _probe_models_in_order(
+            check_type, api_url, api_key, order,
+        )
+        layers["connectivity"] = {
+            "healthy": healthy,
+            "message": error_msg,
+            "tried": tried_models,
+            "primary": check_model or None,
+            "fallback_used": bool(check_model and used_model and used_model != check_model),
+        }
+        check_layer = "model" if check_model else "connectivity"
+
+        # Optional Responses secondary for Codex-suitable keys
+        if healthy and wants_responses:
+            gpt_pool = [m for m in (probe_pool or []) if m.lower().startswith(("gpt-", "o1", "o3", "o4")) or "codex" in m.lower()]
+            resp_order = _build_probe_order(
+                check_model=check_model if (check_model and check_model in (gpt_pool or [check_model])) else (used_model or ""),
+                inventory=gpt_pool or probe_pool,
+                default_model=default_model,
+                prefer_gptish=True,
+            )
+            rh, rm, r_used, r_tried = _probe_models_in_order(
+                "openai_responses", api_url, api_key, resp_order,
+            )
+            layers["responses"] = {"healthy": rh, "message": rm, "tried": r_tried}
+            if not rh:
+                healthy = False
+                error_msg = f"Chat OK; Responses failed: {rm}"
+                check_layer = "responses"
+            elif r_used:
+                used_model = r_used
+
+    latency_ms = int((time.time() - start) * 1000)
+    cache_key = f"{vendor_id}:{key_id}"
+
+    # If primary check_model failed but a fallback worked, note it (do not clear user check_model)
+    primary_failed = bool(check_model and used_model and used_model != check_model and healthy)
 
     result = {
         "key_id": key_id,
@@ -390,7 +598,11 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
         "models": models,
         "default_model": default_model,
         "check_model": check_model,
-        "used_check_model": bool(check_model),
+        "used_model": used_model,
+        "tried_models": tried_models,
+        "used_check_model": bool(check_model and used_model == check_model),
+        "primary_check_failed": primary_failed,
+        "models_refreshed": bool(scanned) if scan_models_flag else False,
         "check_layer": check_layer,
         "check_layers": layers,
         "wants_responses": wants_responses,
@@ -399,10 +611,22 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
 
     with _lock:
         cache = _load_cache()
+        prev = cache.get(cache_key) or {}
+        _apply_streak_and_schedule(result, prev)
         cache[cache_key] = result
         _save_cache(cache)
 
     return result
+
+
+def get_key_entry_fresh(vendor_id: str, key_id: str):
+    v = get_vendor(vendor_id)
+    if not v:
+        return None
+    for k in v.get("keys") or []:
+        if str(k.get("id")) == str(key_id):
+            return k
+    return None
 
 
 def check_key_models(vendor_id: str, key_id: str) -> dict:
@@ -632,14 +856,40 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
             pass
 
 
-def check_all_keys(include_disabled: bool = True) -> list[dict]:
-    """Probe every vendor key. Healthy keys are auto-enabled and synced to backends."""
+def check_all_keys(
+    include_disabled: bool = True,
+    *,
+    only_due: bool = False,
+    force: bool = False,
+) -> list[dict]:
+    """Probe vendor keys. Healthy keys are auto-enabled and synced to backends.
+
+    only_due: when True (scheduled runs), skip keys whose next_check_at is in the future
+              (adaptive interval after consecutive ok/fail streaks).
+    force: ignore due schedule (manual full check).
+    """
     results = []
+    skipped = 0
+    now = datetime.now(timezone.utc)
+    with _lock:
+        cache_snap = dict(_load_cache())
 
     for v in get_vendors():
         for k in v.get("keys", []):
             if not include_disabled and k.get("enabled") is False:
                 continue
+            ck = f"{v['id']}:{k['id']}"
+            if only_due and not force:
+                prev = cache_snap.get(ck) or {}
+                if not key_is_due(prev, now=now):
+                    skipped += 1
+                    # surface last known status so UI/history still see the key
+                    if prev:
+                        row = dict(prev)
+                        row["skipped"] = True
+                        row["skip_reason"] = "not_due"
+                        results.append(row)
+                    continue
             health = check_key_health(v["id"], k["id"])
             results.append(health)
             # Always apply: healthy → enable + push; unhealthy → strip backends
@@ -651,6 +901,14 @@ def check_all_keys(include_disabled: bool = True) -> list[dict]:
         rebuild_all_downstream_routes()
     except Exception:
         pass
+    if skipped:
+        try:
+            import logging
+            logging.getLogger(__name__).info(
+                "Health check skipped %s key(s) not yet due (adaptive interval)", skipped,
+            )
+        except Exception:
+            pass
     return results
 
 

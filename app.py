@@ -675,6 +675,25 @@ def api_empty_vendors_delete():
     return jsonify(result)
 
 
+@app.route("/api/vendors/merge-urls", methods=["GET"])
+def api_vendors_merge_urls_preview():
+    from core.data import merge_duplicate_vendors_by_url
+    return jsonify(merge_duplicate_vendors_by_url(dry_run=True))
+
+
+@app.route("/api/vendors/merge-urls", methods=["POST"])
+def api_vendors_merge_urls_apply():
+    from core.data import merge_duplicate_vendors_by_url
+    result = merge_duplicate_vendors_by_url(dry_run=False)
+    log_event(
+        "vendors.merge_urls",
+        groups=result.get("groups", 0),
+        merged=result.get("merged_vendors", 0),
+        keys_moved=result.get("keys_moved", 0),
+    )
+    return jsonify(result)
+
+
 # ── Keys ───────────────────────────────────────────────────
 
 @app.route("/api/vendors/<vendor_id>/keys", methods=["GET"])
@@ -1280,12 +1299,10 @@ def _batch_import_apply(entries, created, errors):
                 continue
 
             vendor = None
-            # Match only by URL (unique). Never reuse a different URL with same provider name.
-            for v in get_vendors():
-                existing_url = (v.get("api_url") or "").rstrip("/")
-                if existing_url and existing_url == api_url:
-                    vendor = v
-                    break
+            # Match by normalized URL (with/without /v1). Never reuse a different host via provider name.
+            from core.data import find_vendor_by_url
+            if api_url:
+                vendor = find_vendor_by_url(api_url)
 
             if not vendor:
                 base_name = vendor_name or provider.replace("-", " ").title() or "Provider"
@@ -1846,7 +1863,7 @@ def api_gateway_status():
         health = get_all_health_status()
         status["health"] = health
         status["openclaw_version"] = ocp.get_version()
-        status["manager_version"] = "2.0.4"
+        status["manager_version"] = "2.0.5"
         status["min_openclaw_version"] = "2026.3.0"
         status["recommended_openclaw_version"] = "2026.6.11"
         return jsonify(status)
@@ -2574,6 +2591,17 @@ def api_update_settings():
             data["health_network_retries"] = max(1, min(10, int(data["health_network_retries"])))
         except Exception:
             data["health_network_retries"] = 3
+    for sk, default, lo, hi in (
+        ("health_fail_streak", 3, 1, 50),
+        ("health_ok_streak", 3, 1, 50),
+        ("health_fail_interval_seconds", 7200, 60, 86400 * 7),
+        ("health_ok_interval_seconds", 3600, 60, 86400 * 7),
+    ):
+        if sk in data:
+            try:
+                data[sk] = max(lo, min(hi, int(data[sk])))
+            except Exception:
+                data[sk] = default
     if "access_token" in data:
         # empty string clears token
         data["access_token"] = str(data.get("access_token") or "").strip()

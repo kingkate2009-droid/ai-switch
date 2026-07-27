@@ -340,13 +340,42 @@ def _normalize_tags(raw) -> list[str]:
 
 def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "openai",
                thinking_disabled: bool = False, proxy_target: str = "", tags=None,
-               checkin_url: str = "") -> dict:
+               checkin_url: str = "", *, force_new: bool = False) -> dict:
+    """Create vendor. Same normalized API URL auto-merges into existing (unless force_new)."""
+    url = (api_url or "").rstrip("/")
+    if not force_new and url:
+        existing = find_vendor_by_url(url)
+        if existing:
+            patch = {}
+            if name and not (existing.get("name") or "").strip():
+                patch["name"] = name
+            if checkin_url and not (existing.get("checkin_url") or "").strip():
+                patch["checkin_url"] = checkin_url
+            if proxy_target and not (existing.get("proxy_target") or "").strip():
+                patch["proxy_target"] = proxy_target
+            if tags:
+                merged_tags = _normalize_tags(list(existing.get("tags") or []) + list(tags or []))
+                if merged_tags != (existing.get("tags") or []):
+                    patch["tags"] = merged_tags
+            # Prefer /v1 OpenAI URL when existing lacks version path
+            cur = (existing.get("api_url") or "").rstrip("/")
+            if url.lower().endswith("/v1") and not cur.lower().endswith("/v1"):
+                if vendor_url_merge_key(url) == vendor_url_merge_key(cur):
+                    patch["api_url"] = url
+            if patch:
+                updated = update_vendor(str(existing["id"]), **patch) or existing
+            else:
+                updated = existing
+            out = dict(updated)
+            out["_existing"] = True
+            return out
+
     data = _load_data()
     vendor = {
         "id": _next_id(data.get("vendors", [])),
         "name": name,
         "provider": provider,
-        "api_url": api_url.rstrip("/"),
+        "api_url": url,
         "endpoint_type": endpoint_type,
         "thinking_disabled": thinking_disabled,
         "proxy_target": proxy_target,
@@ -443,33 +472,51 @@ def find_key_anywhere(api_key: str) -> Optional[tuple]:
     return None
 
 
-def find_vendor_for_import(provider: str, api_url: str = "", name: str = "") -> Optional[dict]:
-    """Match an existing vendor for reverse-import (backend → system).
+def find_vendor_by_url(api_url: str) -> Optional[dict]:
+    """Match vendor by normalized API URL (with/without trailing /v1)."""
+    want = vendor_url_merge_key(api_url or "")
+    if not want:
+        return None
+    for v in get_vendors():
+        if vendor_url_merge_key(v.get("api_url") or "") == want:
+            return v
+    return None
 
-    Prefer provider id; fall back to case-insensitive name.
+
+def find_vendor_for_import(provider: str, api_url: str = "", name: str = "") -> Optional[dict]:
+    """Match an existing vendor for import / reverse-import.
+
+    Priority: normalized URL → exact provider (only if unique) → name.
+    URL-first prevents same-host /v1 vs bare duplicates and wrong provider collapse.
     """
     provider = (provider or "").strip()
     api_url = (api_url or "").rstrip("/")
     name_l = (name or "").strip().lower()
     vendors = get_vendors()
-    # 1) exact provider
-    if provider:
-        for v in vendors:
-            if (v.get("provider") or "") == provider:
-                return v
-        for v in vendors:
-            if (v.get("provider") or "").lower() == provider.lower():
-                return v
-    # 2) name match
-    if name_l:
-        for v in vendors:
-            if (v.get("name") or "").strip().lower() == name_l:
-                return v
-    # 3) api_url match (loose)
+
+    # 1) normalized URL (primary — same rule as merge-urls)
     if api_url:
+        hit = find_vendor_by_url(api_url)
+        if hit:
+            return hit
+        # loose fallback for partial paths
         for v in vendors:
             vu = (v.get("api_url") or "").rstrip("/")
             if vu and (vu == api_url or vu.endswith(api_url) or api_url.endswith(vu)):
+                return v
+
+    # 2) provider only when unique among vendors (avoid collapsing multi-URL openai clones)
+    if provider:
+        matches = [v for v in vendors if (v.get("provider") or "") == provider]
+        if not matches:
+            matches = [v for v in vendors if (v.get("provider") or "").lower() == provider.lower()]
+        if len(matches) == 1:
+            return matches[0]
+
+    # 3) name match
+    if name_l:
+        for v in vendors:
+            if (v.get("name") or "").strip().lower() == name_l:
                 return v
     return None
 
@@ -707,6 +754,10 @@ _SETTINGS_KEYS = (
     "health_check_enabled",  # bool, default False — optional scheduled health checks
     "health_auto_disable",   # bool, default False — auto-disable keys on failed health check
     "health_network_retries",  # int, default 3 — max attempts on network/SSL/timeout failures
+    "health_fail_streak",    # int, default 3 — consecutive fails before slow interval
+    "health_ok_streak",      # int, default 3 — consecutive oks before slow interval
+    "health_fail_interval_seconds",  # int, default 7200 — interval after fail streak
+    "health_ok_interval_seconds",    # int, default 3600 — interval after ok streak
     "access_token",          # str, empty = no auth
     "onboarding_done",       # bool
     "read_only",             # bool, default False — block mutating APIs except settings/auth
@@ -1250,7 +1301,8 @@ def import_backup(payload: dict, *, mode: str = "merge", password: str = "") -> 
                 checkin_url=vin.get("checkin_url") or "",
             )
             existing = nv
-            added_v += 1
+            if not nv.get("_existing"):
+                added_v += 1
         vid = existing["id"]
         # reload
         existing = get_vendor(vid) or existing
@@ -1307,6 +1359,10 @@ _POLICY_FIELD_KEYS = (
     "health_auto_disable",
     "health_auto_failover",
     "health_network_retries",
+    "health_fail_streak",
+    "health_ok_streak",
+    "health_fail_interval_seconds",
+    "health_ok_interval_seconds",
     "read_only",
     "budget_daily_cost",
     "budget_monthly_cost",
@@ -1751,6 +1807,310 @@ def delete_empty_vendors(*, dry_run: bool = True) -> dict:
         "dry_run": dry_run,
         "count": len(removed),
         "items": removed,
+    }
+
+
+def vendor_url_merge_key(url: str) -> str:
+    """Normalize API URL so host + path match with/without trailing /v1."""
+    from urllib.parse import urlparse
+
+    u = (url or "").strip()
+    if not u:
+        return ""
+    try:
+        p = urlparse(u)
+        if not p.scheme or not p.netloc:
+            return u.rstrip("/").lower()
+        scheme = p.scheme.lower()
+        host = p.netloc.lower()
+        path = (p.path or "").rstrip("/")
+        low = path.lower()
+        if low.endswith("/v1"):
+            path = path[:-3].rstrip("/")
+        return f"{scheme}://{host}{path}".lower()
+    except Exception:
+        return u.rstrip("/").lower()
+
+
+def _vendor_keep_score(v: dict) -> tuple:
+    keys = v.get("keys") or []
+    enabled = sum(1 for k in keys if k.get("enabled") is not False and k.get("api_key"))
+    with_models = sum(1 for k in keys if k.get("models"))
+    name = (v.get("name") or "").strip()
+    name_l = name.lower()
+    generic = name_l in (
+        "openai", "anthropic", "custom", "gemini", "google", "base", "ase", "api",
+    ) or name_l.startswith("https://") or name_l.startswith("http://")
+    url = (v.get("api_url") or "").rstrip("/")
+    has_v1 = url.lower().endswith("/v1")
+    try:
+        vid = int(str(v.get("id") or 0))
+    except Exception:
+        vid = 0
+    return (
+        len(keys),
+        enabled,
+        with_models,
+        1 if (v.get("checkin_url") or "").strip() else 0,
+        0 if generic else 1,
+        1 if has_v1 else 0,
+        -vid,
+    )
+
+
+def _prefer_api_url(urls: list[str], endpoint_type: str = "openai") -> str:
+    cands = [(u or "").strip().rstrip("/") for u in urls if (u or "").strip()]
+    if not cands:
+        return ""
+    ep = (endpoint_type or "openai").lower()
+    if ep in ("openai", "openai_chat", "openai_responses", "responses", "codex", ""):
+        for u in cands:
+            if u.lower().endswith("/v1"):
+                return u
+    # longest path often more specific
+    return max(cands, key=lambda u: (len(u), u))
+
+
+def _merge_key_into(dst: dict, src: dict) -> None:
+    """Enrich destination key with useful fields from source (same secret)."""
+    if not (dst.get("models") or []) and (src.get("models") or []):
+        dst["models"] = list(src.get("models") or [])
+    if not dst.get("default_model") and src.get("default_model"):
+        dst["default_model"] = src.get("default_model")
+    if not dst.get("check_model") and src.get("check_model"):
+        dst["check_model"] = src.get("check_model")
+    if src.get("enabled") is True and dst.get("enabled") is False:
+        dst["enabled"] = True
+    if not (dst.get("notes") or "").strip() and (src.get("notes") or "").strip():
+        dst["notes"] = src.get("notes")
+    if not dst.get("role") and src.get("role"):
+        dst["role"] = src.get("role")
+    # merge model health / disabled lists lightly
+    if src.get("model_health") and not dst.get("model_health"):
+        dst["model_health"] = src.get("model_health")
+    src_dis = list(src.get("disabled_models") or [])
+    if src_dis:
+        cur = list(dst.get("disabled_models") or [])
+        for m in src_dis:
+            if m not in cur:
+                cur.append(m)
+        dst["disabled_models"] = cur
+    sn = (src.get("name") or "").strip()
+    dn = (dst.get("name") or "").strip().lower()
+    if sn and (dn.startswith("from ") or dn.startswith("key-") or not dn):
+        if not sn.lower().startswith("from "):
+            dst["name"] = sn
+
+
+def _remap_vendor_refs(data: dict, id_map: dict) -> int:
+    """Rewrite vendor_id references (downstream routes etc). Returns rewrite count."""
+    if not id_map:
+        return 0
+    n = 0
+    for dk in data.get("downstream_keys") or []:
+        for r in dk.get("routes") or []:
+            old = str(r.get("vendor_id") or "")
+            if old in id_map:
+                new_id = id_map[old]
+                r["vendor_id"] = new_id
+                # refresh name if keep vendor present
+                keep = next((v for v in data.get("vendors") or [] if str(v.get("id")) == str(new_id)), None)
+                if keep:
+                    r["vendor_name"] = keep.get("name") or r.get("vendor_name")
+                n += 1
+    return n
+
+
+def find_duplicate_vendor_url_groups() -> list[dict]:
+    """Group vendors whose api_url matches after /v1 normalization."""
+    buckets: dict[str, list] = {}
+    for v in get_vendors():
+        key = vendor_url_merge_key(v.get("api_url") or "")
+        if not key:
+            continue
+        buckets.setdefault(key, []).append(v)
+
+    groups = []
+    for merge_key, items in buckets.items():
+        if len(items) < 2:
+            continue
+        ranked = sorted(items, key=_vendor_keep_score, reverse=True)
+        keep = ranked[0]
+        merge = ranked[1:]
+        groups.append({
+            "merge_key": merge_key,
+            "count": len(items),
+            "keep": {
+                "id": keep.get("id"),
+                "name": keep.get("name"),
+                "provider": keep.get("provider"),
+                "api_url": keep.get("api_url"),
+                "endpoint_type": keep.get("endpoint_type") or "openai",
+                "key_count": len(keep.get("keys") or []),
+            },
+            "merge": [
+                {
+                    "id": m.get("id"),
+                    "name": m.get("name"),
+                    "provider": m.get("provider"),
+                    "api_url": m.get("api_url"),
+                    "endpoint_type": m.get("endpoint_type") or "openai",
+                    "key_count": len(m.get("keys") or []),
+                }
+                for m in merge
+            ],
+            "urls": sorted({(x.get("api_url") or "").rstrip("/") for x in items if x.get("api_url")}),
+        })
+    groups.sort(key=lambda g: -g["count"])
+    return groups
+
+
+def merge_duplicate_vendors_by_url(*, dry_run: bool = True) -> dict:
+    """Merge vendors that share the same normalized API URL (with/without /v1).
+
+    - Keep the strongest vendor (most keys / enabled / models / checkin)
+    - Move unique secrets into keep; same secret enriches keep key
+    - Prefer canonical api_url with /v1 for OpenAI-compatible endpoints
+    - Remap downstream route vendor_id to keep id
+    - Delete merged vendors
+    """
+    groups = find_duplicate_vendor_url_groups()
+    preview = []
+    total_merge_vendors = 0
+    total_move_keys = 0
+    total_skip_dup_keys = 0
+
+    if dry_run:
+        for g in groups:
+            move = sum(m["key_count"] for m in g["merge"])
+            total_merge_vendors += len(g["merge"])
+            total_move_keys += move
+            preview.append({
+                "merge_key": g["merge_key"],
+                "keep": g["keep"],
+                "merge": g["merge"],
+                "urls": g["urls"],
+                "keys_from_merged": move,
+            })
+        return {
+            "dry_run": True,
+            "groups": len(groups),
+            "would_merge_vendors": total_merge_vendors,
+            "would_touch_keys": total_move_keys,
+            "items": preview,
+        }
+
+    data = _load_data()
+    vendors = data.setdefault("vendors", [])
+    by_id = {str(v.get("id")): v for v in vendors}
+    id_map: dict[str, str] = {}
+    removed_ids: set[str] = set()
+    merged_groups = 0
+
+    for g in groups:
+        keep_id = str(g["keep"]["id"])
+        keep = by_id.get(keep_id)
+        if not keep:
+            continue
+        merge_list = []
+        for m in g["merge"]:
+            mid = str(m["id"])
+            mv = by_id.get(mid)
+            if mv and mid != keep_id:
+                merge_list.append(mv)
+        if not merge_list:
+            continue
+
+        # unify api_url
+        all_urls = [(keep.get("api_url") or "")] + [(m.get("api_url") or "") for m in merge_list]
+        keep["api_url"] = _prefer_api_url(all_urls, keep.get("endpoint_type") or "openai")
+
+        # fill missing metadata from merge candidates
+        if not (keep.get("checkin_url") or "").strip():
+            for m in merge_list:
+                cu = (m.get("checkin_url") or "").strip()
+                if cu:
+                    keep["checkin_url"] = cu
+                    break
+        tags = list(keep.get("tags") or [])
+        tag_seen = {t.lower() for t in tags if isinstance(t, str)}
+        for m in merge_list:
+            for t in m.get("tags") or []:
+                s = str(t or "").strip()
+                if s and s.lower() not in tag_seen:
+                    tag_seen.add(s.lower())
+                    tags.append(s)
+            if not (keep.get("proxy_target") or "").strip() and (m.get("proxy_target") or "").strip():
+                keep["proxy_target"] = m.get("proxy_target")
+        keep["tags"] = tags[:20]
+
+        # better name if keep is generic protocol brand
+        _generic_names = ("openai", "anthropic", "custom", "base", "ase", "api", "gemini", "google")
+        kn = (keep.get("name") or "").strip().lower()
+        if kn in _generic_names or kn.startswith("http"):
+            for m in sorted(merge_list, key=_vendor_keep_score, reverse=True):
+                mn = (m.get("name") or "").strip()
+                ml = mn.lower()
+                if mn and ml not in _generic_names and not ml.startswith("http"):
+                    keep["name"] = mn
+                    if m.get("provider") and (keep.get("provider") or "").lower() in _generic_names:
+                        keep["provider"] = m.get("provider")
+                    break
+
+        keep.setdefault("keys", [])
+        moved = 0
+        skipped = 0
+        for m in merge_list:
+            for k in list(m.get("keys") or []):
+                secret = _norm_secret(k.get("api_key") or "")
+                if not secret:
+                    continue
+                existing = find_key_by_secret(keep, secret)
+                if existing:
+                    _merge_key_into(existing, k)
+                    skipped += 1
+                    continue
+                new_k = dict(k)
+                new_k["id"] = _next_id(keep.get("keys") or [])
+                keep.setdefault("keys", []).append(new_k)
+                moved += 1
+            mid = str(m.get("id"))
+            id_map[mid] = keep_id
+            removed_ids.add(mid)
+
+        total_move_keys += moved
+        total_skip_dup_keys += skipped
+        total_merge_vendors += len(merge_list)
+        merged_groups += 1
+        preview.append({
+            "merge_key": g["merge_key"],
+            "keep": {
+                "id": keep.get("id"),
+                "name": keep.get("name"),
+                "provider": keep.get("provider"),
+                "api_url": keep.get("api_url"),
+                "key_count": len(keep.get("keys") or []),
+            },
+            "merged_ids": [str(m.get("id")) for m in merge_list],
+            "keys_moved": moved,
+            "keys_deduped": skipped,
+        })
+
+    if removed_ids:
+        data["vendors"] = [v for v in vendors if str(v.get("id")) not in removed_ids]
+        refs = _remap_vendor_refs(data, id_map)
+        _save_data(data)
+    else:
+        refs = 0
+
+    return {
+        "dry_run": False,
+        "groups": merged_groups,
+        "merged_vendors": total_merge_vendors,
+        "keys_moved": total_move_keys,
+        "keys_deduped": total_skip_dup_keys,
+        "refs_remapped": refs,
+        "items": preview,
     }
 
 
