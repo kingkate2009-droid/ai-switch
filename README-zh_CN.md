@@ -19,6 +19,7 @@
 
 <p align="center">
   <a href="#为什么需要">为什么需要</a> ·
+  <a href="#界面预览">界面预览</a> ·
   <a href="#三分钟上手">三分钟上手</a> ·
   <a href="#它到底解决什么">解决什么</a> ·
   <a href="#文档">文档</a> ·
@@ -42,6 +43,36 @@
 **定位：** 本地 **Key 中枢**（管 Key、验健康、推配置），不是又一个聊天客户端。
 
 > 一把 Key 改完，多工具立刻能用；坏 Key 别把工具搞挂。
+
+---
+
+## 界面预览
+
+<p align="center">
+  <img src="docs/screenshots/01-dashboard.png" alt="仪表盘" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/02-vendors.png" alt="供应商与 Key" width="390">
+  &nbsp;
+  <img src="docs/screenshots/03-backends.png" alt="后端" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/04-health.png" alt="健康监测" width="390">
+  &nbsp;
+  <img src="docs/screenshots/05-task-center.png" alt="任务中心" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/06-dashboard-dark.png" alt="深色主题" width="800">
+</p>
+
+| | |
+|--|--|
+| 仪表盘总览 | 供应商 / Key 管理 |
+| 后端同步状态 | 健康监测 |
+| 不阻塞页面的任务中心 | 浅色 / 深色主题 |
 
 ---
 

@@ -74,30 +74,34 @@ class ClineAdapter(BackendAdapter):
             self._save_config(config)
 
     def on_key_removed(self, vendor: dict, key: dict) -> None:
-        secrets = self._load_secrets()
-        prov = vendor.get("provider", "").lower()
+        # Only clear slot if no other healthy key of same type remains
         ep = vendor.get("endpoint_type", "openai")
-        if ep == "anthropic" or prov == "anthropic":
+        prov = vendor.get("provider", "").lower()
+        want = "anthropic" if (ep == "anthropic" or prov == "anthropic") else "openai"
+        other = self.pick_syncable_key(providers={want})
+        if other:
+            self.on_key_added(other[0], other[1])
+            return
+        secrets = self._load_secrets()
+        if want == "anthropic":
             secrets.pop("ANTHROPIC_API_KEY", None)
         else:
             secrets.pop("OPENAI_API_KEY", None)
         self._save_secrets(secrets)
+        config = self._load_config()
+        config.get("apiProvider", {}).pop(want, None)
+        self._save_config(config)
 
     def reconcile(self) -> None:
-        from core.data import get_vendors
         secrets = self._load_secrets()
         config = self._load_config()
-        ep_types = {"openai", "anthropic"}
         changed = False
-        for ep_type in ep_types:
+        for ep_type in ("openai", "anthropic"):
             env_key = f"{ep_type.upper()}_API_KEY"
-            active = any(
-                k.get("enabled", True) and k.get("api_key")
-                for v in get_vendors()
-                if v.get("endpoint_type", "") == ep_type or v.get("provider", "").lower() == ep_type
-                for k in v.get("keys", [])
-            )
-            if not active and env_key in secrets:
+            best = self.pick_syncable_key(providers={ep_type})
+            if best:
+                self.on_key_added(best[0], best[1])
+            elif env_key in secrets:
                 del secrets[env_key]
                 changed = True
                 config.get("apiProvider", {}).pop(ep_type, None)

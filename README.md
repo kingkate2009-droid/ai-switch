@@ -19,6 +19,7 @@
 
 <p align="center">
   <a href="#why">Why</a> ·
+  <a href="#screenshots">Screenshots</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#what-it-does">What it does</a> ·
   <a href="#docs">Docs</a> ·
@@ -42,6 +43,36 @@ If you juggle **relay / multi-vendor API keys** across **OpenClaw, OpenCode, Cod
 **Positioning:** a local **Key hub** (manage · probe · push) — not another chat client.
 
 > One key change. Every installed tool updates. Broken keys don’t take your stack down.
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/01-dashboard.png" alt="Dashboard" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/02-vendors.png" alt="Vendors & keys" width="390">
+  &nbsp;
+  <img src="docs/screenshots/03-backends.png" alt="Backends" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/04-health.png" alt="Health monitor" width="390">
+  &nbsp;
+  <img src="docs/screenshots/05-task-center.png" alt="Task center" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/06-dashboard-dark.png" alt="Dark theme" width="800">
+</p>
+
+| | |
+|--|--|
+| Dashboard | Keys & vendors |
+| Backends sync status | Health monitor |
+| Non-blocking task center | Light / dark theme |
 
 ---
 

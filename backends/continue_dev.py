@@ -77,9 +77,7 @@ class ContinueAdapter(BackendAdapter):
         models = config.get("models", [])
         if not models:
             return
-        from core.data import get_vendors
-        active_bare = {k["api_key"] for v in get_vendors() for k in v.get("keys", [])
-                      if k.get("enabled", True) and k.get("api_key")}
+        active_bare = {k["api_key"] for _, k in self.iter_syncable_keys()}
         kept = [m for m in models if m.get("apiKey", "") in active_bare or m.get("api_key", "") in active_bare]
         if len(kept) != len(models):
             config["models"] = kept

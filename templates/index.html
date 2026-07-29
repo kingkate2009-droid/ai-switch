@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title data-i18n="app.title">{{ t('app.title') }}</title>
-<link rel="stylesheet" href="/static/style.css?v=checkin-inline-edit-1">
+<link rel="stylesheet" href="/static/style.css?v=task-center-1">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -37,49 +37,65 @@
     </div>
 
     <nav>
-      <a href="#" class="nav-item active" data-view="dashboard" onclick="switchView('dashboard');return false">
-        <svg width="18" height="18"><use href="#ico-grid"/></svg>
-        <span data-i18n="nav.dashboard">{{ t('nav.dashboard') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="vendors" onclick="switchView('vendors');return false">
-        <svg width="18" height="18"><use href="#ico-key"/></svg>
-        <span data-i18n="nav.vendors">{{ t('nav.vendors') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="backends" onclick="switchView('backends');return false">
-        <svg width="18" height="18"><use href="#ico-box"/></svg>
-        <span data-i18n="nav.backends">{{ t('nav.backends') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="stats" onclick="switchView('stats');return false">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        <span data-i18n="nav.stats">{{ t('nav.stats') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="models" onclick="switchView('models');return false">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="20" cy="18" r="2"/></svg>
-        <span data-i18n="nav.models">{{ t('nav.models') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="routes" onclick="switchView('routes');return false">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-7 6M12 11l7 6"/></svg>
-        <span data-i18n="nav.routes">{{ t('nav.routes') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="health" onclick="switchView('health');return false">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        <span data-i18n="nav.health">{{ t('nav.health') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="checkin" onclick="switchView('checkin');return false">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <span data-i18n="nav.checkin">{{ t('nav.checkin') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="diagnostics" onclick="switchView('diagnostics');return false">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span data-i18n="nav.diagnostics">{{ t('nav.diagnostics') }}</span>
-      </a>
-      <a href="#" class="nav-item" data-view="settings" onclick="switchView('settings');return false">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-        <span data-i18n="nav.settings">{{ t('nav.settings') }}</span>
-      </a>
+      <div class="nav-group">
+        <span class="nav-group-label" data-i18n="nav.groupOverview">{{ t('nav.groupOverview') }}</span>
+        <a href="#" class="nav-item active" data-view="dashboard" onclick="switchView('dashboard');return false">
+          <svg width="18" height="18"><use href="#ico-grid"/></svg>
+          <span data-i18n="nav.dashboard">{{ t('nav.dashboard') }}</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-group-label" data-i18n="nav.groupConfig">{{ t('nav.groupConfig') }}</span>
+        <a href="#" class="nav-item" data-view="vendors" onclick="switchView('vendors');return false">
+          <svg width="18" height="18"><use href="#ico-key"/></svg>
+          <span data-i18n="nav.vendors">{{ t('nav.vendors') }}</span>
+        </a>
+        <a href="#" class="nav-item" data-view="backends" onclick="switchView('backends');return false">
+          <svg width="18" height="18"><use href="#ico-box"/></svg>
+          <span data-i18n="nav.backends">{{ t('nav.backends') }}</span>
+        </a>
+        <a href="#" class="nav-item" data-view="models" onclick="switchView('models');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="20" cy="18" r="2"/></svg>
+          <span data-i18n="nav.models">{{ t('nav.models') }}</span>
+        </a>
+        <a href="#" class="nav-item" data-view="routes" onclick="switchView('routes');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-7 6M12 11l7 6"/></svg>
+          <span data-i18n="nav.routes">{{ t('nav.routes') }}</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-group-label" data-i18n="nav.groupOps">{{ t('nav.groupOps') }}</span>
+        <a href="#" class="nav-item" data-view="health" onclick="switchView('health');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          <span data-i18n="nav.health">{{ t('nav.health') }}</span>
+        </a>
+        <a href="#" class="nav-item" data-view="stats" onclick="switchView('stats');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span data-i18n="nav.stats">{{ t('nav.stats') }}</span>
+        </a>
+        <a href="#" class="nav-item" data-view="checkin" onclick="switchView('checkin');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span data-i18n="nav.checkin">{{ t('nav.checkin') }}</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-group-label" data-i18n="nav.groupSystem">{{ t('nav.groupSystem') }}</span>
+        <a href="#" class="nav-item" data-view="diagnostics" onclick="switchView('diagnostics');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span data-i18n="nav.diagnostics">{{ t('nav.diagnostics') }}</span>
+        </a>
+        <a href="#" class="nav-item" data-view="settings" onclick="switchView('settings');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          <span data-i18n="nav.settings">{{ t('nav.settings') }}</span>
+        </a>
+      </div>
     </nav>
 
     <div class="sidebar-footer">
+      <button type="button" class="task-center-launch" id="taskCenterLaunch" onclick="toggleTaskCenter()" title="{{ t('tasks.title') }}">
+        <span data-i18n="tasks.title">{{ t('tasks.title') }}</span>
+        <span class="task-center-badge" id="taskCenterBadge" style="display:none">0</span>
+      </button>
       <div class="mini-status" id="miniBackendStatus">
         <span class="dot unknown" id="miniDot"></span>
         <span id="miniLabel" data-i18n="gateway.checking">{{ t('gateway.checking') }}</span>
@@ -100,8 +116,20 @@
     <!-- ═══ Dashboard ═══ -->
     <div class="view" id="view-dashboard">
       <div class="page-head">
-        <h2 data-i18n="dashboard.title">{{ t('dashboard.title') }}</h2>
-        <p class="page-desc" data-i18n="dashboard.desc">{{ t('dashboard.desc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="dashboard.title">{{ t('dashboard.title') }}</h2>
+          <p class="page-desc" data-i18n="dashboard.desc">{{ t('dashboard.desc') }}</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" onclick="checkAllHealth()">
+            <svg width="14" height="14"><use href="#ico-play"/></svg>
+            <span data-i18n="dashboard.checkAll">{{ t('dashboard.checkAll') }}</span>
+          </button>
+          <button class="btn btn-primary" onclick="switchView('vendors'); showAddVendorModal()">
+            <svg width="14" height="14"><use href="#ico-plus"/></svg>
+            <span data-i18n="dashboard.addVendor">{{ t('dashboard.addVendor') }}</span>
+          </button>
+        </div>
       </div>
 
       <div class="dash-section onboarding-panel" id="onboardingPanel" style="display:none">
@@ -113,75 +141,71 @@
         <ol class="onboarding-track" id="onboardingTrack"></ol>
       </div>
 
-      <div class="stats-row" id="statsRow">
+<div class="page-body">
+      <div class="stats-row stats-row-hero" id="statsRow">
         <div class="stat-card"><div class="stat-value" id="statVendors">-</div><div class="stat-label" data-i18n="dashboard.vendors">{{ t('dashboard.vendors') }}</div></div>
         <div class="stat-card"><div class="stat-value" id="statKeys">-</div><div class="stat-label" data-i18n="dashboard.keys">{{ t('dashboard.keys') }}</div></div>
         <div class="stat-card success"><div class="stat-value" id="statHealthy">-</div><div class="stat-label" data-i18n="dashboard.healthy">{{ t('dashboard.healthy') }}</div></div>
         <div class="stat-card danger"><div class="stat-value" id="statIssues">-</div><div class="stat-label" data-i18n="dashboard.issues">{{ t('dashboard.issues') }}</div></div>
         <div class="stat-card"><div class="stat-value" id="statBackends">-</div><div class="stat-label" data-i18n="dashboard.backends">{{ t('dashboard.backends') }}</div></div>
-      </div>
-
-      <div class="stats-row stats-row-rich" id="todayUsageRow">
         <div class="stat-card"><div class="stat-value" id="statTodayCalls">-</div><div class="stat-label" data-i18n="dashboard.todayCalls">{{ t('dashboard.todayCalls') }}</div></div>
-        <div class="stat-card"><div class="stat-value" id="statTodayTokens">-</div><div class="stat-label" data-i18n="dashboard.todayTokens">{{ t('dashboard.todayTokens') }}</div></div>
         <div class="stat-card cost"><div class="stat-value" id="statTodayCost">-</div><div class="stat-label" data-i18n="dashboard.todayCost">{{ t('dashboard.todayCost') }}</div></div>
         <div class="stat-card"><div class="stat-value" id="statMonthCost">-</div><div class="stat-label" data-i18n="dashboard.monthCost">{{ t('dashboard.monthCost') }}</div></div>
+      </div>
+      <div class="stats-row stats-row-rich" id="todayUsageRow" style="display:none">
+        <div class="stat-card"><div class="stat-value" id="statTodayTokens">-</div><div class="stat-label" data-i18n="dashboard.todayTokens">{{ t('dashboard.todayTokens') }}</div></div>
       </div>
       <div id="budgetAlerts" class="budget-alerts" style="display:none"></div>
       <div id="lastHealthLine" class="last-health-line" style="display:none"></div>
 
-      <div class="dash-section" id="dashHealthSection">
-        <div class="dash-section-head">
-          <h3 data-i18n="nav.health">{{ t('nav.health') }}</h3>
-          <div>
-            <button class="btn btn-sm" onclick="switchView('health')" data-i18n="health.openPage">{{ t('health.openPage') }}</button>
-            <button class="btn btn-sm" onclick="checkAllHealth()">
-              <span data-i18n="dashboard.checkAll">{{ t('dashboard.checkAll') }}</span>
-            </button>
+      <div class="dash-grid">
+        <div class="dash-section dash-card" id="dashHealthSection">
+          <div class="dash-section-head">
+            <h3 data-i18n="nav.health">{{ t('nav.health') }}</h3>
+            <button class="btn btn-sm btn-ghost" onclick="switchView('health')" data-i18n="health.openPage">{{ t('health.openPage') }}</button>
+          </div>
+          <div id="dashHealthSummary" class="hm-meta">—</div>
+        </div>
+
+        <div class="dash-section dash-card" id="dashTodosSection">
+          <div class="dash-section-head">
+            <h3 data-i18n="dashboard.todos">{{ t('dashboard.todos') }}</h3>
+          </div>
+          <div id="dashTodos" class="todo-list">
+            <div class="todo-empty" data-i18n="dashboard.todosEmpty">{{ t('dashboard.todosEmpty') }}</div>
           </div>
         </div>
-        <div id="dashHealthSummary" class="hm-meta">—</div>
-      </div>
 
-      <div class="dash-section" id="dashTodosSection">
-        <div class="dash-section-head">
-          <h3 data-i18n="dashboard.todos">{{ t('dashboard.todos') }}</h3>
-          <button class="btn btn-sm" onclick="checkAllHealth()">
-            <span data-i18n="dashboard.checkAll">{{ t('dashboard.checkAll') }}</span>
-          </button>
+        <div class="dash-section dash-card">
+          <div class="dash-section-head">
+            <h3 data-i18n="dashboard.recentActivity">{{ t('dashboard.recentActivity') }}</h3>
+            <button class="btn btn-sm btn-ghost" onclick="switchView('diagnostics')">
+              <span data-i18n="nav.diagnostics">{{ t('nav.diagnostics') }}</span>
+            </button>
+          </div>
+          <div id="dashRecent" class="recent-activity">
+            <div class="todo-empty" data-i18n="audit.empty">{{ t('audit.empty') }}</div>
+          </div>
         </div>
-        <div id="dashTodos" class="todo-list">
-          <div class="todo-empty" data-i18n="dashboard.todosEmpty">{{ t('dashboard.todosEmpty') }}</div>
-        </div>
-      </div>
 
-      <div class="dash-section">
-        <div class="dash-section-head">
-          <h3 data-i18n="dashboard.recentActivity">{{ t('dashboard.recentActivity') }}</h3>
-          <button class="btn btn-sm" onclick="switchView('diagnostics')">
-            <span data-i18n="nav.diagnostics">{{ t('nav.diagnostics') }}</span>
-          </button>
-        </div>
-        <div id="dashRecent" class="recent-activity">
-          <div class="todo-empty" data-i18n="audit.empty">{{ t('audit.empty') }}</div>
+        <div class="dash-section dash-card dash-span-2">
+          <div class="dash-section-head">
+            <h3 data-i18n="dashboard.backendStatus">{{ t('dashboard.backendStatus') }}</h3>
+            <button class="btn btn-sm btn-ghost" onclick="refreshBackendStatus()">
+              <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+              <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+            </button>
+          </div>
+          <div id="dashBackendCards" class="backend-grid"></div>
         </div>
       </div>
 
       <div class="dash-section">
         <div class="dash-section-head">
-          <h3 data-i18n="dashboard.backendStatus">{{ t('dashboard.backendStatus') }}</h3>
-          <button class="btn btn-sm" onclick="refreshBackendStatus()">
-            <svg width="14" height="14"><use href="#ico-refresh"/></svg>
-            <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
-          </button>
+          <h3 data-i18n="dashboard.quickActions">{{ t('dashboard.quickActions') }}</h3>
         </div>
-        <div id="dashBackendCards" class="backend-grid"></div>
-      </div>
-
-      <div class="dash-section">
-        <h3 data-i18n="dashboard.quickActions">{{ t('dashboard.quickActions') }}</h3>
-        <div class="action-row">
-          <button class="btn" onclick="switchView('vendors'); showAddVendorModal()">
+        <div class="quick-actions-grid">
+          <button class="btn btn-primary" onclick="switchView('vendors'); showAddVendorModal()">
             <svg width="16" height="16"><use href="#ico-plus"/></svg>
             <span data-i18n="dashboard.addVendor">{{ t('dashboard.addVendor') }}</span>
           </button>
@@ -203,60 +227,69 @@
           <button class="btn" onclick="triggerImportBackup()" title="{{ t('backup.importHint') }}">
             <span data-i18n="backup.import">{{ t('backup.import') }}</span>
           </button>
-          <input type="file" id="backupFileInput" accept="application/json,.json" style="display:none" onchange="onBackupFileSelected(event)">
-          <button class="btn" onclick="checkAllHealth()">
-            <svg width="16" height="16"><use href="#ico-play"/></svg>
-            <span data-i18n="dashboard.checkAll">{{ t('dashboard.checkAll') }}</span>
-          </button>
         </div>
+        <input type="file" id="backupFileInput" accept="application/json,.json" style="display:none" onchange="onBackupFileSelected(event)">
+      </div>
       </div>
     </div>
 
     <!-- ═══ Vendors ═══ -->
     <div class="view" id="view-vendors">
       <div class="page-head">
-        <h2 data-i18n="nav.vendors">{{ t('nav.vendors') }}</h2>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.vendors">{{ t('nav.vendors') }}</h2>
+          <p class="page-desc" data-i18n="vendors.pageDesc">{{ t('vendors.pageDesc') }}</p>
+        </div>
         <div class="page-actions">
           <button class="btn" onclick="showBatchImportModal()">
             <svg width="14" height="14"><use href="#ico-upload"/></svg>
             <span data-i18n="toolbar.batchImport">{{ t('toolbar.batchImport') }}</span>
           </button>
-          <button class="btn" onclick="exportVendorsCsv()" title="{{ t('exportKeys.hint') }}">
-            <span data-i18n="exportKeys.btn">{{ t('exportKeys.btn') }}</span>
-          </button>
-          <button class="btn" onclick="showDedupeModal()" title="{{ t('dedupe.hint') }}">
-            <span data-i18n="dedupe.btn">{{ t('dedupe.btn') }}</span>
-          </button>
-          <button class="btn" onclick="showMergeVendorsModal()" title="{{ t('mergeVendors.hint') }}">
-            <span data-i18n="mergeVendors.btn">{{ t('mergeVendors.btn') }}</span>
-          </button>
-          <button class="btn" onclick="cleanEmptyVendors()" title="{{ t('emptyVendors.hint') }}">
-            <span data-i18n="emptyVendors.btn">{{ t('emptyVendors.btn') }}</span>
-          </button>
-          <button class="btn" onclick="checkFailedHealth()" title="{{ t('health.recheckFailedHint') }}">
-            <span data-i18n="health.recheckFailed">{{ t('health.recheckFailed') }}</span>
-          </button>
-          <button class="btn" id="undoImportBtn" onclick="undoLastImport()" style="display:none" title="{{ t('importUndo.hint') }}">
-            <span data-i18n="importUndo.btn">{{ t('importUndo.btn') }}</span>
+          <button class="btn" onclick="checkAllHealth()">
+            <svg width="14" height="14"><use href="#ico-play"/></svg>
+            <span data-i18n="toolbar.checkAllHealth">{{ t('toolbar.checkAllHealth') }}</span>
           </button>
           <button class="btn" onclick="pushToBackends()" title="{{ t('sync.pushHint') }}">
             <svg width="14" height="14"><use href="#ico-sync"/></svg>
             <span data-i18n="sync.push">{{ t('sync.push') }}</span>
           </button>
-          <button class="btn" onclick="showSyncImportModal()" title="{{ t('sync.importHint') }}">
-            <svg width="14" height="14"><use href="#ico-upload"/></svg>
-            <span data-i18n="sync.importFromBackends">{{ t('sync.importFromBackends') }}</span>
+          <button class="btn" id="undoImportBtn" onclick="undoLastImport()" style="display:none" title="{{ t('importUndo.hint') }}">
+            <span data-i18n="importUndo.btn">{{ t('importUndo.btn') }}</span>
           </button>
-          <button class="btn" onclick="exportBackup()">
-            <span data-i18n="backup.export">{{ t('backup.export') }}</span>
-          </button>
-          <button class="btn" onclick="triggerImportBackup()">
-            <span data-i18n="backup.import">{{ t('backup.import') }}</span>
-          </button>
-          <button class="btn" onclick="checkAllHealth()">
-            <svg width="14" height="14"><use href="#ico-play"/></svg>
-            <span data-i18n="toolbar.checkAllHealth">{{ t('toolbar.checkAllHealth') }}</span>
-          </button>
+          <div class="action-menu" id="vendorsMoreMenu">
+            <button class="btn btn-ghost" type="button" onclick="toggleActionMenu('vendorsMoreMenu', event)" title="{{ t('toolbar.more') }}">
+              <span data-i18n="toolbar.more">{{ t('toolbar.more') }}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="action-menu-panel">
+              <button type="button" onclick="checkFailedHealth(); closeActionMenus()">
+                <span data-i18n="health.recheckFailed">{{ t('health.recheckFailed') }}</span>
+              </button>
+              <button type="button" onclick="showSyncImportModal(); closeActionMenus()">
+                <span data-i18n="sync.importFromBackends">{{ t('sync.importFromBackends') }}</span>
+              </button>
+              <div class="action-menu-sep"></div>
+              <button type="button" onclick="exportVendorsCsv(); closeActionMenus()">
+                <span data-i18n="exportKeys.btn">{{ t('exportKeys.btn') }}</span>
+              </button>
+              <button type="button" onclick="exportBackup(); closeActionMenus()">
+                <span data-i18n="backup.export">{{ t('backup.export') }}</span>
+              </button>
+              <button type="button" onclick="triggerImportBackup(); closeActionMenus()">
+                <span data-i18n="backup.import">{{ t('backup.import') }}</span>
+              </button>
+              <div class="action-menu-sep"></div>
+              <button type="button" onclick="showDedupeModal(); closeActionMenus()">
+                <span data-i18n="dedupe.btn">{{ t('dedupe.btn') }}</span>
+              </button>
+              <button type="button" onclick="showMergeVendorsModal(); closeActionMenus()">
+                <span data-i18n="mergeVendors.btn">{{ t('mergeVendors.btn') }}</span>
+              </button>
+              <button type="button" onclick="cleanEmptyVendors(); closeActionMenus()">
+                <span data-i18n="emptyVendors.btn">{{ t('emptyVendors.btn') }}</span>
+              </button>
+            </div>
+          </div>
           <button class="btn btn-primary" onclick="showAddVendorModal()">
             <svg width="14" height="14"><use href="#ico-plus"/></svg>
             <span data-i18n="toolbar.addVendor">{{ t('toolbar.addVendor') }}</span>
@@ -354,10 +387,23 @@
     <!-- ═══ Backends ═══ -->
     <div class="view" id="view-backends">
       <div class="page-head">
-        <h2 data-i18n="nav.backends">{{ t('nav.backends') }}</h2>
-        <p class="page-desc" data-i18n="backends.desc">{{ t('backends.desc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.backends">{{ t('nav.backends') }}</h2>
+          <p class="page-desc" data-i18n="backends.desc">{{ t('backends.desc') }}</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" onclick="refreshBackendStatus()">
+            <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+            <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+          </button>
+          <button class="btn btn-primary" onclick="pushToBackends()" title="{{ t('sync.pushHint') }}">
+            <svg width="14" height="14"><use href="#ico-sync"/></svg>
+            <span data-i18n="sync.push">{{ t('sync.push') }}</span>
+          </button>
+        </div>
       </div>
 
+      <div class="page-body">
       <div id="backendSummaryBar" class="backend-summary-bar"></div>
       <div id="lastPushPanel" class="last-push-panel" style="display:none"></div>
 
@@ -421,31 +467,43 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
     <!-- ═══ Statistics ═══ -->
     <div class="view" id="view-stats">
       <div class="page-head">
-        <h2 data-i18n="nav.stats">{{ t('nav.stats') }}</h2>
-        <p class="page-desc" data-i18n="stats.desc">{{ t('stats.desc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.stats">{{ t('nav.stats') }}</h2>
+          <p class="page-desc" data-i18n="stats.desc">{{ t('stats.desc') }}</p>
+        </div>
         <div class="page-actions">
-          <button class="btn btn-sm" onclick="loadStats()">
+          <button class="btn" onclick="loadStats()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
-          <button class="btn btn-sm" onclick="importStatsFromOpenClaw()">
-            <span data-i18n="stats.importOpenClaw">{{ t('stats.importOpenClaw') }}</span>
-          </button>
-          <button class="btn btn-sm" onclick="exportStats('csv')">
-            <span data-i18n="stats.exportCsv">{{ t('stats.exportCsv') }}</span>
-          </button>
-          <button class="btn btn-sm" onclick="exportStats('json')">
-            <span data-i18n="stats.exportJson">{{ t('stats.exportJson') }}</span>
-          </button>
+          <div class="action-menu" id="statsMoreMenu">
+            <button class="btn btn-ghost" type="button" onclick="toggleActionMenu('statsMoreMenu', event)">
+              <span data-i18n="toolbar.more">{{ t('toolbar.more') }}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="action-menu-panel">
+              <button type="button" onclick="importStatsFromOpenClaw(); closeActionMenus()">
+                <span data-i18n="stats.importOpenClaw">{{ t('stats.importOpenClaw') }}</span>
+              </button>
+              <button type="button" onclick="exportStats('csv'); closeActionMenus()">
+                <span data-i18n="stats.exportCsv">{{ t('stats.exportCsv') }}</span>
+              </button>
+              <button type="button" onclick="exportStats('json'); closeActionMenus()">
+                <span data-i18n="stats.exportJson">{{ t('stats.exportJson') }}</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="stats-filters" id="statsFilters">
-        <div class="stats-filter-row">
+      <div class="page-body">
+      <div class="stats-filters dash-card" id="statsFilters">
+        <div class="stats-filter-primary">
           <label class="stats-filter-item">
             <span data-i18n="stats.from">{{ t('stats.from') }}</span>
             <input type="date" id="statsFrom" onchange="loadStats()">
@@ -473,6 +531,9 @@
               <option value="source" data-i18n="stats.groupSource">{{ t('stats.groupSource') }}</option>
             </select>
           </label>
+          <button class="btn btn-sm btn-ghost" type="button" onclick="toggleStatsAdvanced()" id="statsAdvancedToggle" data-i18n="stats.moreFilters">{{ t('stats.moreFilters') }}</button>
+        </div>
+        <div class="stats-filter-row stats-filter-advanced" id="statsAdvancedFilters" style="display:none">
           <label class="stats-filter-item">
             <span data-i18n="stats.filterVendor">{{ t('stats.filterVendor') }}</span>
             <select id="statsFilterVendor" onchange="onStatsFilterChange()">
@@ -491,11 +552,11 @@
               <option value="">{{ t('stats.all') }}</option>
             </select>
           </label>
-                    <label class="stats-filter-item">
+          <label class="stats-filter-item">
             <span data-i18n="stats.detailSearch">{{ t('stats.detailSearch') }}</span>
             <input type="text" id="statsDetailSearch" placeholder="{{ t('stats.detailSearchPh') }}" onkeydown="if(event.key==='Enter'){resetStatsPage();loadStats();}">
           </label>
-<button class="btn btn-sm" onclick="clearStatsFilters()" data-i18n="stats.clearFilters">{{ t('stats.clearFilters') }}</button>
+          <button class="btn btn-sm" onclick="clearStatsFilters()" data-i18n="stats.clearFilters">{{ t('stats.clearFilters') }}</button>
         </div>
       </div>
 
@@ -553,21 +614,25 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
 
     <!-- ═══ Models catalog ═══ -->
     <div class="view" id="view-models">
       <div class="page-head">
-        <h2 data-i18n="nav.models">{{ t('nav.models') }}</h2>
-        <p class="page-desc" data-i18n="models.desc">{{ t('models.desc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.models">{{ t('nav.models') }}</h2>
+          <p class="page-desc" data-i18n="models.desc">{{ t('models.desc') }}</p>
+        </div>
         <div class="page-actions">
-          <input type="text" id="modelsCatalogSearch" class="vendor-search" style="min-width:220px" data-i18n-placeholder="models.searchPh" placeholder="{{ t('models.searchPh') }}" oninput="filterModelsCatalog()">
-          <button class="btn btn-sm" onclick="loadModelsCatalog()">
+          <input type="text" id="modelsCatalogSearch" class="page-search" data-i18n-placeholder="models.searchPh" placeholder="{{ t('models.searchPh') }}" oninput="filterModelsCatalog()">
+          <button class="btn" onclick="loadModelsCatalog()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
         </div>
       </div>
+      <div class="page-body">
       <div class="dash-section">
         <div class="table-wrap">
           <table id="modelsCatalogTable" class="models-catalog-table">
@@ -593,31 +658,37 @@
           </table>
         </div>
       </div>
+      </div>
     </div>
 
     <!-- ═══ Downstream Routes ═══ -->
     <div class="view" id="view-routes">
       <div class="page-head">
-        <h2 data-i18n="nav.routes">{{ t('nav.routes') }}</h2>
-        <p class="page-desc" data-i18n="routes.pageDesc">{{ t('routes.pageDesc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.routes">{{ t('nav.routes') }}</h2>
+          <p class="page-desc" data-i18n="routes.pageDesc">{{ t('routes.pageDesc') }}</p>
+        </div>
         <div class="page-actions">
-          <button class="btn btn-sm" onclick="loadRoutesPage()">
+          <button class="btn" onclick="loadRoutesPage()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
-          <button class="btn btn-sm" onclick="rebuildAllDownstream()">
+          <button class="btn" onclick="rebuildAllDownstream()">
             <span data-i18n="routes.rebuildAll">{{ t('routes.rebuildAll') }}</span>
           </button>
-          <button class="btn btn-sm btn-primary" onclick="showCreateDownstream()">
+          <button class="btn btn-primary" onclick="showCreateDownstream()">
+            <svg width="14" height="14"><use href="#ico-plus"/></svg>
             <span data-i18n="routes.create">{{ t('routes.create') }}</span>
           </button>
         </div>
       </div>
+      <div class="page-body">
       <div class="dash-section">
         <div class="form-hint" id="routesEndpointHint" data-i18n="routes.endpointHint">{{ t('routes.endpointHint') }}</div>
-        <div id="routesList" class="profiles-list" style="margin-top:12px">
+        <div id="routesList" class="profiles-list routes-list">
           <div class="todo-empty" data-i18n="common.loading">{{ t('common.loading') }}</div>
         </div>
+      </div>
       </div>
     </div>
 
@@ -671,15 +742,18 @@
     <!-- ═══ Check-in ═══ -->
     <div class="view" id="view-checkin">
       <div class="page-head">
-        <h2 data-i18n="nav.checkin">{{ t('nav.checkin') }}</h2>
-        <p class="page-desc" data-i18n="checkin.pageDesc">{{ t('checkin.pageDesc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.checkin">{{ t('nav.checkin') }}</h2>
+          <p class="page-desc" data-i18n="checkin.pageDesc">{{ t('checkin.pageDesc') }}</p>
+        </div>
         <div class="page-actions">
-          <button class="btn btn-sm" onclick="loadCheckinPage()">
+          <button class="btn" onclick="loadCheckinPage()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
         </div>
       </div>
+      <div class="page-body">
       <div class="dash-section">
         <div class="key-toolbar checkin-toolbar">
           <div class="key-toolbar-left">
@@ -709,26 +783,30 @@
             <tbody id="checkinBody"></tbody>
           </table>
         </div>
-        <p class="form-hint" style="padding:10px 14px" data-i18n="checkin.hint">{{ t('checkin.hint') }}</p>
+        <p class="form-hint checkin-hint" data-i18n="checkin.hint">{{ t('checkin.hint') }}</p>
+      </div>
       </div>
     </div>
 
     <!-- ═══ Health Monitor ═══ -->
     <div class="view" id="view-health">
       <div class="page-head">
-        <h2 data-i18n="nav.health">{{ t('nav.health') }}</h2>
-        <p class="page-desc" data-i18n="health.pageDesc">{{ t('health.pageDesc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.health">{{ t('nav.health') }}</h2>
+          <p class="page-desc" data-i18n="health.pageDesc">{{ t('health.pageDesc') }}</p>
+        </div>
         <div class="page-actions">
-          <button class="btn btn-sm" onclick="loadHealthMonitor()">
+          <button class="btn" onclick="loadHealthMonitor()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
-          <button class="btn btn-sm btn-primary" id="hmRunNowBtn" onclick="healthRunNow()">
+          <button class="btn btn-primary" id="hmRunNowBtn" onclick="healthRunNow()">
             <span data-i18n="health.runNow">{{ t('health.runNow') }}</span>
           </button>
         </div>
       </div>
 
+      <div class="page-body">
       <div class="dash-section">
         <div class="hm-status-bar" id="hmStatusBar">
           <div class="hm-state">
@@ -804,37 +882,41 @@
         </div>
         <div id="hmHistoryDetail" class="hm-history-detail" style="display:none"></div>
       </div>
+      </div>
     </div>
 
     <!-- ═══ Diagnostics ═══ -->
     <div class="view" id="view-diagnostics">
       <div class="page-head">
-        <h2 data-i18n="nav.diagnostics">{{ t('nav.diagnostics') }}</h2>
-        <p class="page-desc" data-i18n="diagnostics.desc">{{ t('diagnostics.desc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.diagnostics">{{ t('nav.diagnostics') }}</h2>
+          <p class="page-desc" data-i18n="diagnostics.desc">{{ t('diagnostics.desc') }}</p>
+        </div>
         <div class="page-actions">
-          <button class="btn btn-sm" onclick="loadDiagnostics()">
+          <button class="btn" onclick="loadDiagnostics()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
-          <button class="btn btn-sm" onclick="copyDiagnostics()">
+          <button class="btn" onclick="copyDiagnostics()">
             <span data-i18n="diagnostics.copy">{{ t('diagnostics.copy') }}</span>
           </button>
-          <button class="btn btn-sm btn-primary" onclick="downloadDiagnosticsPack()" title="{{ t('diagnostics.downloadHint') }}">
+          <button class="btn btn-primary" onclick="downloadDiagnosticsPack()" title="{{ t('diagnostics.downloadHint') }}">
             <span data-i18n="diagnostics.download">{{ t('diagnostics.download') }}</span>
           </button>
-          <button class="btn btn-sm" onclick="checkForUpdates()">
+          <button class="btn btn-ghost" onclick="checkForUpdates()">
             <span data-i18n="updates.check">{{ t('updates.check') }}</span>
           </button>
         </div>
       </div>
+      <div class="page-body">
       <div id="updateCheckBanner" class="budget-alerts" style="display:none"></div>
-      <div class="dash-section">
+      <div class="dash-section dash-card">
         <pre id="diagnosticsOut" class="diagnostics-out">{{ t('common.loading') }}</pre>
       </div>
-      <div class="dash-section">
+      <div class="dash-section dash-card">
         <div class="dash-section-head">
           <h3 data-i18n="audit.title">{{ t('audit.title') }}</h3>
-          <button class="btn btn-sm" onclick="loadAuditLog()">
+          <button class="btn btn-sm btn-ghost" onclick="loadAuditLog()">
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
         </div>
@@ -842,14 +924,18 @@
           <div class="todo-empty" data-i18n="common.loading">{{ t('common.loading') }}</div>
         </div>
       </div>
+      </div>
     </div>
 
     <!-- ═══ Settings ═══ -->
     <div class="view" id="view-settings">
       <div class="page-head">
-        <h2 data-i18n="nav.settings">{{ t('nav.settings') }}</h2>
-        <p class="page-desc" data-i18n="settings.pageDesc">{{ t('settings.pageDesc') }}</p>
+        <div class="page-head-main">
+          <h2 data-i18n="nav.settings">{{ t('nav.settings') }}</h2>
+          <p class="page-desc" data-i18n="settings.pageDesc">{{ t('settings.pageDesc') }}</p>
+        </div>
       </div>
+      <div class="page-body">
       <div class="dash-section settings-panel">
         <div class="settings-card">
           <h3 data-i18n="settings.healthTitle">{{ t('settings.healthTitle') }}</h3>
@@ -909,6 +995,22 @@
               </div>
             </div>
           </div>
+        </div>
+        <div class="settings-card">
+          <h3 data-i18n="settings.secretsTitle">{{ t('settings.secretsTitle') }}</h3>
+          <p class="form-hint" data-i18n="settings.secretsHint">{{ t('settings.secretsHint') }}</p>
+          <p class="form-hint" id="secretsVaultStatus"></p>
+          <div class="form-group">
+            <label data-i18n="settings.secretsPassword">{{ t('settings.secretsPassword') }}</label>
+            <input type="password" id="setSecretsPassword" placeholder="••••••••" autocomplete="new-password">
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+            <button class="btn btn-sm btn-primary" onclick="enableSecretsVault()" data-i18n="settings.secretsEnable">{{ t('settings.secretsEnable') }}</button>
+            <button class="btn btn-sm" onclick="unlockSecretsVault()" data-i18n="settings.secretsUnlock">{{ t('settings.secretsUnlock') }}</button>
+            <button class="btn btn-sm" onclick="lockSecretsVault()" data-i18n="settings.secretsLock">{{ t('settings.secretsLock') }}</button>
+            <button class="btn btn-sm" onclick="disableSecretsVault()" data-i18n="settings.secretsDisable">{{ t('settings.secretsDisable') }}</button>
+          </div>
+          <p class="form-hint" style="margin-top:8px" data-i18n="settings.secretsEnvHint">{{ t('settings.secretsEnvHint') }}</p>
         </div>
         <div class="settings-card">
           <h3 data-i18n="settings.accessTitle">{{ t('settings.accessTitle') }}</h3>
@@ -1020,11 +1122,40 @@
           <button class="btn" onclick="showOnboarding(true)" data-i18n="onboarding.replay">{{ t('onboarding.replay') }}</button>
         </div>
       </div>
+      </div>
     </div>
   </main>
 </div>
 
 <div id="toastContainer" class="toast-container"></div>
+<div id="globalLoading" class="global-loading" style="display:none" aria-live="polite" aria-busy="true">
+  <div class="global-loading-card">
+    <div class="global-loading-spinner" aria-hidden="true"></div>
+    <div class="global-loading-text" id="globalLoadingText">Loading…</div>
+    <div class="global-loading-sub" id="globalLoadingSub" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Task Center: non-blocking progress for import / health / sync -->
+<div id="taskCenter" class="task-center" aria-live="polite">
+  <div class="task-center-head">
+    <div class="task-center-title">
+      <strong data-i18n="tasks.title">{{ t('tasks.title') }}</strong>
+      <span class="task-center-sub" id="taskCenterSub" data-i18n="tasks.idle">{{ t('tasks.idle') }}</span>
+    </div>
+    <div class="task-center-head-actions">
+      <button type="button" class="btn btn-sm btn-ghost" onclick="clearFinishedTasks()" data-i18n="tasks.clearDone">{{ t('tasks.clearDone') }}</button>
+      <button type="button" class="btn-close" onclick="closeTaskCenter()" title="Close">&times;</button>
+    </div>
+  </div>
+  <div class="task-center-body" id="taskCenterBody">
+    <div class="todo-empty" data-i18n="tasks.empty">{{ t('tasks.empty') }}</div>
+  </div>
+</div>
+<button type="button" class="task-center-fab" id="taskCenterFab" onclick="toggleTaskCenter()" style="display:none" title="{{ t('tasks.title') }}">
+  <span class="task-center-fab-label" data-i18n="tasks.short">{{ t('tasks.short') }}</span>
+  <span class="task-center-badge" id="taskCenterFabBadge">0</span>
+</button>
 
 <!-- ═══ Modals ═══ -->
 
@@ -1485,6 +1616,47 @@ function copyStatusText(el) {
   copyText(t.trim());
 }
 
+function toggleStatsAdvanced() {
+  var box = $('statsAdvancedFilters');
+  var btn = $('statsAdvancedToggle');
+  if (!box) return;
+  var open = box.style.display === 'none' || !box.style.display;
+  // if currently none, open; if visible, close
+  var isHidden = box.style.display === 'none' || getComputedStyle(box).display === 'none';
+  box.style.display = isHidden ? '' : 'none';
+  if (btn) {
+    btn.textContent = isHidden
+      ? (_('stats.hideFilters') || 'Hide filters')
+      : (_('stats.moreFilters') || 'More filters');
+  }
+}
+
+function closeActionMenus() {
+  document.querySelectorAll('.action-menu.open').forEach(function(el) {
+    el.classList.remove('open');
+  });
+}
+
+function toggleActionMenu(id, evt) {
+  if (evt) {
+    try { evt.preventDefault(); evt.stopPropagation(); } catch (e) {}
+  }
+  var menu = $(id);
+  if (!menu) return;
+  var wasOpen = menu.classList.contains('open');
+  closeActionMenus();
+  if (!wasOpen) menu.classList.add('open');
+}
+
+document.addEventListener('click', function(e) {
+  if (e.target && e.target.closest && e.target.closest('.action-menu')) return;
+  closeActionMenus();
+});
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeActionMenus();
+});
+
 function showToast(msg, type, opts) {
   type = type || 'info';
   opts = opts || {};
@@ -1515,6 +1687,197 @@ function showToast(msg, type, opts) {
     el.classList.add('toast-leave');
     setTimeout(function() { el.remove(); }, 250);
   }, ms);
+}
+
+var _globalLoadingDepth = 0;
+
+function showGlobalLoading(msg, sub) {
+  _globalLoadingDepth++;
+  var box = $('globalLoading');
+  var text = $('globalLoadingText');
+  var subEl = $('globalLoadingSub');
+  if (text) text.textContent = msg || (_('common.loading') || 'Loading…');
+  if (subEl) {
+    if (sub) {
+      subEl.style.display = '';
+      subEl.textContent = sub;
+    } else if (_globalLoadingDepth <= 1) {
+      subEl.style.display = 'none';
+      subEl.textContent = '';
+    }
+  }
+  if (box) box.style.display = 'flex';
+  try { document.body.classList.add('is-loading'); } catch (e) {}
+}
+
+function updateGlobalLoading(msg, sub) {
+  var text = $('globalLoadingText');
+  var subEl = $('globalLoadingSub');
+  if (text && msg != null) text.textContent = msg;
+  if (subEl && sub != null) {
+    subEl.style.display = sub ? '' : 'none';
+    subEl.textContent = sub || '';
+  }
+}
+
+function hideGlobalLoading(force) {
+  if (force) _globalLoadingDepth = 0;
+  else _globalLoadingDepth = Math.max(0, _globalLoadingDepth - 1);
+  if (_globalLoadingDepth > 0) return;
+  var box = $('globalLoading');
+  if (box) box.style.display = 'none';
+  try { document.body.classList.remove('is-loading'); } catch (e) {}
+}
+
+function setButtonLoading(btn, on, label) {
+  if (!btn) return;
+  if (on) {
+    if (!btn.getAttribute('data-loading-label')) {
+      btn.setAttribute('data-loading-label', btn.textContent || '');
+    }
+    btn.disabled = true;
+    btn.classList.add('loading');
+    if (label) btn.textContent = label;
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    var prev = btn.getAttribute('data-loading-label');
+    if (prev != null) {
+      btn.textContent = prev;
+      btn.removeAttribute('data-loading-label');
+    }
+  }
+}
+
+// ── Task Center (non-blocking jobs) ───────
+var _tasks = [];
+var _taskSeq = 1;
+var _taskCenterOpen = false;
+
+function _taskTypeLabel(type) {
+  var map = {
+    import: _('tasks.typeImport') || 'Import',
+    health: _('tasks.typeHealth') || 'Health check',
+    sync: _('tasks.typeSync') || 'Sync backends',
+  };
+  return map[type] || type || 'Task';
+}
+
+function createTask(opts) {
+  opts = opts || {};
+  var task = {
+    id: 't' + (_taskSeq++),
+    type: opts.type || 'job',
+    title: opts.title || (_('tasks.running') || 'Running…'),
+    detail: opts.detail || '',
+    status: 'running', // running | success | error
+    cur: opts.cur || 0,
+    total: opts.total || 0,
+    startedAt: Date.now(),
+    finishedAt: null,
+    error: '',
+  };
+  _tasks.unshift(task);
+  if (_tasks.length > 30) _tasks = _tasks.slice(0, 30);
+  renderTaskCenter();
+  // Auto-open briefly so user sees background work started
+  if (opts.open !== false) openTaskCenter();
+  return task.id;
+}
+
+function updateTask(id, patch) {
+  var t = _tasks.find(function(x) { return x.id === id; });
+  if (!t) return;
+  Object.keys(patch || {}).forEach(function(k) { t[k] = patch[k]; });
+  renderTaskCenter();
+}
+
+function completeTask(id, opts) {
+  opts = opts || {};
+  updateTask(id, {
+    status: opts.error ? 'error' : 'success',
+    detail: opts.detail != null ? opts.detail : undefined,
+    error: opts.error || '',
+    cur: opts.cur != null ? opts.cur : undefined,
+    total: opts.total != null ? opts.total : undefined,
+    finishedAt: Date.now(),
+  });
+}
+
+function clearFinishedTasks() {
+  _tasks = _tasks.filter(function(t) { return t.status === 'running'; });
+  renderTaskCenter();
+}
+
+function openTaskCenter() {
+  _taskCenterOpen = true;
+  var el = $('taskCenter');
+  if (el) el.classList.add('open');
+  renderTaskCenter();
+}
+
+function closeTaskCenter() {
+  _taskCenterOpen = false;
+  var el = $('taskCenter');
+  if (el) el.classList.remove('open');
+  renderTaskCenter();
+}
+
+function toggleTaskCenter() {
+  if (_taskCenterOpen) closeTaskCenter();
+  else openTaskCenter();
+}
+
+function renderTaskCenter() {
+  var body = $('taskCenterBody');
+  var badge = $('taskCenterBadge');
+  var fab = $('taskCenterFab');
+  var fabBadge = $('taskCenterFabBadge');
+  var sub = $('taskCenterSub');
+  var running = _tasks.filter(function(t) { return t.status === 'running'; }).length;
+  if (badge) {
+    badge.style.display = running ? '' : 'none';
+    badge.textContent = String(running);
+  }
+  if (fab) {
+    // Hide FAB while panel is open; show when there are tasks/running
+    fab.style.display = (_taskCenterOpen || !(running || _tasks.length)) ? 'none' : 'flex';
+  }
+  if (fabBadge) {
+    fabBadge.style.display = running ? '' : 'none';
+    fabBadge.textContent = String(running || _tasks.length);
+  }
+  if (sub) {
+    sub.textContent = running
+      ? ((_('tasks.runningCount') || '{n} running').replace('{n}', running))
+      : (_('tasks.idle') || 'No active tasks');
+  }
+  if (!body) return;
+  if (!_tasks.length) {
+    body.innerHTML = '<div class="todo-empty">' + esc(_('tasks.empty') || 'No tasks yet') + '</div>';
+    return;
+  }
+  body.innerHTML = _tasks.map(function(t) {
+    var pct = t.total > 0 ? Math.min(100, Math.round((t.cur / t.total) * 100)) : (t.status === 'running' ? 15 : 100);
+    var statusCls = t.status === 'success' ? 'ok' : (t.status === 'error' ? 'err' : 'run');
+    var statusLab = t.status === 'success'
+      ? (_('tasks.done') || 'Done')
+      : (t.status === 'error' ? (_('tasks.failed') || 'Failed') : (_('tasks.running') || 'Running'));
+    var progressText = t.total > 0
+      ? ((t.cur || 0) + ' / ' + t.total + (t.total ? ' (' + pct + '%)' : ''))
+      : '';
+    var detail = t.error || t.detail || '';
+    return '<div class="task-item task-' + statusCls + '">' +
+      '<div class="task-item-top">' +
+        '<span class="task-type">' + esc(_taskTypeLabel(t.type)) + '</span>' +
+        '<span class="task-status">' + esc(statusLab) + '</span>' +
+      '</div>' +
+      '<div class="task-title">' + esc(t.title || '') + '</div>' +
+      (detail ? '<div class="task-detail">' + esc(detail) + '</div>' : '') +
+      '<div class="task-progress-bar"><span style="width:' + pct + '%"></span></div>' +
+      (progressText ? '<div class="task-progress-text">' + esc(progressText) + '</div>' : '') +
+    '</div>';
+  }).join('');
 }
 
 // ── View Switching ───────────────────────
@@ -3581,19 +3944,25 @@ async function deleteKey(vendorId, keyId) {
 // ── Key Health Actions ───────────────────
 
 async function checkKeyHealth(vendorId, keyId) {
-  const res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/health');
-  if (res.error && res.healthy == null) showToast(res.error, 'error');
-  else if (res.healthy) showToast(_('toast.checkOk'), 'success');
-  else showToast(formatHealthFailToast(res), 'error', { duration: 8000 });
-  // Immediate local patch: status + enabled + models (before full reload)
-  if (res && !(res.error && res.healthy == null)) {
-    _applyHealthToLocalKey(vendorId, keyId, res);
-  }
-  if (typeof renderVendorList === 'function') renderVendorList();
-  if (selectedVendorId) { await selectVendor(selectedVendorId); }
-  else { await loadVendors(); }
-  if (typeof renderVendorList === 'function') renderVendorList();
-  if (typeof renderOnboardingPanel === 'function') renderOnboardingPanel();
+  var v = (_allVendorsData || []).find(function(x) { return x.id === vendorId; });
+  var k = v && (v.keys || []).find(function(x) { return x.id === keyId; });
+  var label = ((v && v.name) || vendorId) + ' / ' + ((k && (k.name || k.id)) || keyId);
+  return checkHealthTargets([{
+    vendor_id: vendorId,
+    key_id: keyId,
+    vendor_name: (v && v.name) || '',
+    key_name: (k && (k.name || k.id)) || '',
+  }], {
+    title: (_('action.checking') || 'Checking…') + ': ' + label,
+    source: 'manual.one',
+    push: true,
+    reload: true,
+    toast: true,
+    blocking: false,
+    openTask: true,
+    concurrency: 1,
+    quick: true,
+  });
 }
 
 async function enableKey(vendorId, keyId) {
@@ -3628,26 +3997,246 @@ function setHealthProgress(cur, total, label) {
   }
 }
 
+/** Progressive health for an explicit target list (import / recheck).
+ *  Default: non-blocking — progress goes to Task Center, page stays usable.
+ *  opts.blocking=true keeps the old full-page overlay.
+ */
+async function checkHealthTargets(targets, opts) {
+  opts = opts || {};
+  targets = (targets || []).filter(function(t) { return t && t.vendor_id && t.key_id; });
+  if (!targets.length) {
+    return { ok: 0, fail: 0, total: 0 };
+  }
+  if (_healthCheckRunning) {
+    showToast(_('health.busy') || 'Health check already running', 'info');
+    // Still queue? For now reject duplicate health jobs
+    return { ok: 0, fail: 0, total: 0, busy: true };
+  }
+  _healthCheckRunning = true;
+  var ok = 0, fail = 0;
+  var runResults = [];
+  var startedAt = new Date().toISOString();
+  var t0 = Date.now();
+  var title = opts.title || (_('health.running') || 'Checking…');
+  var blocking = opts.blocking === true;
+  var taskId = null;
+  if (typeof createTask === 'function') {
+    taskId = createTask({
+      type: 'health',
+      title: title,
+      detail: (_('health.progress') || 'Checking {cur}/{total}')
+        .replace('{cur}', '0').replace('{total}', String(targets.length)),
+      cur: 0,
+      total: targets.length,
+      open: opts.openTask !== false,
+    });
+  }
+  if (blocking) {
+    showGlobalLoading(title, (_('health.progress') || 'Checking {cur}/{total}')
+      .replace('{cur}', '0').replace('{total}', String(targets.length)));
+  }
+  setHealthProgress(0, targets.length);
+  try {
+    var CONCURRENCY = Math.min(
+      opts.concurrency || 6,
+      Math.max(1, targets.length)
+    );
+    var nextIdx = 0;
+    var finished = 0;
+    var useQuick = opts.quick !== false;
+    async function checkOne(t) {
+      var itemLabel = (_('health.progressItem') || 'Checking {name} ({cur}/{total})')
+        .replace('{name}', (t.vendor_name || '') + '/' + (t.key_name || ''))
+        .replace('{cur}', finished + 1)
+        .replace('{total}', targets.length);
+      try {
+        var qs = '?reconcile=0' + (useQuick ? '&quick=1' : '');
+        var h = await api('/api/vendors/' + t.vendor_id + '/keys/' + t.key_id + '/health' + qs);
+        if (h && h.healthy) ok++; else fail++;
+        if (h) {
+          _applyHealthToLocalKey(t.vendor_id, t.key_id, h);
+          runResults.push({
+            vendor_id: t.vendor_id,
+            key_id: t.key_id,
+            healthy: h.healthy,
+            latency_ms: h.latency_ms,
+            error: h.error,
+          });
+        } else {
+          _applyHealthToLocalKey(t.vendor_id, t.key_id, {
+            vendor_id: t.vendor_id,
+            key_id: t.key_id,
+            healthy: false,
+            error: 'check failed',
+            checked_at: new Date().toISOString(),
+          });
+          runResults.push({ vendor_id: t.vendor_id, key_id: t.key_id, healthy: false, error: 'check failed' });
+        }
+      } catch (e) {
+        fail++;
+        var errMsg = String(e && e.message || e || 'check failed');
+        _applyHealthToLocalKey(t.vendor_id, t.key_id, {
+          vendor_id: t.vendor_id,
+          key_id: t.key_id,
+          healthy: false,
+          error: errMsg,
+          checked_at: new Date().toISOString(),
+        });
+        runResults.push({ vendor_id: t.vendor_id, key_id: t.key_id, healthy: false, error: errMsg });
+      } finally {
+        finished++;
+        setHealthProgress(finished, targets.length, itemLabel);
+        if (taskId) {
+          updateTask(taskId, {
+            cur: finished,
+            total: targets.length,
+            detail: itemLabel,
+          });
+        }
+        if (blocking) {
+          updateGlobalLoading(
+            (_('health.progress') || 'Checking {cur}/{total}')
+              .replace('{cur}', String(finished))
+              .replace('{total}', String(targets.length)),
+            itemLabel
+          );
+        }
+        if (finished % 2 === 0 || finished === targets.length) {
+          if (typeof renderVendorList === 'function') renderVendorList();
+          if (selectedVendorId && typeof filterKeys === 'function') filterKeys();
+        }
+      }
+    }
+    async function worker() {
+      while (true) {
+        var i = nextIdx++;
+        if (i >= targets.length) break;
+        await checkOne(targets[i]);
+      }
+    }
+    var workers = [];
+    for (var w = 0; w < CONCURRENCY; w++) workers.push(worker());
+    await Promise.all(workers);
+    setHealthProgress(targets.length, targets.length, _('health.progressDone') || 'Done {total}/{total}');
+
+    var syncTaskId = null;
+    if (opts.push !== false) {
+      try {
+        if (taskId) {
+          updateTask(taskId, {
+            detail: _('sync.pushing') || 'Syncing backends…',
+            cur: targets.length,
+            total: targets.length,
+          });
+        }
+        if (typeof createTask === 'function') {
+          syncTaskId = createTask({
+            type: 'sync',
+            title: _('sync.pushing') || 'Syncing backends…',
+            detail: _('tasks.syncAfterHealth') || 'After health check',
+            cur: 0,
+            total: 1,
+            open: false,
+          });
+        }
+        if (blocking) updateGlobalLoading(_('sync.pushing') || 'Syncing backends…');
+        await api('/api/sync/push', { method: 'POST' });
+        if (syncTaskId) completeTask(syncTaskId, { detail: _('sync.pushDone') || 'Backends synced', cur: 1, total: 1 });
+      } catch (e) {
+        var serr = String(e && e.message || e);
+        if (syncTaskId) completeTask(syncTaskId, { error: serr, detail: serr, cur: 1, total: 1 });
+        showToast((_('sync.pushFailed') || 'Backend sync failed: {err}').replace('{err}', serr), 'error');
+      }
+    }
+
+    try {
+      await api('/api/health/history', {
+        method: 'POST',
+        body: JSON.stringify({
+          source: opts.source || 'import',
+          started_at: startedAt,
+          finished_at: new Date().toISOString(),
+          duration_ms: Date.now() - t0,
+          results: runResults,
+          ok: ok,
+          fail: fail,
+          total: runResults.length || (ok + fail),
+        }),
+      });
+    } catch (e) {}
+
+    var doneDetail = (_('health.runDone') || 'Done: {ok} ok, {fail} failed')
+      .replace('{ok}', ok).replace('{fail}', fail);
+    if (taskId) {
+      completeTask(taskId, {
+        error: fail && !ok ? doneDetail : '',
+        detail: doneDetail,
+        cur: targets.length,
+        total: targets.length,
+      });
+    }
+    if (opts.toast !== false) {
+      showToast(doneDetail, fail ? 'error' : 'success', {
+        duration: fail ? 8000 : 3000,
+        actionLabel: _('tasks.title') || 'Tasks',
+        onAction: function() { openTaskCenter(); },
+      });
+    }
+    if (opts.reload !== false) {
+      try { await loadVendors(); } catch (e) {}
+    }
+    return { ok: ok, fail: fail, total: ok + fail };
+  } catch (e) {
+    if (taskId) completeTask(taskId, { error: String(e && e.message || e) });
+    throw e;
+  } finally {
+    _healthCheckRunning = false;
+    if (blocking) hideGlobalLoading(true);
+    setTimeout(function() { setHealthProgress(0, 0); }, 1200);
+  }
+}
+
 async function checkAllHealth() {
   if (_healthCheckRunning) {
     showToast(_('health.busy') || 'Health check already running', 'info');
     return;
   }
-  _healthCheckRunning = true;
-  var ok = 0, fail = 0;
-  var startedAt = new Date().toISOString();
-  var t0 = Date.now();
-  var runResults = [];
+  // include_disabled=1 → every key (so no vendor stays "未检测")
+  var meta;
   try {
-    // include_disabled=1 → every key (so no vendor stays "未检测")
-    var meta = await api('/api/health/check-targets?include_disabled=1');
-    var targets = (meta && meta.targets) || [];
-    if (!targets.length) {
-      // fallback bulk (also includes disabled keys + final reconcile)
+    meta = await api('/api/health/check-targets?include_disabled=1');
+  } catch (e) {
+    showToast(String(e && e.message || e), 'error');
+    return;
+  }
+  var targets = (meta && meta.targets) || [];
+  if (!targets.length) {
+    // Fallback bulk via Task Center (no full-page overlay)
+    if (_healthCheckRunning) {
+      showToast(_('health.busy') || 'Health check already running', 'info');
+      return;
+    }
+    _healthCheckRunning = true;
+    var taskId = null;
+    var startedAt = new Date().toISOString();
+    var t0 = Date.now();
+    if (typeof createTask === 'function') {
+      taskId = createTask({
+        type: 'health',
+        title: _('health.running') || 'Running full health check…',
+        detail: _('health.bulkChecking') || 'Bulk checking all keys…',
+        cur: 0,
+        total: 1,
+        open: true,
+      });
+    }
+    try {
       var res = await api('/api/health/check-all', {
         method: 'POST',
         body: JSON.stringify({ reconcile: true, include_disabled: true }),
       });
+      var ok = 0, fail = 0;
+      var runResults = [];
       (res.results || []).forEach(function(h) {
         if (h && h.healthy) ok++; else fail++;
         if (h && h.vendor_id && h.key_id) {
@@ -3661,101 +4250,57 @@ async function checkAllHealth() {
           });
         }
       });
-    } else {
-      setHealthProgress(0, targets.length);
-      for (var i = 0; i < targets.length; i++) {
-        var t = targets[i];
-        setHealthProgress(i, targets.length,
-          (_('health.progressItem') || 'Checking {name} ({cur}/{total})')
-            .replace('{name}', (t.vendor_name || '') + '/' + (t.key_name || ''))
-            .replace('{cur}', i + 1)
-            .replace('{total}', targets.length)
-        );
-        try {
-          // reconcile=0: skip per-key full engine rebuild; one final push below
-          var h = await api('/api/vendors/' + t.vendor_id + '/keys/' + t.key_id + '/health?reconcile=0');
-          if (h && h.healthy) ok++;
-          else fail++;
-          // Always store result (including failures) so UI never stays "未检测"
-          if (h) {
-            _applyHealthToLocalKey(t.vendor_id, t.key_id, h);
-            runResults.push({
-              vendor_id: t.vendor_id,
-              key_id: t.key_id,
-              healthy: h.healthy,
-              latency_ms: h.latency_ms,
-              error: h.error,
-            });
-          } else {
-            _applyHealthToLocalKey(t.vendor_id, t.key_id, {
-              vendor_id: t.vendor_id,
-              key_id: t.key_id,
-              healthy: false,
-              error: 'check failed',
-              checked_at: new Date().toISOString(),
-            });
-            runResults.push({ vendor_id: t.vendor_id, key_id: t.key_id, healthy: false, error: 'check failed' });
-          }
-          if (typeof renderVendorList === 'function') renderVendorList();
-          // live-refresh open key table for selected vendor
-          if (selectedVendorId === t.vendor_id && typeof filterKeys === 'function') filterKeys();
-        } catch (e) {
-          fail++;
-          var errMsg = String(e && e.message || e || 'check failed');
-          _applyHealthToLocalKey(t.vendor_id, t.key_id, {
-            vendor_id: t.vendor_id,
-            key_id: t.key_id,
-            healthy: false,
-            error: errMsg,
-            checked_at: new Date().toISOString(),
-          });
-          runResults.push({ vendor_id: t.vendor_id, key_id: t.key_id, healthy: false, error: errMsg });
-          if (typeof renderVendorList === 'function') renderVendorList();
-        }
-      }
-      setHealthProgress(targets.length, targets.length, _('health.progressDone') || 'Done {total}/{total}');
-      // Final rebuild: healthy keys kept/added, failed/disabled stripped from engines
       try {
-        showToast(_('sync.pushing') || 'Syncing backends…', 'info');
-        await api('/api/sync/push', { method: 'POST' });
+        await api('/api/health/history', {
+          method: 'POST',
+          body: JSON.stringify({
+            source: 'manual',
+            started_at: startedAt,
+            finished_at: new Date().toISOString(),
+            duration_ms: Date.now() - t0,
+            results: runResults,
+            ok: ok,
+            fail: fail,
+            total: runResults.length || (ok + fail),
+          }),
+        });
       } catch (e) {}
+      var doneDetail = (_('health.runDone') || 'Done: {ok} ok, {fail} failed')
+        .replace('{ok}', ok).replace('{fail}', fail);
+      if (taskId) completeTask(taskId, { error: fail && !ok ? doneDetail : '', detail: doneDetail, cur: 1, total: 1 });
+      showToast(
+        _('toast.checkAllDone').replace('{ok}', ok).replace('{fail}', fail),
+        fail > 0 ? 'error' : 'success',
+        { duration: fail > 0 ? 8000 : 3000, actionLabel: _('tasks.title') || 'Tasks', onAction: function() { openTaskCenter(); } }
+      );
+      await loadVendors();
+      if (typeof loadDashHealthSummary === 'function') loadDashHealthSummary();
+      if (typeof renderOnboardingPanel === 'function') renderOnboardingPanel();
+    } catch (e) {
+      if (taskId) completeTask(taskId, { error: String(e && e.message || e) });
+      showToast(String(e && e.message || e), 'error');
+    } finally {
+      _healthCheckRunning = false;
     }
-    // Persist progressive run into health history (for Health page)
-    try {
-      await api('/api/health/history', {
-        method: 'POST',
-        body: JSON.stringify({
-          source: 'manual',
-          started_at: startedAt,
-          finished_at: new Date().toISOString(),
-          duration_ms: Date.now() - t0,
-          results: runResults,
-          ok: ok,
-          fail: fail,
-          total: runResults.length || (ok + fail),
-        }),
-      });
-    } catch (e) {}
-    var reasonMap = {};
-    Object.keys(_allHealthData || {}).forEach(function(ck) {
-      var h = _allHealthData[ck] || {};
-      if (h.healthy === false) {
-        var cat = (typeof classifyHealthErrorCode === 'function')
-          ? classifyHealthErrorCode(h.error || h.message || '', h.error_code)
-          : 'other';
-        var lab = (typeof healthErrorLabel === 'function') ? healthErrorLabel(cat) : cat;
-        reasonMap[lab] = (reasonMap[lab] || 0) + 1;
-      }
-    });
-    var summary = Object.keys(reasonMap).sort(function(a,b){ return reasonMap[b]-reasonMap[a]; })
-      .map(function(k){ return k + '×' + reasonMap[k]; }).join(' · ');
-    var msg = _('toast.checkAllDone').replace('{ok}', ok).replace('{fail}', fail);
-    if (fail > 0 && summary) msg += ' — ' + summary;
-    showToast(msg, fail > 0 ? 'error' : 'success', { duration: fail > 0 ? 8000 : 3000 });
-    await loadVendors();
+    return;
+  }
+  var result = await checkHealthTargets(targets, {
+    title: _('health.running') || 'Running full health check…',
+    source: 'manual',
+    push: true,
+    reload: true,
+    toast: true,
+    blocking: false,
+    openTask: true,
+    concurrency: 8,
+    quick: true,
+  });
+  if (result && !result.busy) {
     if (selectedVendorId) {
       var still = (_sortedVendorsForSelect || []).some(function(v) { return v.id === selectedVendorId; });
-      if (still) await selectVendor(selectedVendorId);
+      if (still) {
+        try { await selectVendor(selectedVendorId); } catch (e) {}
+      }
     }
     if (typeof loadDashHealthSummary === 'function') loadDashHealthSummary();
     if (typeof renderOnboardingPanel === 'function') {
@@ -3764,10 +4309,8 @@ async function checkAllHealth() {
         renderOnboardingPanel((b && b.backends) || []);
       } catch (e) { renderOnboardingPanel(); }
     }
-  } finally {
-    _healthCheckRunning = false;
-    setTimeout(function() { setHealthProgress(0, 0); }, 1200);
   }
+  return result;
 }
 
 // ── Models Modal ─────────────────────────
@@ -4304,40 +4847,56 @@ async function parseBatchImport(force) {
   }
   if (!force && _batchDirty) return;
 
-  const res = await api('/api/batch/parse', { method: 'POST', body: JSON.stringify({ text: text }) });
-  if (res.error) {
-    $('batchImportError').textContent = res.error;
-    $('batchImportError').style.display = '';
-    return;
+  var parseBtn = $('batchParseBtn');
+  var showBusy = !!force;
+  if (showBusy) {
+    setButtonLoading(parseBtn, true, _('batchImport.parsing') || 'Parsing…');
+    showGlobalLoading(_('batchImport.parsing') || 'Parsing…', _('batchImport.parsingHint') || 'Recognizing vendors and keys…');
   }
-  $('batchImportError').style.display = 'none';
-
-  var usedNames = {};
-  (_allVendorsData || []).forEach(function(v) {
-    usedNames[(v.name || '').toLowerCase()] = true;
-  });
-  var parsed = (res.entries || []).map(function(e) {
-    return _normalizeBatchEntry(e, usedNames);
-  });
-
-  if (!parsed.length) {
-    if (force) {
-      showToast(_('batchImport.noEntries'), 'error');
-      // still show empty editable row for manual fill
-      _batchEntries = [];
-      _batchDirty = false;
-      addBatchRow();
+  try {
+    const res = await api('/api/batch/parse', { method: 'POST', body: JSON.stringify({ text: text }) });
+    if (res.error) {
+      $('batchImportError').textContent = res.error;
+      $('batchImportError').style.display = '';
       return;
     }
-    $('batchImportPreview').style.display = 'none';
-    $('batchApplyBtn').style.display = 'none';
-    return;
-  }
+    $('batchImportError').style.display = 'none';
 
-  _batchEntries = parsed;
-  _batchDirty = false;
-  _batchAutoParse = true;
-  renderBatchPreview();
+    var usedNames = {};
+    (_allVendorsData || []).forEach(function(v) {
+      usedNames[(v.name || '').toLowerCase()] = true;
+    });
+    var parsed = (res.entries || []).map(function(e) {
+      return _normalizeBatchEntry(e, usedNames);
+    });
+
+    if (!parsed.length) {
+      if (force) {
+        showToast(_('batchImport.noEntries'), 'error');
+        // still show empty editable row for manual fill
+        _batchEntries = [];
+        _batchDirty = false;
+        addBatchRow();
+        return;
+      }
+      $('batchImportPreview').style.display = 'none';
+      $('batchApplyBtn').style.display = 'none';
+      return;
+    }
+
+    _batchEntries = parsed;
+    _batchDirty = false;
+    _batchAutoParse = true;
+    renderBatchPreview();
+    if (force) {
+      showToast((_('batchImport.parsed') || 'Recognized {n} entr(y/ies)').replace('{n}', parsed.length), 'success');
+    }
+  } finally {
+    if (showBusy) {
+      setButtonLoading(parseBtn, false);
+      hideGlobalLoading();
+    }
+  }
 }
 
 async function applyBatchImport() {
@@ -4358,7 +4917,7 @@ async function applyBatchImport() {
     $('batchImportError').textContent = invalid.join('；');
     $('batchImportError').style.display = '';
     renderBatchPreview();
-    showToast(_('batchImport.fixErrors'), 'error');
+    showToast(_('batchImport.formErrors'), 'error');
     return;
   }
   $('batchImportError').style.display = 'none';
@@ -4375,21 +4934,72 @@ async function applyBatchImport() {
   });
 
   const btn = $('batchApplyBtn');
-  btn.disabled = true;
+  setButtonLoading(btn, true, _('batchImport.importing') || 'Importing…');
+  var importTaskId = null;
+  if (typeof createTask === 'function') {
+    importTaskId = createTask({
+      type: 'import',
+      title: _('batchImport.importing') || 'Importing…',
+      detail: (_('batchImport.importingHint') || 'Writing {n} entr(y/ies)…').replace('{n}', payload.length),
+      cur: 0,
+      total: payload.length,
+      open: true,
+    });
+  }
+  // Short overlay only for the fast write itself
+  showGlobalLoading(
+    _('batchImport.importing') || 'Importing…',
+    (_('batchImport.importingHint') || 'Writing {n} entr(y/ies)…').replace('{n}', payload.length)
+  );
+  var checkTargets = [];
+  var focusId = '';
+  var pending = 0;
   try {
     const res = await api('/api/batch/import', { method: 'POST', body: JSON.stringify({ entries: payload }) });
-    if (res.error) { showToast(res.error, 'error'); return; }
+    if (res.error) {
+      if (importTaskId) completeTask(importTaskId, { error: res.error, detail: res.error });
+      showToast(res.error, 'error');
+      return;
+    }
     var imported = (res.created || []).filter(function(c) { return !c.skipped; }).length;
     var skipped = (res.created || []).filter(function(c) { return c.skipped; }).length;
     var errN = (res.errors || []).length;
+    pending = res.pending_health || (res.check_targets || []).length || 0;
+    checkTargets = res.check_targets || [];
+    if (!checkTargets.length && pending) {
+      checkTargets = (res.created || []).filter(function(c) {
+        return !c.skipped && c.pending_health && c.vendor_id != null && c.key_id != null;
+      }).map(function(c) {
+        return {
+          vendor_id: String(c.vendor_id),
+          key_id: String(c.key_id),
+          vendor_name: c.vendor || '',
+          key_name: c.key || '',
+        };
+      });
+    }
     var msg = _('batchImport.importDone')
       .replace('{ok}', imported)
       .replace('{skip}', skipped)
       .replace('{err}', errN);
+    if (pending) {
+      msg += ' — ' + (_('batchImport.healthDeferred') || 'will check {n} key(s)').replace('{n}', pending);
+    }
+    if (importTaskId) {
+      completeTask(importTaskId, {
+        detail: msg,
+        cur: payload.length,
+        total: payload.length,
+        error: errN && !imported ? msg : '',
+      });
+    }
     showToast(msg, errN ? 'error' : 'success', {
-      duration: 10000,
-      actionLabel: _('importUndo.btn') || 'Undo import',
-      onAction: function() { undoLastImport(); },
+      duration: 6000,
+      actionLabel: pending ? (_('tasks.title') || 'Tasks') : (_('importUndo.btn') || 'Undo import'),
+      onAction: function() {
+        if (pending) openTaskCenter();
+        else undoLastImport();
+      },
     });
     if (errN && res.errors) {
       $('batchImportError').textContent = res.errors.map(function(x) {
@@ -4397,20 +5007,37 @@ async function applyBatchImport() {
       }).join('；');
       $('batchImportError').style.display = '';
     }
-    // Always jump to vendors after import attempt so user sees result
-    var focusId = res.focus_vendor_id
+    focusId = res.focus_vendor_id
       || ((res.created || []).filter(function(c) { return !c.skipped && c.vendor_id; }).slice(-1)[0] || {}).vendor_id
       || ((res.created || []).filter(function(c) { return c.vendor_id; }).slice(-1)[0] || {}).vendor_id
       || '';
     focusId = focusId != null && focusId !== '' ? String(focusId) : '';
     closeBatchImportModal();
     setPendingFocusVendor(focusId);
-    // skipLoad: only one loadVendors with sticky focus (avoids race)
     switchView('vendors', { skipLoad: true });
     await loadVendors({ focusVendorId: focusId });
     refreshUndoImportBtn();
+  } catch (e) {
+    if (importTaskId) completeTask(importTaskId, { error: String(e && e.message || e) });
+    showToast(String(e && e.message || e), 'error');
   } finally {
-    btn.disabled = false;
+    setButtonLoading(btn, false);
+    hideGlobalLoading(true);
+  }
+
+  // Background: check ONLY imported keys + sync — does NOT block the page
+  if (checkTargets.length && typeof checkHealthTargets === 'function') {
+    setTimeout(function() {
+      checkHealthTargets(checkTargets, {
+        title: _('batchImport.checkingImported') || 'Checking imported keys…',
+        source: 'batch.import',
+        push: true,
+        reload: true,
+        toast: true,
+        blocking: false,
+        openTask: true,
+      });
+    }, 120);
   }
 }
 
@@ -5867,6 +6494,7 @@ async function loadSettingsPage() {
   if ($('setHealthOkStreak')) $('setHealthOkStreak').value = s.health_ok_streak || 3;
   if ($('setHealthFailInterval')) $('setHealthFailInterval').value = s.health_fail_interval_seconds || 7200;
   if ($('setHealthOkInterval')) $('setHealthOkInterval').value = s.health_ok_interval_seconds || 3600;
+  refreshSecretsVaultStatus(s);
   if ($('setBudgetDailyCost')) $('setBudgetDailyCost').value = s.budget_daily_cost || 0;
   if ($('setBudgetMonthlyCost')) $('setBudgetMonthlyCost').value = s.budget_monthly_cost || 0;
   if ($('setBudgetDailyTokens')) $('setBudgetDailyTokens').value = s.budget_daily_tokens || 0;
@@ -6521,12 +7149,29 @@ function renderHealthKeys() {
 }
 
 async function healthCheckOne(vendorId, keyId) {
-  var res = await api('/api/vendors/' + encodeURIComponent(vendorId) + '/keys/' + encodeURIComponent(keyId) + '/health');
-  if (res.error && res.healthy == null) { showToast(res.error, 'error'); return; }
-  if (res.healthy) showToast(_('health.healthy') || 'Healthy', 'success');
-  else showToast(formatHealthFailToast(res), 'error', { duration: 8000 });
-  loadHealthMonitor();
-  if (typeof renderOnboardingPanel === 'function') renderOnboardingPanel();
+  var v = (_allVendorsData || []).find(function(x) { return x.id === vendorId; });
+  var k = v && (v.keys || []).find(function(x) { return x.id === keyId; });
+  var result = await checkHealthTargets([{
+    vendor_id: vendorId,
+    key_id: keyId,
+    vendor_name: (v && v.name) || '',
+    key_name: (k && (k.name || k.id)) || '',
+  }], {
+    title: (_('action.checking') || 'Checking…') + ': ' + ((v && v.name) || vendorId),
+    source: 'manual.monitor',
+    push: true,
+    reload: true,
+    toast: true,
+    blocking: false,
+    openTask: true,
+    concurrency: 1,
+    quick: true,
+  });
+  if (result && !result.busy) {
+    if (typeof loadHealthMonitor === 'function') loadHealthMonitor();
+    if (typeof renderOnboardingPanel === 'function') renderOnboardingPanel();
+  }
+  return result;
 }
 
 async function healthMonitorStart() {
@@ -7047,6 +7692,59 @@ async function loadAppVersion() {
   } catch (e) {}
 }
 
+function refreshSecretsVaultStatus(s) {
+  var el = $('secretsVaultStatus');
+  if (!el) return;
+  s = s || {};
+  if (s.encrypt_keys_at_rest) {
+    el.textContent = s.secrets_locked
+      ? (_('settings.secretsStatusLocked') || 'On disk: encrypted · process: LOCKED — unlock to use keys')
+      : (_('settings.secretsStatusUnlocked') || 'On disk: encrypted · process: unlocked');
+  } else {
+    el.textContent = _('settings.secretsStatusOff') || 'On disk: plaintext (file mode 600). Optional encryption available.';
+  }
+}
+
+async function enableSecretsVault() {
+  var pw = (($('setSecretsPassword') && $('setSecretsPassword').value) || '').trim();
+  if (pw.length < 6) { showToast(_('settings.secretsPwShort') || 'Password min 6 chars', 'error'); return; }
+  if (!confirm(_('settings.secretsEnableConfirm') || 'Encrypt all API keys on disk with this password?')) return;
+  var res = await api('/api/secrets/enable', { method: 'POST', body: JSON.stringify({ password: pw }) });
+  if (res.error || res.success === false) { showToast(res.error || 'Failed', 'error'); return; }
+  if ($('setSecretsPassword')) $('setSecretsPassword').value = '';
+  showToast(_('settings.secretsEnabled') || 'Disk encryption enabled', 'success');
+  loadSettingsPage();
+}
+
+async function unlockSecretsVault() {
+  var pw = (($('setSecretsPassword') && $('setSecretsPassword').value) || '').trim();
+  if (!pw) { showToast(_('settings.secretsPwRequired') || 'Enter password', 'error'); return; }
+  var res = await api('/api/secrets/unlock', { method: 'POST', body: JSON.stringify({ password: pw }) });
+  if (res.error || res.success === false) { showToast(res.error || 'Wrong password', 'error'); return; }
+  if ($('setSecretsPassword')) $('setSecretsPassword').value = '';
+  showToast(_('settings.secretsUnlocked') || 'Vault unlocked', 'success');
+  loadSettingsPage();
+  try { loadVendors(); } catch (e) {}
+}
+
+async function lockSecretsVault() {
+  var res = await api('/api/secrets/lock', { method: 'POST', body: '{}' });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  showToast(_('settings.secretsLocked') || 'Vault locked', 'info');
+  loadSettingsPage();
+}
+
+async function disableSecretsVault() {
+  var pw = (($('setSecretsPassword') && $('setSecretsPassword').value) || '').trim();
+  if (!pw) { showToast(_('settings.secretsPwRequired') || 'Enter password', 'error'); return; }
+  if (!confirm(_('settings.secretsDisableConfirm') || 'Decrypt all keys back to plaintext on disk?')) return;
+  var res = await api('/api/secrets/disable', { method: 'POST', body: JSON.stringify({ password: pw }) });
+  if (res.error || res.success === false) { showToast(res.error || 'Failed', 'error'); return; }
+  if ($('setSecretsPassword')) $('setSecretsPassword').value = '';
+  showToast(_('settings.secretsDisabled') || 'Disk encryption disabled', 'success');
+  loadSettingsPage();
+}
+
 async function cleanEmptyVendors() {
   var prev = await api('/api/vendors/empty');
   if (prev.error) { showToast(prev.error, 'error'); return; }
@@ -7065,10 +7763,6 @@ async function cleanEmptyVendors() {
 }
 
 async function checkFailedHealth() {
-  if (_healthCheckRunning) {
-    showToast(_('health.busy') || 'Health check already running', 'info');
-    return;
-  }
   // failed + not-yet-checked enabled keys
   var targets = [];
   (_allVendorsData || []).forEach(function(v) {
@@ -7089,43 +7783,17 @@ async function checkFailedHealth() {
     showToast(_('health.noFailed') || 'No failed keys to recheck', 'info');
     return;
   }
-  _healthCheckRunning = true;
-  var ok = 0, fail = 0;
-  try {
-    setHealthProgress(0, targets.length);
-    for (var i = 0; i < targets.length; i++) {
-      var tg = targets[i];
-      setHealthProgress(i, targets.length,
-        (_('health.progressItem') || 'Checking {name} ({cur}/{total})')
-          .replace('{name}', (tg.vendor_name || '') + '/' + (tg.key_name || ''))
-          .replace('{cur}', i + 1)
-          .replace('{total}', targets.length)
-      );
-      try {
-        var h = await api('/api/vendors/' + tg.vendor_id + '/keys/' + tg.key_id + '/health?reconcile=0');
-        if (h && h.healthy) ok++; else fail++;
-        if (h) _allHealthData[tg.vendor_id + ':' + tg.key_id] = h;
-        if (typeof renderVendorList === 'function') renderVendorList();
-      } catch (e) {
-        fail++;
-        _allHealthData[tg.vendor_id + ':' + tg.key_id] = {
-          vendor_id: tg.vendor_id,
-          key_id: tg.key_id,
-          healthy: false,
-          error: String(e && e.message || e || 'check failed'),
-          checked_at: new Date().toISOString(),
-        };
-      }
-    }
-    setHealthProgress(targets.length, targets.length);
-    try { await api('/api/sync/push', { method: 'POST' }); } catch (e) {}
-    showToast((_('health.recheckDone') || 'Recheck done: {ok} ok, {fail} failed')
-      .replace('{ok}', ok).replace('{fail}', fail), fail ? 'error' : 'success');
-    await loadVendors();
-  } finally {
-    _healthCheckRunning = false;
-    setTimeout(function(){ setHealthProgress(0, 0); }, 1000);
-  }
+  return checkHealthTargets(targets, {
+    title: _('health.recheckFailed') || 'Rechecking failed keys…',
+    source: 'manual.recheck',
+    push: true,
+    reload: true,
+    toast: true,
+    blocking: false,
+    openTask: true,
+    concurrency: 8,
+    quick: true,
+  });
 }
 
 

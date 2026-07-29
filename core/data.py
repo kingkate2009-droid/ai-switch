@@ -244,7 +244,16 @@ def _load_data() -> dict:
         # one-time / residual: split usage out of main config
         if isinstance(data, dict) and "usage" in data:
             data = _migrate_usage_out_of_data(data)
+        if isinstance(data, dict):
+            data = _hydrate_secrets_in_memory(data)
         return data
+
+
+def _chmod_private(path: Path) -> None:
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
 
 
 def _save_data_core(data: dict) -> None:
@@ -257,6 +266,8 @@ def _save_data_core(data: dict) -> None:
     if "usage" in data:
         data = dict(data)
         data.pop("usage", None)
+    # Encrypt secrets on disk when vault is enabled + unlocked
+    data = _prepare_data_for_disk(data)
     # rotate backups before overwrite
     try:
         if DATA_PATH.exists():
@@ -280,6 +291,7 @@ def _save_data_core(data: dict) -> None:
                         pass
                 try:
                     shutil.copy2(DATA_PATH, bak0)
+                    _chmod_private(bak0)
                 except OSError:
                     pass
             except Exception:
@@ -293,6 +305,7 @@ def _save_data_core(data: dict) -> None:
         f.flush()
         os.fsync(f.fileno())
     tmp.replace(DATA_PATH)
+    _chmod_private(DATA_PATH)
 
 
 def _save_data(data: dict) -> None:
@@ -549,6 +562,160 @@ def add_key(vendor_id: str, name: str, api_key: str, *, allow_duplicate: bool = 
     return None
 
 
+def batch_import_entries(entries: list) -> dict:
+    """Fast bulk import: single data load + single save. No health / no backend sync.
+
+    Returns {created, errors, focus_vendor_id, pending_health}.
+    Each created item may include pending_health=True for newly added keys.
+    """
+    created: list = []
+    errors: list = []
+    if not entries:
+        return {
+            "created": created,
+            "errors": errors,
+            "focus_vendor_id": "",
+            "pending_health": 0,
+        }
+
+    with _DATA_LOCK:
+        data = _load_data()
+        vendors = data.setdefault("vendors", [])
+
+        # Indexes for O(1) dedupe within this batch + against existing data
+        secret_index: dict[str, tuple] = {}
+        url_index: dict[str, dict] = {}
+        used_names: set[str] = set()
+        for v in vendors:
+            used_names.add((v.get("name") or "").strip().lower())
+            uk = vendor_url_merge_key(v.get("api_url") or "")
+            if uk and uk not in url_index:
+                url_index[uk] = v
+            for k in v.get("keys") or []:
+                sec = _norm_secret(k.get("api_key") or "")
+                if sec and sec not in secret_index:
+                    secret_index[sec] = (v, k)
+
+        for entry in entries or []:
+            provider = (entry.get("provider") or "custom").strip() or "custom"
+            api_url = (entry.get("api_url") or "").strip().rstrip("/")
+            api_key = (entry.get("api_key") or "").strip()
+            name = (entry.get("name") or "").strip() or (
+                f"key-{(api_key[-4:] if len(api_key) >= 4 else api_key)}" if api_key else "key"
+            )
+            endpoint_type = (entry.get("endpoint_type") or "openai").strip().lower() or "openai"
+            if endpoint_type not in ("openai", "anthropic"):
+                endpoint_type = "anthropic" if (
+                    "/anthropic" in api_url.lower() or "api.anthropic.com" in api_url.lower()
+                ) else "openai"
+            vendor_name = (entry.get("vendor_name") or entry.get("vendor") or "").strip()
+
+            if not api_key or not api_url:
+                errors.append({
+                    "entry": vendor_name or name or provider,
+                    "error": "api_url and api_key are required",
+                })
+                continue
+
+            secret = _norm_secret(api_key)
+            hit = secret_index.get(secret) if secret else None
+            if hit:
+                ev, ek = hit
+                created.append({
+                    "vendor": (ev or {}).get("name") or vendor_name or provider,
+                    "key": (ek or {}).get("name") or name,
+                    "vendor_id": (ev or {}).get("id"),
+                    "key_id": (ek or {}).get("id"),
+                    "api_key": api_key[:8] + "...",
+                    "skipped": True,
+                    "reason": "duplicate_secret",
+                    "existing_vendor": (ev or {}).get("name"),
+                    "existing_key": (ek or {}).get("name"),
+                })
+                continue
+
+            uk = vendor_url_merge_key(api_url)
+            vendor = url_index.get(uk) if uk else None
+            if not vendor:
+                base_name = vendor_name or provider.replace("-", " ").title() or "Provider"
+                final_name = base_name
+                n = 2
+                while final_name.lower() in used_names:
+                    final_name = f"{base_name}-{n}"
+                    n += 1
+                used_names.add(final_name.lower())
+                vendor = {
+                    "id": _next_id(vendors),
+                    "name": final_name,
+                    "provider": provider,
+                    "api_url": api_url,
+                    "endpoint_type": endpoint_type,
+                    "thinking_disabled": False,
+                    "proxy_target": "",
+                    "checkin_url": "",
+                    "tags": [],
+                    "keys": [],
+                }
+                vendors.append(vendor)
+                if uk:
+                    url_index[uk] = vendor
+            else:
+                # light in-place updates (no extra disk write)
+                if vendor_name and vendor_name != vendor.get("name"):
+                    low = vendor_name.lower()
+                    if low not in used_names or low == (vendor.get("name") or "").lower():
+                        used_names.discard((vendor.get("name") or "").lower())
+                        used_names.add(low)
+                        vendor["name"] = vendor_name
+                if provider and provider != vendor.get("provider"):
+                    vendor["provider"] = provider
+                if endpoint_type and endpoint_type != vendor.get("endpoint_type"):
+                    vendor["endpoint_type"] = endpoint_type
+
+            key_entry = {
+                "id": _next_id(vendor.get("keys") or []),
+                "name": name,
+                "api_key": api_key,
+                "enabled": True,
+                "notes": "",
+            }
+            vendor.setdefault("keys", []).append(key_entry)
+            if secret:
+                secret_index[secret] = (vendor, key_entry)
+            created.append({
+                "vendor": vendor.get("name"),
+                "key": name,
+                "vendor_id": vendor.get("id"),
+                "key_id": key_entry.get("id"),
+                "api_key": api_key[:8] + "...",
+                "healthy": None,
+                "pending_health": True,
+            })
+
+        _save_data(data)
+
+    focus_vendor_id = ""
+    for c in reversed(created):
+        if c.get("skipped"):
+            continue
+        if c.get("vendor_id") is not None and str(c.get("vendor_id")) != "":
+            focus_vendor_id = str(c["vendor_id"])
+            break
+    if not focus_vendor_id:
+        for c in reversed(created):
+            if c.get("vendor_id") is not None and str(c.get("vendor_id")) != "":
+                focus_vendor_id = str(c["vendor_id"])
+                break
+
+    pending = sum(1 for c in created if c.get("pending_health"))
+    return {
+        "created": created,
+        "errors": errors,
+        "focus_vendor_id": focus_vendor_id,
+        "pending_health": pending,
+    }
+
+
 _KEY_FIELDS = (
     "name", "api_key", "enabled", "models", "default_model",
     "check_model",  # primary model for health / scheduled checks; empty = auto
@@ -769,11 +936,353 @@ _SETTINGS_KEYS = (
     "budget_monthly_tokens",# int, 0 = off
     "budget_action",        # "" | "alert" | "read_only" | "disable_keys"
     "budget_enforced_at",   # iso timestamp of last enforcement
+    "encrypt_keys_at_rest",  # bool — field-level encryption for api_key / access_token / downstream
+    "secrets_kdf",           # {salt, iterations, verifier} — no password stored
     "gateway",
     "last_push",
     "usage_imported_at",
     "data_recovery",  # one-shot notice after corrupt data.json restore
 )
+
+# ── At-rest secrets vault (in-memory master key) ──────────
+
+_MASTER_KEY: Optional[bytes] = None
+_VAULT_LOCK = threading.RLock()
+
+
+def secrets_encryption_enabled(settings: Optional[dict] = None) -> bool:
+    s = settings if settings is not None else ((_load_data_raw_settings() or {}))
+    return bool((s or {}).get("encrypt_keys_at_rest"))
+
+
+def _load_data_raw_settings() -> dict:
+    """Read settings without full hydrate (avoid recursion)."""
+    try:
+        if DATA_PATH.exists():
+            raw = _read_json_file(DATA_PATH)
+            if isinstance(raw, dict):
+                return raw.get("settings") or {}
+    except Exception:
+        pass
+    return {}
+
+
+def secrets_unlocked() -> bool:
+    with _VAULT_LOCK:
+        return _MASTER_KEY is not None and len(_MASTER_KEY) >= 16
+
+
+def secrets_status() -> dict:
+    raw_settings = _load_data_raw_settings()
+    enabled = bool(raw_settings.get("encrypt_keys_at_rest"))
+    kdf = raw_settings.get("secrets_kdf") if isinstance(raw_settings.get("secrets_kdf"), dict) else {}
+    return {
+        "encrypt_keys_at_rest": enabled,
+        "unlocked": secrets_unlocked() if enabled else True,
+        "has_kdf": bool(kdf.get("salt") and kdf.get("verifier")),
+        "locked": bool(enabled and not secrets_unlocked()),
+    }
+
+
+def _try_env_unlock(settings: dict) -> None:
+    """Auto-unlock from AI_SWITCH_SECRETS_PASSWORD when encryption is on."""
+    global _MASTER_KEY
+    if not bool(settings.get("encrypt_keys_at_rest")):
+        return
+    if secrets_unlocked():
+        return
+    pw = (os.environ.get("AI_SWITCH_SECRETS_PASSWORD") or "").strip()
+    if not pw:
+        return
+    try:
+        unlock_secrets(pw)
+    except Exception as e:
+        log.warning("AI_SWITCH_SECRETS_PASSWORD unlock failed: %s", e)
+
+
+def unlock_secrets(password: str) -> dict:
+    """Derive master key from password and keep in process memory."""
+    global _MASTER_KEY
+    from core.crypto_secrets import (
+        derive_master_key,
+        generate_salt,
+        make_verifier,
+        verify_master_key,
+    )
+    from core.crypto_backup import _b64d, _b64e
+
+    password = (password or "").strip()
+    if not password:
+        raise ValueError("password required")
+    with _DATA_LOCK:
+        data = _read_json_file(DATA_PATH) if DATA_PATH.exists() else dict(_DEFAULT_DATA)
+        if not isinstance(data, dict):
+            data = dict(_DEFAULT_DATA)
+        settings = data.setdefault("settings", {})
+        kdf = settings.get("secrets_kdf") if isinstance(settings.get("secrets_kdf"), dict) else {}
+        if kdf.get("salt") and kdf.get("verifier"):
+            salt = _b64d(str(kdf["salt"]))
+            iterations = int(kdf.get("iterations") or 200_000)
+            key = derive_master_key(password, salt, iterations)
+            if not verify_master_key(key, str(kdf["verifier"])):
+                raise ValueError("wrong password")
+        else:
+            salt = generate_salt()
+            iterations = 200_000
+            key = derive_master_key(password, salt, iterations)
+            settings["secrets_kdf"] = {
+                "salt": _b64e(salt),
+                "iterations": iterations,
+                "verifier": make_verifier(key),
+            }
+            _save_data_core_plain(data)
+        with _VAULT_LOCK:
+            _MASTER_KEY = key
+    return secrets_status()
+
+
+def lock_secrets() -> dict:
+    global _MASTER_KEY
+    with _VAULT_LOCK:
+        _MASTER_KEY = None
+    return secrets_status()
+
+
+def _master_key() -> Optional[bytes]:
+    with _VAULT_LOCK:
+        return _MASTER_KEY
+
+
+def _save_data_core_plain(data: dict) -> None:
+    """Internal save without re-entering encrypt prepare (for kdf bootstrap)."""
+    _ensure_dirs()
+    if not isinstance(data, dict):
+        raise TypeError("data must be a dict")
+    if "usage" in data:
+        data = dict(data)
+        data.pop("usage", None)
+    tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(DATA_PATH)
+    _chmod_private(DATA_PATH)
+
+
+def _walk_encrypt_secrets(data: dict, master: bytes) -> dict:
+    from core.crypto_secrets import encrypt_if_needed, is_encrypted_secret
+    out = dict(data)
+    # vendors keys
+    vendors = []
+    for v in out.get("vendors") or []:
+        if not isinstance(v, dict):
+            vendors.append(v)
+            continue
+        nv = dict(v)
+        keys = []
+        for k in nv.get("keys") or []:
+            if not isinstance(k, dict):
+                keys.append(k)
+                continue
+            nk = dict(k)
+            ak = nk.get("api_key") or ""
+            if ak and not is_encrypted_secret(ak):
+                nk["api_key"] = encrypt_if_needed(ak, master, True)
+            keys.append(nk)
+        nv["keys"] = keys
+        vendors.append(nv)
+    out["vendors"] = vendors
+    # settings access_token
+    settings = dict(out.get("settings") or {})
+    tok = settings.get("access_token") or ""
+    if tok and not is_encrypted_secret(str(tok)):
+        settings["access_token"] = encrypt_if_needed(str(tok), master, True)
+    out["settings"] = settings
+    # downstream
+    dkeys = []
+    for d in out.get("downstream_keys") or []:
+        if not isinstance(d, dict):
+            dkeys.append(d)
+            continue
+        nd = dict(d)
+        ak = nd.get("api_key") or ""
+        if ak and not is_encrypted_secret(str(ak)):
+            nd["api_key"] = encrypt_if_needed(str(ak), master, True)
+        dkeys.append(nd)
+    if "downstream_keys" in out or dkeys:
+        out["downstream_keys"] = dkeys
+    return out
+
+
+def _walk_decrypt_secrets(data: dict, master: Optional[bytes]) -> dict:
+    from core.crypto_secrets import decrypt_if_needed, is_encrypted_secret
+    out = dict(data)
+    vendors = []
+    for v in out.get("vendors") or []:
+        if not isinstance(v, dict):
+            vendors.append(v)
+            continue
+        nv = dict(v)
+        keys = []
+        for k in nv.get("keys") or []:
+            if not isinstance(k, dict):
+                keys.append(k)
+                continue
+            nk = dict(k)
+            ak = nk.get("api_key") or ""
+            if is_encrypted_secret(str(ak)):
+                if not master:
+                    nk["api_key"] = ""
+                    nk["_secrets_locked"] = True
+                else:
+                    try:
+                        nk["api_key"] = decrypt_if_needed(str(ak), master)
+                    except Exception:
+                        nk["api_key"] = ""
+                        nk["_secrets_locked"] = True
+            keys.append(nk)
+        nv["keys"] = keys
+        vendors.append(nv)
+    out["vendors"] = vendors
+    settings = dict(out.get("settings") or {})
+    tok = settings.get("access_token") or ""
+    if is_encrypted_secret(str(tok)):
+        if master:
+            try:
+                settings["access_token"] = decrypt_if_needed(str(tok), master)
+            except Exception:
+                settings["access_token"] = ""
+        else:
+            settings["access_token"] = ""
+    out["settings"] = settings
+    dkeys = []
+    for d in out.get("downstream_keys") or []:
+        if not isinstance(d, dict):
+            dkeys.append(d)
+            continue
+        nd = dict(d)
+        ak = nd.get("api_key") or ""
+        if is_encrypted_secret(str(ak)):
+            if master:
+                try:
+                    nd["api_key"] = decrypt_if_needed(str(ak), master)
+                except Exception:
+                    nd["api_key"] = ""
+                    nd["_secrets_locked"] = True
+            else:
+                nd["api_key"] = ""
+                nd["_secrets_locked"] = True
+        dkeys.append(nd)
+    if "downstream_keys" in out or dkeys:
+        out["downstream_keys"] = dkeys
+    return out
+
+
+def _prepare_data_for_disk(data: dict) -> dict:
+    """Before write: encrypt secrets if vault enabled and unlocked."""
+    settings = (data.get("settings") or {}) if isinstance(data, dict) else {}
+    if not bool(settings.get("encrypt_keys_at_rest")):
+        return data
+    master = _master_key()
+    if not master:
+        # refuse to write plaintext while encryption is required
+        raise RuntimeError("secrets vault locked — unlock before saving")
+    return _walk_encrypt_secrets(data, master)
+
+
+def _hydrate_secrets_in_memory(data: dict) -> dict:
+    """After read: decrypt secrets if possible; try env auto-unlock."""
+    settings = data.get("settings") or {}
+    if bool(settings.get("encrypt_keys_at_rest")):
+        _try_env_unlock(settings)
+    master = _master_key() if bool(settings.get("encrypt_keys_at_rest")) else None
+    # even if encryption off, decrypt any leftover ENC1 blobs when unlocked
+    if not bool(settings.get("encrypt_keys_at_rest")):
+        master = _master_key()
+        # only hydrate encrypted fields if we have a key; else leave as-is for migration
+        from core.crypto_secrets import is_encrypted_secret
+        has_enc = False
+        for v in data.get("vendors") or []:
+            for k in (v or {}).get("keys") or []:
+                if is_encrypted_secret(str((k or {}).get("api_key") or "")):
+                    has_enc = True
+                    break
+            if has_enc:
+                break
+        if not has_enc:
+            return data
+    return _walk_decrypt_secrets(data, master if bool(settings.get("encrypt_keys_at_rest")) or master else None)
+
+
+def enable_secrets_encryption(password: str) -> dict:
+    """Turn on at-rest encryption: set password, encrypt all secrets, save."""
+    global _MASTER_KEY
+    from core.crypto_secrets import derive_master_key, generate_salt, make_verifier
+    from core.crypto_backup import _b64e
+
+    password = (password or "").strip()
+    if len(password) < 6:
+        raise ValueError("password must be at least 6 characters")
+    with _DATA_LOCK:
+        # load raw disk (may already have plaintext)
+        if DATA_PATH.exists():
+            data = _read_json_file(DATA_PATH)
+        else:
+            data = dict(_DEFAULT_DATA)
+        if not isinstance(data, dict):
+            data = dict(_DEFAULT_DATA)
+        # if already encrypted on disk, unlock first conceptually by reading via hydrate
+        settings = data.setdefault("settings", {})
+        salt = generate_salt()
+        iterations = 200_000
+        key = derive_master_key(password, salt, iterations)
+        settings["encrypt_keys_at_rest"] = True
+        settings["secrets_kdf"] = {
+            "salt": _b64e(salt),
+            "iterations": iterations,
+            "verifier": make_verifier(key),
+        }
+        with _VAULT_LOCK:
+            _MASTER_KEY = key
+        # hydrate any existing enc blobs then re-encrypt all
+        data = _walk_decrypt_secrets(data, key)
+        data = _walk_encrypt_secrets(data, key)
+        data["settings"] = settings
+        _save_data_core_plain(data)
+    return secrets_status()
+
+
+def disable_secrets_encryption(password: str) -> dict:
+    """Turn off encryption: verify password, write plaintext secrets."""
+    global _MASTER_KEY
+    from core.crypto_secrets import derive_master_key, verify_master_key
+    from core.crypto_backup import _b64d
+
+    password = (password or "").strip()
+    if not password:
+        raise ValueError("password required")
+    with _DATA_LOCK:
+        if not DATA_PATH.exists():
+            raise ValueError("no data file")
+        data = _read_json_file(DATA_PATH)
+        settings = data.get("settings") or {}
+        kdf = settings.get("secrets_kdf") if isinstance(settings.get("secrets_kdf"), dict) else {}
+        if not kdf.get("salt"):
+            raise ValueError("encryption not configured")
+        key = derive_master_key(password, _b64d(str(kdf["salt"])), int(kdf.get("iterations") or 200_000))
+        if not verify_master_key(key, str(kdf.get("verifier") or "")):
+            raise ValueError("wrong password")
+        data = _walk_decrypt_secrets(data, key)
+        settings = dict(data.get("settings") or {})
+        settings["encrypt_keys_at_rest"] = False
+        # keep kdf so user can re-enable with same password optionally — clear for safety
+        settings.pop("secrets_kdf", None)
+        data["settings"] = settings
+        with _VAULT_LOCK:
+            _MASTER_KEY = None
+        _save_data_core_plain(data)
+    return secrets_status()
 
 
 def is_read_only() -> bool:

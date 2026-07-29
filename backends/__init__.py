@@ -43,7 +43,7 @@ def init_backends(data_dir: str = "") -> None:
 
 
 def _filtered_adapters(vendor: dict, key: dict) -> list[BackendAdapter]:
-    """Iterates adapters that should receive an event for this vendor+key pair."""
+    """Adapters that may receive add/update for this vendor+key (healthy/syncable only)."""
     result = []
     for adapter in _adapters.values():
         try:
@@ -53,6 +53,41 @@ def _filtered_adapters(vendor: dict, key: dict) -> list[BackendAdapter]:
             import logging
             logging.getLogger(__name__).warning(
                 "Backend %s should_sync failed: %s", adapter.name, e
+            )
+    return result
+
+
+def _removal_adapters(vendor: dict, key: dict) -> list[BackendAdapter]:
+    """Adapters that must receive remove events.
+
+    Unlike add/update, removal must NOT require should_sync/health — otherwise
+    unhealthy / disabled keys can never be stripped from engine configs
+    (should_sync returns False → on_key_removed becomes a no-op).
+    Still respect: supports_byok, backend disabled, not installed, sync_vendors.
+    """
+    from core.data import get_backend_config
+    result = []
+    for adapter in _adapters.values():
+        try:
+            if not getattr(adapter, "supports_byok", True):
+                continue
+            config = get_backend_config(adapter.name) or {}
+            if config.get("disabled"):
+                continue
+            try:
+                if not adapter.is_installed():
+                    continue
+            except Exception:
+                continue
+            sync = config.get("sync_vendors", "all")
+            if isinstance(sync, list):
+                if vendor.get("provider") not in sync and vendor.get("id") not in sync:
+                    continue
+            result.append(adapter)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Backend %s removal filter failed: %s", adapter.name, e
             )
     return result
 
@@ -76,7 +111,8 @@ def on_key_updated(vendor: dict, key: dict) -> None:
 
 
 def on_key_removed(vendor: dict, key: dict) -> None:
-    for adapter in _filtered_adapters(vendor, key):
+    # Always deliver removals even when key is unhealthy/disabled (see _removal_adapters)
+    for adapter in _removal_adapters(vendor, key):
         try:
             adapter.on_key_removed(vendor, key)
         except Exception as e:

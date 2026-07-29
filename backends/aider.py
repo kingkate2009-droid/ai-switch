@@ -77,8 +77,15 @@ class AiderAdapter(BackendAdapter):
         if isinstance(api_keys, str):
             api_keys = [api_keys]
         from core.data import get_vendors
-        active_bare = {k["api_key"] for v in get_vendors() for k in v.get("keys", [])
-                      if k.get("enabled", True) and k.get("api_key")}
+        from core.health_checker import is_key_backend_syncable
+        active_bare = {
+            k["api_key"]
+            for v in get_vendors()
+            for k in v.get("keys", [])
+            if k.get("enabled", True)
+            and k.get("api_key")
+            and is_key_backend_syncable(str(v.get("id") or ""), k)
+        }
         kept = [entry for entry in api_keys if "=" in entry and entry.split("=", 1)[1] in active_bare]
         if len(kept) != len(api_keys):
             config["api-key"] = kept

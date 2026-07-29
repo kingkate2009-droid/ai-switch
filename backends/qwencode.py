@@ -66,9 +66,7 @@ class QwenCodeAdapter(BackendAdapter):
         env_keys = list(settings.get("env", {}).keys())
         if not env_keys:
             return
-        from core.data import get_vendors
-        active_bare = {k["api_key"] for v in get_vendors() for k in v.get("keys", [])
-                      if k.get("enabled", True) and k.get("api_key")}
+        active_bare = {k["api_key"] for _, k in self.iter_syncable_keys()}
         env = settings.get("env", {})
         changed = False
         for ek in env_keys:

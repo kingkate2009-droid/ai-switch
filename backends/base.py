@@ -535,6 +535,41 @@ class BackendAdapter:
             return True
         return vendor.get("provider") in sync or vendor.get("id") in sync
 
+    @staticmethod
+    def iter_syncable_keys():
+        """Yield (vendor, key) pairs that may stay in any backend engine config.
+
+        Prefer this over raw enabled+api_key loops so quota/auth failures are
+        stripped on reconcile even when health_auto_disable left enabled=True.
+        """
+        from core.data import get_vendors
+        from core.health_checker import is_key_backend_syncable
+
+        for v in get_vendors():
+            vid = str(v.get("id") or "")
+            for k in v.get("keys") or []:
+                if not k.get("api_key") or k.get("enabled") is False:
+                    continue
+                if not is_key_backend_syncable(vid, k):
+                    continue
+                yield v, k
+
+    def pick_syncable_key(self, vendor: dict = None, *, providers: set = None):
+        """First syncable key, optionally filtered by vendor or provider set."""
+        want_providers = {p.lower() for p in (providers or set()) if p}
+        for v, k in self.iter_syncable_keys():
+            if vendor is not None and str(v.get("id")) != str(vendor.get("id")):
+                continue
+            if want_providers:
+                prov = str(v.get("provider") or "").lower()
+                ep = str(v.get("endpoint_type") or "").lower()
+                if prov not in want_providers and ep not in want_providers:
+                    continue
+            if not self.should_sync(v, k):
+                continue
+            return v, k
+        return None
+
     def on_key_added(self, vendor: dict, key: dict) -> None:
         pass
 

@@ -1,7 +1,8 @@
 import random
 import re
+import threading
 import warnings
-
+from contextlib import contextmanager
 from typing import Optional
 
 import requests
@@ -23,15 +24,57 @@ _PROBE_PROMPTS = (
     "check",
 )
 
+# Per-thread probe knobs (bulk/quick health can lower timeout without global races)
+_tls = threading.local()
+_session_local = threading.local()
+
 
 def probe_prompt() -> str:
     return random.choice(_PROBE_PROMPTS)
 
 
 def _new_session() -> requests.Session:
-    s = requests.Session()
-    s.verify = False
+    """Reuse one Session per thread to avoid TLS handshake on every probe."""
+    s = getattr(_session_local, "session", None)
+    if s is None:
+        s = requests.Session()
+        s.verify = False
+        _session_local.session = s
     return s
+
+
+def get_probe_timeout(default: float = None) -> float:
+    override = getattr(_tls, "probe_timeout", None)
+    if override is not None:
+        try:
+            return max(2.0, float(override))
+        except Exception:
+            pass
+    return float(default if default is not None else PROBE_TIMEOUT)
+
+
+@contextmanager
+def probe_profile(timeout: float = None, retries: int = None):
+    """Temporarily override probe timeout (and optionally expose retries via TLS)."""
+    prev_t = getattr(_tls, "probe_timeout", None)
+    prev_r = getattr(_tls, "probe_retries", None)
+    try:
+        if timeout is not None:
+            _tls.probe_timeout = timeout
+        if retries is not None:
+            _tls.probe_retries = retries
+        yield
+    finally:
+        if prev_t is None:
+            if hasattr(_tls, "probe_timeout"):
+                delattr(_tls, "probe_timeout")
+        else:
+            _tls.probe_timeout = prev_t
+        if prev_r is None:
+            if hasattr(_tls, "probe_retries"):
+                delattr(_tls, "probe_retries")
+        else:
+            _tls.probe_retries = prev_r
 
 # ── Provider Registry ─────────────────────────────────────
 
@@ -246,6 +289,8 @@ def recognize_provider(text: str) -> Optional[dict]:
 # ── Health-check probes ───────────────────────────────────
 
 PROBE_TIMEOUT = 15
+# Bulk/progressive health uses a shorter timeout (still overridable)
+PROBE_TIMEOUT_QUICK = 8
 
 _MODEL_CANDIDATES = ["gpt-3.5-turbo", "gpt-4o-mini", "deepseek-chat", "glm-4", "qwen-turbo", "mimo-v2.5-pro", ""]
 
@@ -266,6 +311,25 @@ def _is_model_error(body: str) -> bool:
     ]):
         return True
     return False
+
+
+def _is_quota_exhausted_body(body: str) -> bool:
+    """True when 429/403 body means usage/billing cap, not a short rate-limit window.
+
+    OpenCode Zen returns GoUsageLimitError / monthly caps as 429 — those must
+    mark the key unhealthy so backends strip them.
+    """
+    bl = (body or "").lower()
+    return any(
+        x in bl
+        for x in (
+            "quota", "exhausted", "insufficient", "billing",
+            "usagelimit", "usage limit", "usage_limit",
+            "gousagelimit", "monthly limit", "credit", "balance",
+            "no credits", "out of credits", "payment required",
+            "额度",
+        )
+    )
 
 
 def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[list[str]] = None) -> tuple:
@@ -293,7 +357,7 @@ def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[lis
             payload = dict(base_payload)
             if model:
                 payload["model"] = model
-            r = _new_session().post(chat_url, json=payload, headers=headers, timeout=PROBE_TIMEOUT)
+            r = _new_session().post(chat_url, json=payload, headers=headers, timeout=get_probe_timeout())
             last_model_name = model or "(none)"
             if r.status_code == 200:
                 try:
@@ -306,8 +370,7 @@ def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[lis
                 return True, f"[{model}] {msg[:200]}"
             if r.status_code == 429:
                 body = r.text[:300]
-                body_lower = body.lower()
-                if "quota" in body_lower or "exhausted" in body_lower or "insufficient" in body_lower:
+                if _is_quota_exhausted_body(body):
                     return False, f"Quota exhausted: {body}"
                 return True, f"Rate limited: {body}"
             body = r.text[:500]
@@ -391,7 +454,7 @@ def _probe_responses(url: str, headers: dict, models_to_try: Optional[list[str]]
             if model:
                 payload["model"] = model
             r = _new_session().post(
-                resp_url, json=payload, headers=headers, timeout=PROBE_TIMEOUT, stream=True,
+                resp_url, json=payload, headers=headers, timeout=get_probe_timeout(), stream=True,
             )
             if r.status_code == 200:
                 # Read a small chunk of SSE to ensure stream works
@@ -424,8 +487,7 @@ def _probe_responses(url: str, headers: dict, models_to_try: Optional[list[str]]
                     continue
                 return False, f"Access denied on /responses: {body}"
             if r.status_code == 429:
-                bl = body.lower()
-                if "quota" in bl or "exhausted" in bl:
+                if _is_quota_exhausted_body(body):
                     return False, f"Quota exhausted on /responses: {body}"
                 return True, f"Rate limited on /responses: {body}"
             if r.status_code == 404:
@@ -526,7 +588,7 @@ def probe_anthropic(url: str, api_key: str, models_to_try: Optional[list[str]] =
                 "model": model,
                 "max_tokens": 10,
                 "messages": [{"role": "user", "content": probe_prompt()}],
-            }, headers=headers, timeout=PROBE_TIMEOUT)
+            }, headers=headers, timeout=get_probe_timeout())
             last_code = r.status_code
             last_body = r.text[:300]
             if r.status_code == 200:
@@ -559,8 +621,7 @@ def probe_anthropic(url: str, api_key: str, models_to_try: Optional[list[str]] =
                     return False, f"Access blocked: {last_body}"
                 return False, f"Auth failed (HTTP {r.status_code})"
             if r.status_code == 429:
-                body_lower = last_body.lower()
-                if "quota" in body_lower or "exhausted" in body_lower or "insufficient" in body_lower:
+                if _is_quota_exhausted_body(last_body):
                     return False, f"Quota exhausted: {last_body}"
                 return True, f"Rate limited: {last_body}"
             if _is_model_error(last_body):
@@ -591,7 +652,7 @@ def probe_gemini(url: str, api_key: str, models_to_try: Optional[list[str]] = No
             chat_url = base + f"/models/{model}:generateContent?key={api_key}"
             r = _new_session().post(chat_url, json={
                 "contents": [{"parts": [{"text": probe_prompt()}]}],
-            }, timeout=PROBE_TIMEOUT)
+            }, timeout=get_probe_timeout())
             last_code = r.status_code
             last_body = r.text[:300]
             if r.status_code == 200:
@@ -607,8 +668,7 @@ def probe_gemini(url: str, api_key: str, models_to_try: Optional[list[str]] = No
                     continue
                 return False, f"Auth failed (HTTP {r.status_code})"
             if r.status_code == 429:
-                body_lower = last_body.lower()
-                if "quota" in body_lower or "exhausted" in body_lower or "insufficient" in body_lower:
+                if _is_quota_exhausted_body(last_body):
                     return False, f"Quota exhausted: {last_body}"
                 return True, f"Rate limited: {last_body}"
             if _is_model_error(last_body):
@@ -682,7 +742,7 @@ def _scan_models_openai(url: str, headers: dict) -> list[str]:
     else:
         models_url = root + "/v1/models"
     try:
-        r = _new_session().get(models_url, headers=headers, timeout=PROBE_TIMEOUT)
+        r = _new_session().get(models_url, headers=headers, timeout=get_probe_timeout())
         if r.status_code == 200:
             data = r.json()
             raw = data.get("data", []) if isinstance(data, dict) else data
@@ -740,7 +800,7 @@ def _scan_models_anthropic(url: str, api_key: str) -> list[str]:
         seen_urls.add(models_url)
         for headers in headers_variants:
             try:
-                r = _new_session().get(models_url, headers=headers, timeout=PROBE_TIMEOUT)
+                r = _new_session().get(models_url, headers=headers, timeout=get_probe_timeout())
                 if r.status_code != 200:
                     continue
                 data = r.json()
@@ -768,7 +828,7 @@ def scan_models(check_type: str, url: str, api_key: str) -> list[str]:
     if check_type == "gemini":
         models_url = url.rstrip("/") + f"/models?key={api_key}"
         try:
-            r = _new_session().get(models_url, timeout=PROBE_TIMEOUT)
+            r = _new_session().get(models_url, timeout=get_probe_timeout())
             if r.status_code == 200:
                 data = r.json()
                 raw = data.get("models", []) if isinstance(data, dict) else data

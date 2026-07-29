@@ -87,9 +87,7 @@ class HermesAdapter(BackendAdapter):
         env = self._load_env()
         if not env:
             return
-        from core.data import get_vendors
-        active_bare = {k["api_key"] for v in get_vendors() for k in v.get("keys", [])
-                      if k.get("enabled", True) and k.get("api_key")}
+        active_bare = {k["api_key"] for _, k in self.iter_syncable_keys()}
         changed = False
         for k, v in list(env.items()):
             if v not in active_bare:

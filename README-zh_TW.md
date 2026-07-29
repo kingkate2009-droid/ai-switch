@@ -32,6 +32,28 @@
 
 > 一把 Key 改完，多工具立刻能用；壞 Key 別把工具搞掛。
 
+## 介面預覽
+
+<p align="center">
+  <img src="docs/screenshots/01-dashboard.png" alt="儀表板" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/02-vendors.png" alt="供應商與 Key" width="390">
+  &nbsp;
+  <img src="docs/screenshots/03-backends.png" alt="後端" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/04-health.png" alt="健康監測" width="390">
+  &nbsp;
+  <img src="docs/screenshots/05-task-center.png" alt="任務中心" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/06-dashboard-dark.png" alt="深色主題" width="800">
+</p>
+
 ## 三分鐘上手
 
 **建議：** 從 [Releases](https://github.com/kingkate2009-droid/ai-switch/releases) 下載對應平台包 → 解壓執行 → **http://127.0.0.1:8787**

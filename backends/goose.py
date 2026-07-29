@@ -74,32 +74,25 @@ class GooseAdapter(BackendAdapter):
         env_var = self._provider_env_map.get(vendor.get("provider", ""))
         if not env_var:
             return
-        from core.data import get_vendors
-        others = False
-        for v in get_vendors():
-            if v.get("provider") != vendor.get("provider"):
-                continue
-            for k in v.get("keys", []):
-                if k.get("enabled", True) and k.get("api_key") and k.get("id") != key.get("id"):
-                    others = True
-                    break
-            if others:
-                break
-        if not others:
-            secrets = self._load_secrets()
-            secrets.pop(env_var, None)
-            self._save_secrets(secrets)
+        other = self.pick_syncable_key(providers={str(vendor.get("provider") or "").lower()})
+        if other and other[1].get("id") != key.get("id"):
+            self.on_key_added(other[0], other[1])
+            return
+        secrets = self._load_secrets()
+        secrets.pop(env_var, None)
+        self._save_secrets(secrets)
 
     def reconcile(self) -> None:
-        from core.data import get_vendors
         active_envs = set()
-        for v in get_vendors():
+        for v, k in self.iter_syncable_keys():
             env_var = self._provider_env_map.get(v.get("provider", ""))
-            if not env_var:
-                continue
-            for k in v.get("keys", []):
-                if k.get("enabled", True) and k.get("api_key"):
-                    active_envs.add(env_var)
+            if env_var and self.should_sync(v, k):
+                active_envs.add(env_var)
+                # Refresh secret from best remaining key
+                secrets = self._load_secrets()
+                if secrets.get(env_var) != k["api_key"]:
+                    secrets[env_var] = k["api_key"]
+                    self._save_secrets(secrets)
         secrets = self._load_secrets()
         changed = False
         for env_var in self._provider_env_map.values():

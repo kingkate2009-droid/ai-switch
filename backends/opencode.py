@@ -212,7 +212,36 @@ class OpenCodeAdapter(BackendAdapter):
                 out[dm] = {"name": dm}
         return out
 
+    @staticmethod
+    def _is_opencode_zen(vendor: dict) -> bool:
+        """OpenCode Zen / built-in opencode provider — models come from models.dev.
+
+        Writing a managed provider.opencode.models map overrides the catalog and
+        hides free models (big-pickle, *-free, etc.). Auth-only is correct.
+        """
+        raw = (vendor.get("provider") or vendor.get("name") or "").strip().lower()
+        pid = re.sub(r"[^a-zA-Z0-9._-]+", "-", raw).strip("-")
+        api_url = (vendor.get("proxy_target") or vendor.get("api_url") or "").strip().lower()
+        # Exact / common aliases
+        if pid in ("opencode", "zen", "opencode-zen", "opencode-zen-free", "zen-free"):
+            if not api_url or "opencode.ai" in api_url:
+                return True
+        # Name contains both tokens (e.g. "OpenCode Zen Free", "opencode-2")
+        if ("opencode" in pid or "opencode" in raw) and (
+            "zen" in pid or "zen" in raw or not api_url or "opencode.ai" in api_url
+        ):
+            if not api_url or "opencode.ai" in api_url:
+                return True
+        if "opencode.ai" in api_url and (
+            "/zen" in api_url or "zen." in api_url or "/go" in api_url
+        ):
+            return True
+        return False
+
     def _is_custom(self, vendor: dict) -> bool:
+        # Zen must stay on built-in catalog (auth.json only)
+        if self._is_opencode_zen(vendor):
+            return False
         pid = self._provider_id(vendor)
         if pid not in _BUILTIN_PROVIDERS:
             return True
@@ -228,6 +257,9 @@ class OpenCodeAdapter(BackendAdapter):
             "xai": "api.x.ai",
             "google": "generativelanguage.googleapis.com",
             "gemini": "generativelanguage.googleapis.com",
+            "opencode": "opencode.ai",
+            "zai": "api.z.ai",
+            "zhipu": "open.bigmodel.cn",
         }
         host = defaults.get(pid, "")
         if host and host in api_url and not vendor.get("proxy_target"):
@@ -294,12 +326,28 @@ class OpenCodeAdapter(BackendAdapter):
         if not key.get("api_key") or not key.get("enabled", True):
             return
         pid = self._provider_id(vendor)
+        # Force official Zen onto built-in id so /models shows free catalog
+        if self._is_opencode_zen(vendor):
+            pid = "opencode"
 
         auth = self._load_auth()
         auth[pid] = self._auth_entry(key["api_key"])
         self._save_auth(auth)
 
-        # Always write provider block for custom endpoints; for built-ins only if models/proxy
+        # Zen / pure built-ins: auth only — never write models map (hides free models)
+        if self._is_opencode_zen(vendor) or (
+            not self._is_custom(vendor) and not vendor.get("proxy_target")
+        ):
+            cfg = self._load_config()
+            entry = (cfg.get("provider") or {}).get(pid)
+            if entry and (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG:
+                del cfg["provider"][pid]
+                self._save_config(cfg)
+                log.info("OpenCode: cleared managed override for built-in '%s'", pid)
+            else:
+                log.info("OpenCode: auth for built-in '%s'", pid)
+            return
+
         if self._is_custom(vendor) or key.get("models") or vendor.get("proxy_target"):
             cfg = self._load_config()
             cfg.setdefault("provider", {})
@@ -316,12 +364,18 @@ class OpenCodeAdapter(BackendAdapter):
         else:
             self.on_key_removed(vendor, key)
 
+    def _effective_provider_id(self, vendor: dict) -> str:
+        if self._is_opencode_zen(vendor):
+            return "opencode"
+        return self._provider_id(vendor)
+
     def on_key_removed(self, vendor: dict, key: dict) -> None:
-        pid = self._provider_id(vendor)
+        pid = self._effective_provider_id(vendor)
         from core.data import get_vendors
 
+        # Prefer another healthy key for the same effective provider id
         for v in get_vendors():
-            if self._provider_id(v) != pid:
+            if self._effective_provider_id(v) != pid:
                 continue
             other = self._pick_best_key(v)
             if other and other.get("id") != key.get("id"):
@@ -332,11 +386,20 @@ class OpenCodeAdapter(BackendAdapter):
         if pid in auth:
             del auth[pid]
             self._save_auth(auth)
+        # Also drop legacy pid if Zen was stored under a non-opencode id
+        legacy = self._provider_id(vendor)
+        if legacy != pid and legacy in auth:
+            del auth[legacy]
+            self._save_auth(auth)
 
         cfg = self._load_config()
-        entry = (cfg.get("provider") or {}).get(pid)
-        if entry and (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG:
-            del cfg["provider"][pid]
+        changed = False
+        for drop_pid in {pid, legacy}:
+            entry = (cfg.get("provider") or {}).get(drop_pid)
+            if entry and (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG:
+                del cfg["provider"][drop_pid]
+                changed = True
+        if changed:
             self._save_config(cfg)
             log.info("OpenCode: removed managed provider '%s'", pid)
 
@@ -362,17 +425,28 @@ class OpenCodeAdapter(BackendAdapter):
         out = []
         seen = set()
         for v in get_vendors():
-            pid = self._provider_id(v)
+            pid = self._effective_provider_id(v)
             k = self._pick_best_key(v)
             if not k or not self.should_sync(v, k):
                 continue
-            if (k.get("models") or k.get("disabled_models")) and not get_enabled_models(k):
+            # Zen free catalog does not require key model inventory
+            if not self._is_opencode_zen(v):
+                if (k.get("models") or k.get("disabled_models")) and not get_enabled_models(k):
+                    continue
+            if pid in seen:
                 continue
             seen.add(pid)
             models = get_enabled_models(k) or []
             pcfg = providers_cfg.get(pid) or {}
             opts = pcfg.get("options") or {}
             base = opts.get("baseURL") or opts.get("baseUrl") or (v.get("proxy_target") or v.get("api_url") or "")
+            if self._is_opencode_zen(v):
+                base = base or "https://opencode.ai/zen"
+                preview = "Zen free catalog (models.dev)"
+                model_list = list(models)[:20]
+            else:
+                preview = ", ".join(list(models)[:6]) + ("…" if len(models) > 6 else "")
+                model_list = list(models)[:20]
             out.append({
                 "id": pid,
                 "name": v.get("name") or pcfg.get("name") or pid,
@@ -381,11 +455,12 @@ class OpenCodeAdapter(BackendAdapter):
                 "vendor_name": v.get("name") or "",
                 "key_id": str(k.get("id") or ""),
                 "key_name": k.get("name") or "",
-                "models": list(models)[:20],
-                "model_preview": ", ".join(list(models)[:6]) + ("…" if len(models) > 6 else ""),
+                "models": model_list,
+                "model_preview": preview,
                 "active": bool(preferred and preferred == pid) or (not preferred and pid in auth),
                 "managed": True,
                 "has_auth": pid in auth,
+                "auth_only": self._is_opencode_zen(v),
             })
 
         # config-only managed providers not in system
@@ -436,15 +511,15 @@ class OpenCodeAdapter(BackendAdapter):
         if vendor_id:
             vendor = get_vendor(vendor_id)
         if not vendor and provider_id:
-            # match by provider id
+            # match by provider id (including Zen → opencode)
             for v in get_vendors():
-                if self._provider_id(v) == provider_id:
+                if self._effective_provider_id(v) == provider_id or self._provider_id(v) == provider_id:
                     vendor = v
                     break
         if not vendor:
             return {"success": False, "message": "Vendor not found for OpenCode switch"}
 
-        pid = self._provider_id(vendor)
+        pid = self._effective_provider_id(vendor)
         key = None
         if key_id:
             for k in vendor.get("keys") or []:
@@ -458,18 +533,39 @@ class OpenCodeAdapter(BackendAdapter):
         if not self.is_installed():
             return {"success": False, "message": "OpenCode not installed"}
 
-        # Write auth + provider block
+        # Auth always
         auth = self._load_auth()
         auth[pid] = self._auth_entry(key["api_key"])
         self._save_auth(auth)
 
         cfg = self._load_config()
         cfg.setdefault("provider", {})
+
+        # Zen / pure built-ins: auth only — never write models map (hides free catalog)
+        if self._is_opencode_zen(vendor) or (
+            not self._is_custom(vendor) and not vendor.get("proxy_target")
+        ):
+            entry = cfg["provider"].get(pid)
+            if entry and (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG:
+                del cfg["provider"][pid]
+            # Prefer a free catalog model if none set; leave model empty so OpenCode picks
+            models = get_enabled_models(key) or []
+            if models and not self._is_opencode_zen(vendor):
+                cfg["model"] = f"{pid}/{models[0]}"
+            self._save_config(cfg)
+            return {
+                "success": True,
+                "active_provider": pid,
+                "message": f"OpenCode active → {vendor.get('name') or pid} (auth-only, free catalog)",
+                "model": cfg.get("model") or "",
+                "vendor_id": str(vendor.get("id") or ""),
+                "key_id": str(key.get("id") or ""),
+            }
+
         existing = cfg["provider"].get(pid) or {}
         if not existing or (existing.get("options") or {}).get("_managed") == self.MANAGED_TAG or self._is_custom(vendor):
             cfg["provider"][pid] = self._build_provider_block(vendor, key, existing)
 
-        # Set default model to first enabled model on this provider
         models = get_enabled_models(key) or []
         if not models and key.get("default_model"):
             models = [str(key.get("default_model"))]
@@ -499,43 +595,56 @@ class OpenCodeAdapter(BackendAdapter):
 
         # Group vendors by provider id, pick best key
         desired: dict[str, tuple[dict, dict]] = {}
+        # Built-in / Zen: auth only (no provider.models override)
+        auth_only_pids: set[str] = set()
         for v in get_vendors():
             pid = self._provider_id(v)
+            if self._is_opencode_zen(v):
+                pid = "opencode"
             k = self._pick_best_key(v)
             if not k or not self.should_sync(v, k):
                 continue
-            # Keys with inventory but no enabled models stay system-only
-            if (k.get("models") or k.get("disabled_models")) and not get_enabled_models(k):
-                continue
+            # Zen/built-in free catalog does not need per-key model inventory
+            if not self._is_opencode_zen(v):
+                if (k.get("models") or k.get("disabled_models")) and not get_enabled_models(k):
+                    continue
             prev = desired.get(pid)
             if not prev:
                 desired[pid] = (v, k)
-                continue
-            # Prefer vendor with more enabled models / real api_url
-            prev_score = len(get_enabled_models(prev[1]))
-            cur_score = len(get_enabled_models(k))
-            if cur_score > prev_score:
-                desired[pid] = (v, k)
-            elif cur_score == prev_score and (v.get("api_url") or "") and not (prev[0].get("api_url") or ""):
-                desired[pid] = (v, k)
+            else:
+                prev_score = len(get_enabled_models(prev[1]))
+                cur_score = len(get_enabled_models(k))
+                if cur_score > prev_score:
+                    desired[pid] = (v, k)
+                elif cur_score == prev_score and (v.get("api_url") or "") and not (prev[0].get("api_url") or ""):
+                    desired[pid] = (v, k)
+            if self._is_opencode_zen(v) or (
+                not self._is_custom(v) and not v.get("proxy_target")
+            ):
+                auth_only_pids.add(pid)
 
         new_auth = {k: v for k, v in auth.items()
                     if isinstance(v, dict) and v.get("type") in ("oauth", "token")}
 
         for pid, (v, k) in desired.items():
             new_auth[pid] = self._auth_entry(k["api_key"])
+            if pid in auth_only_pids or self._is_opencode_zen(v):
+                # Keep models.dev catalog — strip our previous managed override
+                existing = cfg["provider"].get(pid) or {}
+                if existing and (existing.get("options") or {}).get("_managed") == self.MANAGED_TAG:
+                    del cfg["provider"][pid]
+                continue
             if self._is_custom(v) or k.get("models") or v.get("proxy_target") or v.get("api_url"):
                 existing = cfg["provider"].get(pid) or {}
-                # Only overwrite managed or missing entries
                 if not existing or (existing.get("options") or {}).get("_managed") == self.MANAGED_TAG:
                     cfg["provider"][pid] = self._build_provider_block(v, k, existing)
-                else:
-                    # User-owned provider: only refresh apiKey in auth, leave config
-                    pass
 
         # Drop managed providers no longer desired
         for pid, entry in list(cfg.get("provider", {}).items()):
             if (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG and pid not in desired:
+                del cfg["provider"][pid]
+            # Always drop managed override on auth-only pids (e.g. zen free models)
+            if pid in auth_only_pids and (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG:
                 del cfg["provider"][pid]
 
         self._save_auth(new_auth)

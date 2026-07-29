@@ -139,16 +139,10 @@ class GrokCliAdapter(BackendAdapter):
 
     def on_key_removed(self, vendor: dict, key: dict) -> None:
         env_var, alias = self._resolve_key_env(vendor)
-        # Keep env if another active key of same provider remains
-        from core.data import get_vendors
-        for v in get_vendors():
-            if (v.get("provider") or "").lower() != (vendor.get("provider") or "").lower():
-                continue
-            for k in v.get("keys", []):
-                if k.get("id") == key.get("id"):
-                    continue
-                if k.get("enabled", True) and k.get("api_key"):
-                    return
+        other = self.pick_syncable_key(providers={str(vendor.get("provider") or "").lower()})
+        if other and other[1].get("id") != key.get("id"):
+            self.on_key_added(other[0], other[1])
+            return
 
         env = self._load_env()
         env.pop(env_var, None)
@@ -160,16 +154,8 @@ class GrokCliAdapter(BackendAdapter):
         self._save_env(env)
 
     def reconcile(self) -> None:
-        from core.data import get_vendors
-        # Pick the first enabled key to keep as active (single-slot CLI)
-        chosen = None
-        for v in get_vendors():
-            for k in v.get("keys", []):
-                if k.get("enabled", True) and k.get("api_key"):
-                    chosen = (v, k)
-                    break
-            if chosen:
-                break
+        # Pick the first healthy/syncable key (single-slot CLI)
+        chosen = self.pick_syncable_key()
         if chosen:
             self.on_key_added(chosen[0], chosen[1])
         else:

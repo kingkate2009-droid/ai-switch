@@ -22,6 +22,8 @@ from core.providers import (
 
 # Max models to try after primary check_model (performance cap)
 _MAX_FALLBACK_MODELS = 12
+# Quick/bulk health: fewer fallbacks, shorter wall time on dead keys
+_MAX_FALLBACK_MODELS_QUICK = 3
 from backends import reconcile_all, on_key_updated, on_key_removed
 
 DATA_DIR = Path.home() / ".ai-switch"
@@ -31,15 +33,61 @@ _lock = threading.Lock()
 # Default network retries (total attempts = 1 + retries, but we treat as max attempts)
 _DEFAULT_NETWORK_RETRIES = 3
 _RETRY_BACKOFF_BASE = 0.6  # seconds; attempt 1 wait 0.6, then 1.2, ...
+# Quick bulk checks: 1 attempt only (no multi-second backoff chain)
+_QUICK_NETWORK_RETRIES = 1
+
+# Thread-local quick mode (set by check_key_health(quick=True) / bulk)
+_tls = threading.local()
+
+
+def _in_quick_mode() -> bool:
+    return bool(getattr(_tls, "quick", False))
+
+
+def _max_fallback_models() -> int:
+    return _MAX_FALLBACK_MODELS_QUICK if _in_quick_mode() else _MAX_FALLBACK_MODELS
 
 
 def _network_retry_attempts() -> int:
     """Max attempts for network-ish probe failures. Default 3, clamped 1..10."""
+    # Thread override from providers.probe_profile / quick health
+    try:
+        from core.providers import _tls as _prov_tls
+        ov = getattr(_prov_tls, "probe_retries", None)
+        if ov is not None:
+            return max(1, min(10, int(ov)))
+    except Exception:
+        pass
+    if _in_quick_mode():
+        return _QUICK_NETWORK_RETRIES
     try:
         n = int((get_settings() or {}).get("health_network_retries", _DEFAULT_NETWORK_RETRIES))
     except Exception:
         n = _DEFAULT_NETWORK_RETRIES
     return max(1, min(10, n))
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def health_check_profile(mode: str = "full"):
+    """Tune probe cost for bulk vs interactive single-key checks.
+
+    quick: shorter timeout, 1 retry, fewer model fallbacks.
+    """
+    from core.providers import probe_profile, PROBE_TIMEOUT_QUICK
+    prev = getattr(_tls, "quick", False)
+    try:
+        if mode == "quick":
+            _tls.quick = True
+            with probe_profile(timeout=PROBE_TIMEOUT_QUICK, retries=1):
+                yield
+        else:
+            _tls.quick = False
+            yield
+    finally:
+        _tls.quick = prev
 
 
 def _adaptive_cfg() -> dict:
@@ -172,7 +220,11 @@ def classify_health_error(msg: str) -> dict:
             "label": "Rate limited (429)",
             "suggestion": "Slow down requests or switch to another key; retry later.",
         }
-    if any(x in s for x in ("quota", "billing", "insufficient", "payment", "balance", "credit", "exceeded your current quota")):
+    if any(x in s for x in (
+        "quota", "billing", "insufficient", "payment", "balance", "credit",
+        "exceeded your current quota", "usagelimit", "usage limit", "usage_limit",
+        "gousagelimit", "monthly limit", "no credits", "out of credits", "额度",
+    )):
         return {
             "code": "quota",
             "label": "Quota / billing",
@@ -417,8 +469,9 @@ def _build_probe_order(
     tail = rest[1:]
     random.shuffle(tail)
     rest = head + tail
+    cap = 1 + _max_fallback_models()
     for m in rest:
-        if len(ordered) >= 1 + _MAX_FALLBACK_MODELS:
+        if len(ordered) >= cap:
             break
         if m not in seen:
             seen.add(m)
@@ -466,13 +519,32 @@ def _probe_models_in_order(
     return False, detail, None, tried
 
 
-def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True) -> dict:
+def check_key_health(
+    vendor_id: str,
+    key_id: str,
+    scan_models_flag: bool = True,
+    *,
+    quick: bool = False,
+) -> dict:
     """Key-level health check.
 
-    - Always refresh model inventory when scan_models_flag (every check).
+    - Refresh model inventory when scan_models_flag and (not quick or inventory empty).
     - Probe primary check_model first; on failure randomly try other models.
     - Key is unhealthy only when no candidate model works (or hard auth/network fail).
+    - quick=True: fewer fallbacks, 1 network retry, shorter timeout, skip scan if inventory exists.
     """
+    ctx = health_check_profile("quick") if quick else health_check_profile("full")
+    with ctx:
+        return _check_key_health_inner(vendor_id, key_id, scan_models_flag=scan_models_flag, quick=quick)
+
+
+def _check_key_health_inner(
+    vendor_id: str,
+    key_id: str,
+    scan_models_flag: bool = True,
+    *,
+    quick: bool = False,
+) -> dict:
     vendor = get_vendor(vendor_id)
     if not vendor:
         return {"key_id": key_id, "healthy": False, "latency_ms": 0, "error": "Vendor not found"}
@@ -495,16 +567,20 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
 
     start = time.time()
 
-    # 1) Always refresh model list (not only when healthy)
+    # 1) Model inventory: skip network scan in quick mode when we already have models
     scan_type = "openai_chat" if check_type == "openai_responses" else check_type
     scanned = []
-    if scan_models_flag:
+    existing_ids = list_model_ids(key_entry)
+    do_scan = bool(scan_models_flag)
+    if quick and existing_ids:
+        do_scan = False
+    if do_scan:
         try:
             scanned = scan_models(scan_type, api_url, api_key) or []
         except Exception:
             scanned = []
 
-    existing = list_model_ids(key_entry)
+    existing = existing_ids
     siblings = _sibling_model_ids(vendor, key_id)
     models = _merge_model_ids(scanned, existing, siblings)
     # drop disabled from probe pool but keep full inventory for storage
@@ -561,8 +637,8 @@ def check_key_health(vendor_id: str, key_id: str, scan_models_flag: bool = True)
         }
         check_layer = "model" if check_model else "connectivity"
 
-        # Optional Responses secondary for Codex-suitable keys
-        if healthy and wants_responses:
+        # Optional Responses secondary for Codex-suitable keys (skip in quick bulk mode)
+        if healthy and wants_responses and not quick:
             gpt_pool = [m for m in (probe_pool or []) if m.lower().startswith(("gpt-", "o1", "o3", "o4")) or "codex" in m.lower()]
             resp_order = _build_probe_order(
                 check_model=check_model if (check_model and check_model in (gpt_pool or [check_model])) else (used_model or ""),
@@ -766,13 +842,23 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
 
 
 def _key_has_usable_model(key: dict, health: dict = None) -> bool:
-    """True if key-level healthy OR any non-disabled model is healthy in model_health."""
+    """True when the key currently has something backends may use.
+
+    Fresh probe result wins over stale per-model history:
+    - health.healthy is True  → usable
+    - health.healthy is False → not usable (do NOT resurrect via old model_health)
+    - no fresh verdict        → fall back to non-disabled model_health ok entries
+    """
     if not key or not key.get("api_key"):
         return False
     if health is None:
         health = {}
     if health.get("healthy") is True:
         return True
+    # Explicit key/model probe failure must strip backends; stale model_health
+    # from an older per-model pass must not keep dead/quota keys alive.
+    if health.get("healthy") is False:
+        return False
     disabled = set(key.get("disabled_models") or [])
     mh = key.get("model_health") or {}
     for mid, rec in mh.items():
@@ -780,12 +866,6 @@ def _key_has_usable_model(key: dict, health: dict = None) -> bool:
             continue
         if isinstance(rec, dict) and rec.get("healthy") is True:
             return True
-    # enabled models list after successful inventory (key healthy path)
-    try:
-        if health.get("healthy") is True and (get_enabled_models(key) or list_model_ids(key)):
-            return True
-    except Exception:
-        pass
     return False
 
 
@@ -793,8 +873,8 @@ def is_key_backend_syncable(vendor_id: str, key: dict) -> bool:
     """Whether a key may be written into backend engine configs.
 
     - disabled keys: never
-    - known unhealthy AND no usable model: never
-    - healthy / has usable model / not-yet-checked: yes
+    - known unhealthy (latest key health False): never
+    - healthy / not-yet-checked: yes
     """
     if not key or not key.get("api_key"):
         return False
@@ -806,20 +886,22 @@ def is_key_backend_syncable(vendor_id: str, key: dict) -> bool:
     with _lock:
         cache = _load_cache()
     h = cache.get(f"{vendor_id}:{kid}") or {}
-    if h.get("healthy") is False and not _key_has_usable_model(key, h):
+    # Latest key-level verdict is authoritative — never keep quota/auth failures
+    # because an older model_health entry still says ok.
+    if h.get("healthy") is False:
         return False
     return True
 
 
 def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
-    """Push usable keys (auto-enable + sync); strip fully-unusable from backends (keep in system).
+    """Push healthy keys (auto-enable + sync); strip failed keys from backends.
 
-    Policy: if the key is healthy OR has at least one usable model, treat as enabled
-    and sync to backends. Only strip when nothing is usable.
+    Policy: only the fresh probe result decides. Stale model_health must not
+    keep no-quota / auth-failed keys on engines, and must not flip UI to green.
     """
     if not vendor or not key:
         return
-    usable = bool(health.get("healthy")) or _key_has_usable_model(key, health)
+    usable = bool(health.get("healthy"))
     if usable:
         models = health.get("models", [])
         default_model = health.get("default_model", "") or key.get("default_model", "")
@@ -830,13 +912,13 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
             updates["models"] = [default_model]
         if default_model:
             updates["default_model"] = default_model
+        # Clear stale model_health marks that contradict a fresh healthy probe
+        # so later failure paths are not blocked by old per-model ok flags.
+        if key.get("model_health") and health.get("tried_models"):
+            updates["model_health"] = {}
         updated = update_key_data(vendor["id"], key["id"], **updates) or key
-        # mark response for UI — usable ⇒ enabled + healthy for vendor aggregation
         try:
             health["enabled"] = True
-            if health.get("healthy") is not True:
-                health["healthy"] = True
-                health.setdefault("message", "usable model available")
             if updates.get("models") is not None:
                 health["models"] = updates["models"]
             if updates.get("default_model"):
@@ -849,9 +931,16 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
         on_key_removed(vendor, key)
         try:
             from core.data import get_settings
+            updates = {}
+            # Drop stale per-model ok flags so a later reconcile cannot resurrect
+            # this key via old model_health after a key-level probe failure.
+            if key.get("model_health"):
+                updates["model_health"] = {}
             if bool((get_settings() or {}).get("health_auto_disable")):
-                update_key_data(vendor["id"], key["id"], enabled=False)
+                updates["enabled"] = False
                 health["enabled"] = False
+            if updates:
+                update_key_data(vendor["id"], key["id"], **updates)
         except Exception:
             pass
 

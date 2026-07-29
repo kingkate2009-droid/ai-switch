@@ -781,8 +781,12 @@ def api_delete_key(vendor_id, key_id):
 
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>/health", methods=["GET"])
 def api_check_key_health(vendor_id, key_id):
-    health = check_key_health(vendor_id, key_id)
-    log_event("health.check", vendor_id=vendor_id, key_id=key_id, healthy=bool(health.get("healthy")), error=(health.get("error") or "")[:200])
+    # quick=1: shorter timeout, fewer fallbacks, skip model scan when inventory exists
+    # (used by progressive bulk check). Single interactive check stays full by default.
+    quick = request.args.get("quick", "0") in ("1", "true", "yes")
+    scan = request.args.get("scan_models", "1" if not quick else "0") not in ("0", "false", "no")
+    health = check_key_health(vendor_id, key_id, scan_models_flag=scan, quick=quick)
+    log_event("health.check", vendor_id=vendor_id, key_id=key_id, healthy=bool(health.get("healthy")), error=(health.get("error") or "")[:200], quick=quick)
     v = get_vendor(vendor_id)
     k = get_key(vendor_id, key_id)
     if v and k:
@@ -1231,18 +1235,23 @@ def api_batch_parse():
 
 @app.route("/api/batch/import", methods=["POST"])
 def api_batch_apply():
+    """Import only — no health checks, no backend reconcile.
+
+    Writes vendors/keys in one disk save. Client should run health only on
+    returned pending keys, then optionally push backends once.
+    """
     data = request.get_json() or {}
     entries = data.get("entries", [])
     if not entries:
         entries = parse_batch_text(data.get("text", ""))
     if not entries:
         return jsonify({"error": "no entries to import"}), 400
-    from core.data import import_transaction
-    created = []
-    errors = []
+
+    from core.data import batch_import_entries, import_transaction
+
     try:
         with import_transaction({"source": "batch.import", "entries": len(entries)}):
-            return _batch_import_apply(entries, created, errors)
+            result = batch_import_entries(entries)
     except Exception as e:
         log.exception("batch import aborted and rolled back")
         return jsonify({
@@ -1251,173 +1260,76 @@ def api_batch_apply():
             "created": [],
             "errors": [{"entry": "transaction", "error": str(e)}],
             "count": 0,
+            "pending_health": 0,
             "focus_vendor_id": "",
+            "check_targets": [],
         }), 500
 
+    created = result.get("created") or []
+    errors = result.get("errors") or []
+    pending = int(result.get("pending_health") or 0)
+    focus_vendor_id = result.get("focus_vendor_id") or ""
 
-def _batch_import_apply(entries, created, errors):
-    used_names = {(v.get("name") or "").lower() for v in get_vendors()}
-    for entry in entries:
-        provider = (entry.get("provider") or "custom").strip() or "custom"
-        api_url = (entry.get("api_url") or "").strip().rstrip("/")
-        api_key = (entry.get("api_key") or "").strip()
-        name = (entry.get("name") or "").strip() or (
-            f"key-{(api_key[-4:] if len(api_key) >= 4 else api_key)}" if api_key else "key"
-        )
-        endpoint_type = (entry.get("endpoint_type") or "openai").strip().lower() or "openai"
-        if endpoint_type not in ("openai", "anthropic"):
-            endpoint_type = "anthropic" if (
-                "/anthropic" in api_url.lower() or "api.anthropic.com" in api_url.lower()
-            ) else "openai"
-        vendor_name = (entry.get("vendor_name") or entry.get("vendor") or "").strip()
-
-        if not api_key or not api_url:
-            errors.append({
-                "entry": vendor_name or name or provider,
-                "error": "api_url and api_key are required",
-            })
+    # Targets for client-side progressive health (imported keys only)
+    check_targets = []
+    for c in created:
+        if c.get("skipped") or not c.get("pending_health"):
             continue
-
-        try:
-            # Global secret check BEFORE creating vendors
-            from core.data import find_key_anywhere, _norm_secret
-            secret = _norm_secret(api_key)
-            existing_hit = find_key_anywhere(secret) if secret else None
-            if existing_hit:
-                ev, ek = existing_hit
-                created.append({
-                    "vendor": (ev or {}).get("name") or vendor_name or provider,
-                    "key": (ek or {}).get("name") or name,
-                    "vendor_id": (ev or {}).get("id"),
-                    "key_id": (ek or {}).get("id"),
-                    "api_key": api_key[:8] + "...",
-                    "skipped": True,
-                    "reason": "duplicate_secret",
-                    "existing_vendor": (ev or {}).get("name"),
-                    "existing_key": (ek or {}).get("name"),
-                })
-                continue
-
-            vendor = None
-            # Match by normalized URL (with/without /v1). Never reuse a different host via provider name.
-            from core.data import find_vendor_by_url
-            if api_url:
-                vendor = find_vendor_by_url(api_url)
-
-            if not vendor:
-                base_name = vendor_name or provider.replace("-", " ").title() or "Provider"
-                final_name = base_name
-                n = 2
-                while final_name.lower() in used_names:
-                    final_name = f"{base_name}-{n}"
-                    n += 1
-                used_names.add(final_name.lower())
-                vendor = add_vendor(
-                    name=final_name,
-                    provider=provider,
-                    api_url=api_url,
-                    endpoint_type=endpoint_type,
-                )
-            else:
-                # Optional renames / provider / endpoint updates from editable import
-                from core.data import update_vendor
-                updates = {}
-                if vendor_name and vendor_name != vendor.get("name"):
-                    if vendor_name.lower() not in used_names or vendor_name.lower() == (vendor.get("name") or "").lower():
-                        updates["name"] = vendor_name
-                        used_names.discard((vendor.get("name") or "").lower())
-                        used_names.add(vendor_name.lower())
-                if provider and provider != vendor.get("provider"):
-                    updates["provider"] = provider
-                if endpoint_type and endpoint_type != vendor.get("endpoint_type"):
-                    updates["endpoint_type"] = endpoint_type
-                if updates:
-                    update_vendor(vendor["id"], **updates)
-                    vendor = get_vendor(vendor["id"]) or vendor
-
-            # System-wide secret dedup (never import same API key twice)
-            from core.data import find_key_anywhere, _norm_secret
-            secret = _norm_secret(api_key)
-            existing_hit = find_key_anywhere(secret) if secret else None
-            if existing_hit:
-                ev, ek = existing_hit
-                created.append({
-                    "vendor": (ev.get("name") if ev else None) or vendor.get("name"),
-                    "key": (ek.get("name") if ek else None) or name,
-                    "vendor_id": (ev or {}).get("id") or vendor.get("id"),
-                    "key_id": (ek or {}).get("id"),
-                    "api_key": api_key[:8] + "...",
-                    "skipped": True,
-                    "reason": "duplicate_secret",
-                    "existing_vendor": (ev or {}).get("name"),
-                    "existing_key": (ek or {}).get("name"),
-                })
-            else:
-                k = add_key(vendor["id"], name, api_key)
-                if k and not k.get("_existing"):
-                    health = check_key_health(vendor["id"], k["id"])
-                    if health.get("healthy"):
-                        models = health.get("models", [])
-                        default_model = health.get("default_model", "")
-                        updates = {"enabled": True}
-                        if models:
-                            updates["models"] = models
-                        if default_model:
-                            updates["default_model"] = default_model
-                        updated_key = update_key_data(vendor["id"], k["id"], **updates)
-                        on_key_added(vendor, updated_key or k)
-                    else:
-                        if bool((get_settings() or {}).get("health_auto_disable")):
-                            update_key_data(vendor["id"], k["id"], enabled=False)
-                            on_key_removed(vendor, k)
-                    created.append({
-                        "vendor": vendor["name"],
-                        "key": name,
-                        "vendor_id": vendor.get("id"),
-                        "key_id": k.get("id"),
-                        "api_key": api_key[:8] + "...",
-                        "healthy": health.get("healthy"),
-                    })
-                else:
-                    created.append({
-                        "vendor": vendor["name"],
-                        "key": name,
-                        "vendor_id": vendor.get("id"),
-                        "key_id": (k or {}).get("id") if k else None,
-                        "api_key": api_key[:8] + "...",
-                        "skipped": True,
-                        "reason": "duplicate_or_add_failed",
-                    })
-        except Exception as e:
-            log.error("Batch import entry failed: %s", e)
-            # hard failure → abort whole transaction (context manager rolls back)
-            raise RuntimeError(f"batch import failed at entry {name!r}: {e}") from e
-
-    focus_vendor_id = None
-    for c in reversed(created):
-        if c.get("skipped"):
+        if c.get("vendor_id") is None or c.get("key_id") is None:
             continue
-        if c.get("vendor_id") is not None and str(c.get("vendor_id")) != "":
-            focus_vendor_id = str(c["vendor_id"])
-            break
-    if not focus_vendor_id:
-        for c in reversed(created):
-            if c.get("vendor_id") is not None and str(c.get("vendor_id")) != "":
-                focus_vendor_id = str(c["vendor_id"])
-                break
+        check_targets.append({
+            "vendor_id": str(c.get("vendor_id")),
+            "key_id": str(c.get("key_id")),
+            "vendor_name": c.get("vendor") or "",
+            "key_name": c.get("key") or "",
+        })
 
     log_event(
         "batch.import",
         imported=sum(1 for c in created if not c.get("skipped")),
         skipped=sum(1 for c in created if c.get("skipped")),
         errors=len(errors),
+        pending_health=pending,
         focus_vendor_id=focus_vendor_id or "",
     )
     return jsonify({
         "created": created,
         "errors": errors,
         "count": len(created),
-        "focus_vendor_id": focus_vendor_id or "",
+        "pending_health": pending,
+        "focus_vendor_id": focus_vendor_id,
+        "check_targets": check_targets,
+        "message": (
+            f"Imported {sum(1 for c in created if not c.get('skipped'))} key(s); "
+            f"health check deferred for {pending}"
+            if pending else None
+        ),
+        "undo_available": True,
+    })
+
+
+# Legacy sequential path kept only if something still imports the symbol (tests).
+def _batch_import_apply(entries, created, errors):
+    from core.data import batch_import_entries
+    result = batch_import_entries(entries)
+    created.extend(result.get("created") or [])
+    errors.extend(result.get("errors") or [])
+    return jsonify({
+        "created": created,
+        "errors": errors,
+        "count": len(created),
+        "pending_health": result.get("pending_health") or 0,
+        "focus_vendor_id": result.get("focus_vendor_id") or "",
+        "check_targets": [
+            {
+                "vendor_id": str(c.get("vendor_id")),
+                "key_id": str(c.get("key_id")),
+                "vendor_name": c.get("vendor") or "",
+                "key_name": c.get("key") or "",
+            }
+            for c in (result.get("created") or [])
+            if c.get("pending_health") and c.get("vendor_id") is not None and c.get("key_id") is not None
+        ],
         "undo_available": True,
     })
 
@@ -2570,7 +2482,68 @@ def api_get_settings():
     token = str(s.pop("access_token", "") or "")
     s["access_token_set"] = bool(token.strip())
     s["access_token"] = ""  # client must not echo secrets
+    s.pop("secrets_kdf", None)  # never expose salt/verifier details beyond status
+    try:
+        from core.data import secrets_status
+        st = secrets_status()
+        s["encrypt_keys_at_rest"] = bool(st.get("encrypt_keys_at_rest"))
+        s["secrets_unlocked"] = bool(st.get("unlocked"))
+        s["secrets_locked"] = bool(st.get("locked"))
+    except Exception:
+        s.setdefault("encrypt_keys_at_rest", False)
+        s["secrets_unlocked"] = True
+        s["secrets_locked"] = False
     return jsonify(s)
+
+
+@app.route("/api/secrets/status", methods=["GET"])
+def api_secrets_status():
+    from core.data import secrets_status
+    return jsonify(secrets_status())
+
+
+@app.route("/api/secrets/unlock", methods=["POST"])
+def api_secrets_unlock():
+    from core.data import unlock_secrets
+    body = request.get_json(silent=True) or {}
+    try:
+        st = unlock_secrets(str(body.get("password") or ""))
+        log_event("secrets.unlock", ok=True)
+        return jsonify({"success": True, **st})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/secrets/lock", methods=["POST"])
+def api_secrets_lock():
+    from core.data import lock_secrets
+    st = lock_secrets()
+    log_event("secrets.lock")
+    return jsonify({"success": True, **st})
+
+
+@app.route("/api/secrets/enable", methods=["POST"])
+def api_secrets_enable():
+    from core.data import enable_secrets_encryption
+    body = request.get_json(silent=True) or {}
+    try:
+        st = enable_secrets_encryption(str(body.get("password") or ""))
+        log_event("secrets.enable")
+        return jsonify({"success": True, **st})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/secrets/disable", methods=["POST"])
+def api_secrets_disable():
+    from core.data import disable_secrets_encryption
+    body = request.get_json(silent=True) or {}
+    try:
+        st = disable_secrets_encryption(str(body.get("password") or ""))
+        log_event("secrets.disable")
+        return jsonify({"success": True, **st})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
 
 @app.route("/api/settings", methods=["POST"])

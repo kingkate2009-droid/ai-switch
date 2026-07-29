@@ -195,19 +195,23 @@ class ClaudeCodeAdapter(BackendAdapter):
 
     def reconcile(self) -> None:
         from core.data import get_vendors
-        has_active = False
+        from core.health_checker import is_key_backend_syncable
+        best = None
         for v in get_vendors():
             if not self._is_anthropic_vendor(v):
                 continue
             for k in v.get("keys", []):
-                if k.get("enabled", True) and k.get("api_key"):
-                    has_active = True
-                    break
-            if has_active:
+                if not k.get("enabled", True) or not k.get("api_key"):
+                    continue
+                if not is_key_backend_syncable(str(v.get("id") or ""), k):
+                    continue
+                best = (v, k)
                 break
-        if not has_active:
-            settings = self._load_settings()
-            env = settings.get("env", {})
+            if best:
+                break
+        settings = self._load_settings()
+        env = settings.setdefault("env", {})
+        if not best:
             removed = env.pop("ANTHROPIC_API_KEY", None)
             env.pop("ANTHROPIC_BASE_URL", None)
             if removed is not None:
@@ -216,6 +220,16 @@ class ClaudeCodeAdapter(BackendAdapter):
                 else:
                     settings.pop("env", None)
                 self._save_settings(settings)
+            return
+        v, k = best
+        env["ANTHROPIC_API_KEY"] = k["api_key"]
+        api_url = (v.get("proxy_target") or v.get("api_url") or "").strip()
+        if api_url:
+            env["ANTHROPIC_BASE_URL"] = api_url
+        else:
+            env.pop("ANTHROPIC_BASE_URL", None)
+        settings["env"] = env
+        self._save_settings(settings)
 
     def sync_from_backend(self) -> list[dict]:
         settings = self._load_settings()

@@ -51,11 +51,10 @@ class CopilotCliAdapter(BackendAdapter):
             json.dump(settings, f, indent=2)
 
     def on_key_removed(self, vendor: dict, key: dict) -> None:
-        from core.data import get_vendors
-        for v in get_vendors():
-            for k in v.get("keys", []):
-                if k.get("enabled", True) and k.get("api_key"):
-                    return
+        other = self.pick_syncable_key()
+        if other and other[1].get("id") != key.get("id"):
+            self.on_key_added(other[0], other[1])
+            return
         settings = self._load_settings()
         settings.pop("byok", None)
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,22 +62,16 @@ class CopilotCliAdapter(BackendAdapter):
             json.dump(settings, f, indent=2)
 
     def reconcile(self) -> None:
-        from core.data import get_vendors
-        has_active = False
-        for v in get_vendors():
-            for k in v.get("keys", []):
-                if k.get("enabled", True) and k.get("api_key"):
-                    has_active = True
-                    break
-            if has_active:
-                break
-        if not has_active:
-            settings = self._load_settings()
-            if "byok" in settings:
-                del settings["byok"]
-                self._settings_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._settings_path, "w") as f:
-                    json.dump(settings, f, indent=2)
+        best = self.pick_syncable_key()
+        if best:
+            self.on_key_added(best[0], best[1])
+            return
+        settings = self._load_settings()
+        if "byok" in settings:
+            del settings["byok"]
+            self._settings_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._settings_path, "w") as f:
+                json.dump(settings, f, indent=2)
 
     def sync_from_backend(self) -> list[dict]:
         settings = self._load_settings()
