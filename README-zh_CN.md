@@ -53,26 +53,22 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/02-vendors.png" alt="供应商与 Key" width="390">
-  &nbsp;
   <img src="docs/screenshots/03-backends.png" alt="后端" width="390">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/04-health.png" alt="健康监测" width="390">
   &nbsp;
-  <img src="docs/screenshots/05-task-center.png" alt="任务中心" width="390">
+  <img src="docs/screenshots/04-health.png" alt="健康监测" width="390">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/06-dashboard-dark.png" alt="深色主题" width="800">
+  <img src="docs/screenshots/05-task-center.png" alt="任务中心" width="390">
+  &nbsp;
+  <img src="docs/screenshots/06-dashboard-dark.png" alt="深色主题" width="390">
 </p>
 
 | | |
 |--|--|
-| 仪表盘总览 | 供应商 / Key 管理 |
-| 后端同步状态 | 健康监测 |
-| 不阻塞页面的任务中心 | 浅色 / 深色主题 |
+| 仪表盘总览 | 后端同步状态 |
+| 健康监测 | 不阻塞页面的任务中心 |
+| 浅色 / 深色主题 | |
 
 ---
 

@@ -39,19 +39,15 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/02-vendors.png" alt="供應商與 Key" width="390">
-  &nbsp;
   <img src="docs/screenshots/03-backends.png" alt="後端" width="390">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/04-health.png" alt="健康監測" width="390">
   &nbsp;
-  <img src="docs/screenshots/05-task-center.png" alt="任務中心" width="390">
+  <img src="docs/screenshots/04-health.png" alt="健康監測" width="390">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/06-dashboard-dark.png" alt="深色主題" width="800">
+  <img src="docs/screenshots/05-task-center.png" alt="任務中心" width="390">
+  &nbsp;
+  <img src="docs/screenshots/06-dashboard-dark.png" alt="深色主題" width="390">
 </p>
 
 ## 三分鐘上手

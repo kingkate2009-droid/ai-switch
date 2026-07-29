@@ -53,26 +53,22 @@ If you juggle **relay / multi-vendor API keys** across **OpenClaw, OpenCode, Cod
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/02-vendors.png" alt="Vendors & keys" width="390">
-  &nbsp;
   <img src="docs/screenshots/03-backends.png" alt="Backends" width="390">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/04-health.png" alt="Health monitor" width="390">
   &nbsp;
-  <img src="docs/screenshots/05-task-center.png" alt="Task center" width="390">
+  <img src="docs/screenshots/04-health.png" alt="Health monitor" width="390">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/06-dashboard-dark.png" alt="Dark theme" width="800">
+  <img src="docs/screenshots/05-task-center.png" alt="Task center" width="390">
+  &nbsp;
+  <img src="docs/screenshots/06-dashboard-dark.png" alt="Dark theme" width="390">
 </p>
 
 | | |
 |--|--|
-| Dashboard | Keys & vendors |
-| Backends sync status | Health monitor |
-| Non-blocking task center | Light / dark theme |
+| Dashboard | Backends sync status |
+| Health monitor | Non-blocking task center |
+| Light / dark theme | |
 
 ---
 
