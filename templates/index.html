@@ -1118,6 +1118,17 @@
           <div id="profilesList" class="profiles-list"></div>
         </div>
         <div class="settings-card">
+          <h3>Appearance</h3>
+          <p class="form-hint">Switch between light and dark theme.</p>
+          <div style="display:flex;gap:12px;margin-top:12px;align-items:center">
+            <label style="font-size:13px;font-weight:600;color:var(--text2)">Theme:</label>
+            <select id="themeSelect" onchange="onThemeSelectChange(this.value)" style="padding:6px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;cursor:pointer">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-card">
           <button class="btn btn-primary" id="settingsSaveBtn" onclick="saveSettingsPage()" data-i18n="settings.save">{{ t('settings.save') }}</button>
           <button class="btn" onclick="showOnboarding(true)" data-i18n="onboarding.replay">{{ t('onboarding.replay') }}</button>
         </div>
@@ -5643,6 +5654,17 @@ function toggleTheme() {
   var next = current === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('opencaw_theme', next);
+  _syncThemeSelect(next);
+}
+
+function onThemeSelectChange(val) {
+  document.documentElement.setAttribute('data-theme', val);
+  localStorage.setItem('opencaw_theme', val);
+}
+
+function _syncThemeSelect(val) {
+  var sel = document.getElementById('themeSelect');
+  if (sel) sel.value = val || 'light';
 }
 
 // ── Statistics ──────────────────────────
@@ -6290,8 +6312,9 @@ async function loadStats() {
 }
 
 (function() {
-  var saved = localStorage.getItem('opencaw_theme');
-  if (saved) document.documentElement.setAttribute('data-theme', saved);
+  var saved = localStorage.getItem('opencaw_theme') || 'light';
+  document.documentElement.setAttribute('data-theme', saved);
+  try { _syncThemeSelect(saved); } catch(e) {}
 })();
 
 
@@ -6514,6 +6537,7 @@ async function loadSettingsPage() {
     pj.value = Object.keys(pricing).length ? JSON.stringify(pricing, null, 2) : '';
   }
   _settingsDirty = false;
+  _syncThemeSelect(document.documentElement.getAttribute('data-theme') || 'light');
   applyReadOnlyUI();
   loadProfilesList();
   loadPoliciesList();
