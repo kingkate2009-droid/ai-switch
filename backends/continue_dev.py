@@ -40,6 +40,12 @@ class ContinueAdapter(BackendAdapter):
         prov = vendor.get("provider", "openai")
         api_url = vendor.get("api_url", "")
         ep = vendor.get("endpoint_type", "openai")
+        model_id = str(key.get("default_model") or "")
+        selected_endpoint = self.selected_model_endpoint(vendor, key, model_id) if model_id else ""
+        if selected_endpoint == "anthropic_messages":
+            ep = "anthropic"
+        elif selected_endpoint:
+            ep = "openai"
 
         # Check if this provider already has an entry
         existing = None
@@ -74,13 +80,36 @@ class ContinueAdapter(BackendAdapter):
 
     def reconcile(self) -> None:
         config = self._load_config()
-        models = config.get("models", [])
-        if not models:
-            return
-        active_bare = {k["api_key"] for _, k in self.iter_syncable_keys()}
-        kept = [m for m in models if m.get("apiKey", "") in active_bare or m.get("api_key", "") in active_bare]
-        if len(kept) != len(models):
-            config["models"] = kept
+        from core.data import get_vendors
+        existing = config.get("models", [])
+        desired = {}
+        for v in get_vendors():
+            prov = str(v.get("provider") or "openai")
+            selected = self.pick_syncable_key(vendor=v)
+            if not selected:
+                continue
+            _, k = selected
+            model_id = str(k.get("default_model") or "")
+            selected_endpoint = self.selected_model_endpoint(v, k, model_id) if model_id else ""
+            if not selected_endpoint:
+                continue
+            entry = {
+                "title": prov.title(),
+                "provider": "anthropic" if selected_endpoint == "anthropic_messages" else "openai",
+                "model": "AUTODETECT",
+                "apiKey": k["api_key"],
+            }
+            if v.get("api_url"):
+                entry["apiBase"] = v["api_url"]
+            desired[prov.lower()] = entry
+
+        # Continue has one slot per provider title. Preserve unrelated entries,
+        # but replace entries for providers controlled by the system.
+        system_providers = {str(v.get("provider") or "openai").lower() for v in get_vendors()}
+        kept = [m for m in existing if str(m.get("title") or m.get("provider") or "").lower() not in system_providers]
+        models = kept + list(desired.values())
+        if models != existing:
+            config["models"] = models
             self._save_config(config)
 
     def sync_from_backend(self) -> list[dict]:

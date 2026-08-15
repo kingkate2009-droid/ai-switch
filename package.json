@@ -1,0 +1,56 @@
+{
+  "name": "@kingkate/ai-switch",
+  "version": "2.2.0",
+  "description": "Local AI API Key hub \u2014 change once, every tool works",
+  "main": "run.py",
+  "bin": {
+    "ai-switch": "./bin/ai-switch.js"
+  },
+  "scripts": {
+    "start": "node bin/ai-switch.js",
+    "postinstall": "node bin/postinstall.js"
+  },
+  "keywords": [
+    "ai",
+    "api-key",
+    "openai",
+    "anthropic",
+    "claude",
+    "openclaw",
+    "key-management"
+  ],
+  "author": "kingkate",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kingkate2009-droid/ai-switch.git"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "files": [
+    "bin/",
+    "app.py",
+    "run.py",
+    "core/",
+    "backends/",
+    "templates/",
+    "static/",
+    "locales/",
+    "requirements.txt",
+    "VERSION",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
+    "!**/*.pyo",
+    "!**/*.pyd"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

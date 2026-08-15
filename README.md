@@ -88,6 +88,20 @@ python3 run.py
 # → http://127.0.0.1:8787
 ```
 
+**npm (Node.js):**
+
+```bash
+npx github:kingkate2009-droid/ai-switch
+# → http://127.0.0.1:8787
+```
+
+Or install globally:
+
+```bash
+npm install -g github:kingkate2009-droid/ai-switch
+ai-switch
+```
+
 **Docker:**
 
 ```bash
@@ -95,7 +109,7 @@ docker compose up -d
 # → http://127.0.0.1:8787
 ```
 
-Requires **Python 3.9+** for source installs.
+Requires **Python 3.9+** for source/npm installs.
 
 **3-minute loop:** [docs/quickstart.md](docs/quickstart.md)
 
@@ -111,8 +125,8 @@ Requires **Python 3.9+** for source installs.
 Only three outcomes matter day-to-day:
 
 1. **One place for keys** — vendors, tags, batch import, MetaAPI merge, dedupe  
-2. **Know what’s alive** — layered probes (Chat + Codex Responses), readable errors, adaptive interval  
-3. **Safe sync** — preview · last-sync summary · never write to uninstalled tools · active provider switch  
+2. **Know what’s alive** — model-level endpoint detection, quality checks, readable errors, adaptive interval
+3. **Safe sync** — verified models only · preview · primary/backup failover · never write to uninstalled tools
 
 Also included when you need them: check-in URLs, budgets, encrypted profile export, diagnostics pack, downstream routes, desktop packages.
 
@@ -121,9 +135,13 @@ Also included when you need them: check-in URLs, budgets, encrypted profile expo
 
 - Multi-vendor + key table, search / tags / batch enable-disable-delete  
 - 26+ built-in providers + custom OpenAI-compatible endpoints  
-- Health monitor (scheduled), auto-disable / failover (optional)  
+- Per-model endpoint detection (Chat, Responses, Messages, Gemini) with auto/manual selection
+- Vendor-grouped quality checks with per-vendor and per-model actions
+- Health monitor (scheduled), auto-disable / primary-backup failover (optional)
 - Sync to OpenClaw, OpenCode, Claude Code, Codex, Cline, Aider, Continue, …  
 - Batch / backup / MetaAPI import with undo  
+- Transactional SQLite state with one-time legacy JSON migration
+- npm/npx launcher in addition to source, Docker and desktop packages
 - Light/dark theme, EN / 简体 / 繁中  
 - Drop-in backend adapters ([contribution guide](docs/adapter-contribution.md))
 
@@ -145,7 +163,7 @@ Also included when you need them: check-in URLs, budgets, encrypted profile expo
 - [#1 Install & start](https://github.com/kingkate2009-droid/ai-switch/issues/1)
 - [#2 Codex connectivity](https://github.com/kingkate2009-droid/ai-switch/issues/2)
 - [#3 Import & merge](https://github.com/kingkate2009-droid/ai-switch/issues/3)
-- Latest: [v2.0.5 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.0.5) · [notes](docs/release-notes-2.0.5.md)
+- Latest: [v2.2.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.2.0) · [notes](docs/release-notes-2.2.0.md)
 
 ---
 
@@ -162,7 +180,7 @@ Also included when you need them: check-in URLs, budgets, encrypted profile expo
 
 Status on the Backends page: **Not installed** · **Stopped (syncable)** · **Running** — uninstalled tools are never written.
 
-### Providers (probe types)
+### Model endpoint types
 
 | Type | Examples |
 |------|----------|
@@ -170,6 +188,8 @@ Status on the Backends page: **Not installed** · **Stopped (syncable)** · **Ru
 | `anthropic` | Anthropic-compatible |
 | `gemini` | Google Gemini |
 | `openai_responses` | Codex-oriented `/v1/responses` path |
+
+Endpoint support is detected per model. Automatic mode uses verified endpoints; manual mode lets you choose among detected formats. Backend sync only includes models with a recent successful health and endpoint check. Quality checks send four short requests per model and may consume provider quota.
 
 ---
 
@@ -186,7 +206,7 @@ Status on the Backends page: **Not installed** · **Stopped (syncable)** · **Ru
 # Local package
 bash scripts/build_package.sh
 # Multi-platform release via CI
-./release.sh v2.0.5
+./release.sh v2.2.0
 ```
 
 ---
@@ -195,13 +215,15 @@ bash scripts/build_package.sh
 
 | Item | Path |
 |------|------|
-| Data | `~/.ai-switch/data.json` |
+| Data | `~/.ai-switch/ai-switch.db` |
 | Usage | `~/.ai-switch/usage.json` |
 | Port | `8787` (`AI_SWITCH_PORT`) |
 
+Existing `data.json` state is imported once; legacy files are retained with a `.legacy` suffix for rollback. The configured port is fixed: startup exits with a clear error if the port is occupied.
+
 > **Keys live only under `~/.ai-switch/`.** Never commit that directory. Optional access token in Settings for LAN exposure.
 
-**Stack:** Python + Flask · vanilla JS · JSON storage · pluggable adapters · Apache 2.0
+**Stack:** Python + Flask · vanilla JS · SQLite storage · pluggable adapters · Apache 2.0
 
 ---
 

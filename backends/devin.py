@@ -170,24 +170,27 @@ class DevinAdapter(BackendAdapter):
             return True
         return False
 
-    def _find_active_key(self) -> Optional[tuple]:
-        """Return (vendor, key) for best Devin-related enabled key."""
+    def _find_active_key(self, *, exclude: tuple[str, str] = None) -> Optional[tuple]:
+        """Return (vendor, key) using the common primary/backup policy."""
         from core.data import get_vendors
-        best = None
-        for v in get_vendors():
+        candidates = []
+        for vendor_index, v in enumerate(get_vendors()):
             if not self._is_devin_vendor(v):
                 continue
-            for k in v.get("keys", []):
-                if k.get("enabled", True) and k.get("api_key"):
-                    # Prefer keys with default_model / models
-                    score = 1
-                    if k.get("default_model"):
-                        score += 2
-                    if k.get("models"):
-                        score += 1
-                    if best is None or score > best[2]:
-                        best = (v, k, score)
-        return (best[0], best[1]) if best else None
+            for key_index, k in enumerate(v.get("keys") or []):
+                if not k.get("enabled", True) or not k.get("api_key"):
+                    continue
+                if exclude and str(v.get("id") or "") == str(exclude[0]) and str(k.get("id") or "") == str(exclude[1]):
+                    continue
+                if not self.should_sync(v, k):
+                    continue
+                role = str(k.get("role") or "").strip().lower()
+                rank = {"primary": 0, "backup": 1}.get(role, 2)
+                candidates.append((rank, vendor_index, key_index, v, k))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[:3])
+        return candidates[0][3], candidates[0][4]
 
     def _apply_model(self, key: dict) -> None:
         model = key.get("default_model") or ""
@@ -222,7 +225,9 @@ class DevinAdapter(BackendAdapter):
     def on_key_removed(self, vendor: dict, key: dict) -> None:
         if not self._is_devin_vendor(vendor):
             return
-        other = self._find_active_key()
+        other = self._find_active_key(
+            exclude=(str(vendor.get("id") or ""), str(key.get("id") or "")),
+        )
         if other:
             self.on_key_added(other[0], other[1])
             return

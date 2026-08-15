@@ -69,7 +69,7 @@ def collect_diagnostics(*, for_issue: bool = False) -> dict:
     for_issue=True includes extra fields useful for GitHub issues
     (recent health failures, last push summary, usage counts) without secrets.
     """
-    from core.data import DATA_PATH, DATA_DIR, get_vendors, get_settings
+    from core.data import DATA_PATH, SQLITE_PATH, DATA_DIR, get_vendors, get_settings
     try:
         from core.data import USAGE_PATH, _load_usage_raw
     except Exception:
@@ -120,7 +120,7 @@ def collect_diagnostics(*, for_issue: bool = False) -> dict:
             "last_sync": last_sync,
         })
 
-    data_size = DATA_PATH.stat().st_size if DATA_PATH.exists() else 0
+    data_size = SQLITE_PATH.stat().st_size if SQLITE_PATH.exists() else 0
     usage_size = USAGE_PATH.stat().st_size if USAGE_PATH.exists() else 0
     try:
         usage_n = len(_load_usage_raw())
@@ -152,9 +152,9 @@ def collect_diagnostics(*, for_issue: bool = False) -> dict:
             "resource_root": str(resource_root()),
         },
         "data": {
-            "path": str(DATA_PATH),
+            "path": str(SQLITE_PATH),
             "dir": str(DATA_DIR),
-            "exists": DATA_PATH.exists(),
+            "exists": SQLITE_PATH.exists(),
             "size_bytes": data_size,
             "usage_path": str(USAGE_PATH),
             "usage_size_bytes": usage_size,
@@ -162,7 +162,7 @@ def collect_diagnostics(*, for_issue: bool = False) -> dict:
             "vendors": len(vendors),
             "keys": keys,
             "enabled_keys": enabled_keys,
-            "backups": [p.name for p in DATA_DIR.glob("data.json.bak*")],
+            "legacy_json": [p.name for p in DATA_DIR.glob("data.json*")],
             "audit_path": str(AUDIT_PATH),
             "audit_events": len(list_events(limit=500)),
         },

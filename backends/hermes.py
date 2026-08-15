@@ -85,16 +85,38 @@ class HermesAdapter(BackendAdapter):
 
     def reconcile(self) -> None:
         env = self._load_env()
-        if not env:
-            return
-        active_bare = {k["api_key"] for _, k in self.iter_syncable_keys()}
-        changed = False
-        for k, v in list(env.items()):
-            if v not in active_bare:
-                del env[k]
-                changed = True
-        if changed:
-            self._save_env(env)
+        env_map = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "google": "GEMINI_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "github": "GITHUB_TOKEN",
+        }
+        from core.data import get_vendors
+        slot_providers = {}
+        for v in get_vendors():
+            prov = str(v.get("provider") or "").lower()
+            slot = env_map.get(prov, f"{prov.upper()}_API_KEY")
+            slot_providers.setdefault(slot, set()).add(prov)
+
+        managed = set(slot_providers)
+        for slot, providers in slot_providers.items():
+            selected = self.pick_syncable_key(providers=providers, match_endpoint=False)
+            if selected:
+                from core.data import get_enabled_models
+                if selected[1].get("models") and not self.filter_model_ids(selected[0], selected[1], get_enabled_models(selected[1])):
+                    env.pop(slot, None)
+                    continue
+                env[slot] = selected[1]["api_key"]
+            else:
+                env.pop(slot, None)
+        # Remove stale managed slots while preserving unrelated user variables.
+        for slot in set(env_map.values()) | managed:
+            if slot not in slot_providers:
+                env.pop(slot, None)
+        self._save_env(env)
 
     def sync_from_backend(self) -> list[dict]:
         env = self._load_env()

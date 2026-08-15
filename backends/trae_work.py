@@ -216,22 +216,31 @@ def _api_format(vendor: dict) -> str:
 
 
 def _model_id_for(vendor: dict, key: dict) -> str:
+    candidates = []
     for mid in (
         (key.get("default_model") or "").strip(),
         (key.get("check_model") or "").strip(),
     ):
         if mid:
-            return mid
+            candidates.append(mid)
     for field in ("enabled_models", "models", "available_models"):
         raw = key.get(field) or []
-        if isinstance(raw, list) and raw:
-            first = raw[0]
-            if isinstance(first, dict):
-                s = (first.get("id") or first.get("name") or "").strip()
-            else:
-                s = str(first or "").strip()
-            if s:
-                return s
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, dict):
+                    s = str(item.get("id") or item.get("name") or "").strip()
+                else:
+                    s = str(item or "").strip()
+                if s:
+                    candidates.append(s)
+    from core.endpoints import selected_model_endpoint
+    seen = set()
+    for mid in candidates:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        if selected_model_endpoint(vendor, key, mid, "trae-work"):
+            return mid
     fmt = _api_format(vendor)
     return "claude-sonnet-4-0" if fmt == "anthropic" else "gpt-4o"
 
@@ -342,7 +351,12 @@ class TraeWorkAdapter(BackendAdapter):
             return None
         if not self.should_sync(vendor, key):
             return None
-        fmt = _api_format(vendor)
+        model_id = _model_id_for(vendor, key)
+        from core.endpoints import selected_model_endpoint
+        endpoint = selected_model_endpoint(vendor, key, model_id, self.name)
+        if not endpoint:
+            return None
+        fmt = "anthropic" if endpoint == "anthropic_messages" else "openai"
         base = _normalize_base_url(vendor.get("proxy_target") or vendor.get("api_url") or "", fmt)
         name = f"{vendor.get('name') or vendor.get('provider') or 'Custom'} / {key.get('name') or key.get('id')}"
         return {
@@ -351,7 +365,7 @@ class TraeWorkAdapter(BackendAdapter):
             "apiFormat": fmt,
             "baseUrl": base,
             "apiKey": key["api_key"],
-            "modelId": _model_id_for(vendor, key),
+            "modelId": model_id,
             "enabled": True,
             "vendor_id": str(vendor.get("id") or ""),
             "key_id": str(key.get("id") or ""),

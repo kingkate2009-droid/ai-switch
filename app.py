@@ -46,11 +46,13 @@ from core.health_checker import (
     check_key_health,
     check_key_models,
     get_all_health_status,
+    check_model_endpoints,
 )
+from core.model_quality import evaluate_key_quality, evaluate_model_quality, list_quality_targets, get_quality_catalog
+from core.data import update_model_endpoint_capabilities
 from core.i18n import SUPPORTED_LANGS, get_translations, resolve_lang, t as _t
 from core.audit import log_event, list_events
-from backends import init_backends, get as get_backend, get_all as get_all_backends, \
-    on_key_added, on_key_updated, on_key_removed, on_vendor_removed, reconcile_all
+from backends import init_backends, get as get_backend, get_all as get_all_backends, reconcile_all
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="[ai-switch] %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -383,6 +385,7 @@ def api_save_backend_sync_config(name):
     if "sync_vendors" in body:
         config["sync_vendors"] = body["sync_vendors"]
     save_backend_config(adapter.name, config)
+    reconcile_all()
     return jsonify({"success": True, "config": config})
 
 
@@ -576,6 +579,9 @@ def api_vendors_export_csv():
 @app.route("/api/vendors", methods=["GET"])
 def api_list_vendors():
     vendors = get_vendors()
+    from core.providers import official_vendor_info
+    for vendor in vendors:
+        vendor.update(official_vendor_info(vendor))
     health = get_all_health_status()
     return jsonify({"vendors": vendors, "health": health})
 
@@ -610,6 +616,7 @@ def api_update_vendor(vendor_id):
     v = update_vendor(vendor_id, **allowed)
     if not v:
         return jsonify({"error": "not found"}), 404
+    reconcile_all()
     return jsonify(v)
 
 
@@ -644,13 +651,27 @@ def api_models_catalog():
     return jsonify(get_models_catalog())
 
 
+@app.route("/api/models/quality-targets", methods=["GET"])
+def api_model_quality_targets():
+    include_official = request.args.get("include_official", "0") in ("1", "true", "yes")
+    targets = list_quality_targets(include_official=include_official)
+    return jsonify({"count": len(targets), "targets": targets})
+
+
+@app.route("/api/models/quality-catalog", methods=["GET"])
+def api_model_quality_catalog():
+    return jsonify(get_quality_catalog())
+
+
 @app.route("/api/vendors/<vendor_id>", methods=["DELETE"])
 def api_delete_vendor(vendor_id):
     v = get_vendor(vendor_id)
-    if v:
-        on_vendor_removed(v)
     if not delete_vendor(vendor_id):
         return jsonify({"error": "not found"}), 404
+    # Rebuild every installed backend from the post-delete system state.
+    # Deleting through per-key callbacks used to let adapters see the vendor
+    # while it was still present and could leave stale/fallback credentials.
+    reconcile_all()
     log_event("vendor.delete", vendor_id=vendor_id, name=(v or {}).get("name"))
     return jsonify({"success": True})
 
@@ -671,6 +692,7 @@ def api_empty_vendors_delete():
     dry = body.get("dry_run", False)
     result = delete_empty_vendors(dry_run=bool(dry))
     if not dry:
+        reconcile_all()
         log_event("vendors.clean_empty", count=result.get("count", 0))
     return jsonify(result)
 
@@ -685,6 +707,7 @@ def api_vendors_merge_urls_preview():
 def api_vendors_merge_urls_apply():
     from core.data import merge_duplicate_vendors_by_url
     result = merge_duplicate_vendors_by_url(dry_run=False)
+    reconcile_all()
     log_event(
         "vendors.merge_urls",
         groups=result.get("groups", 0),
@@ -721,6 +744,13 @@ def api_create_key(vendor_id):
         if extra:
             k = update_key(vendor_id, k["id"], **extra) or k
 
+    skip_health = data.get("skip_health_check", False)
+    if skip_health:
+        health = {"healthy": None, "error": "deferred"}
+        threading.Thread(target=reconcile_all, daemon=True).start()
+        log_event("key.add", vendor_id=vendor_id, key_id=(k or {}).get("id"), name=(k or {}).get("name"))
+        return jsonify({"key": k, "health": health}), 201
+
     health = check_key_health(vendor_id, k["id"])
     v = get_vendor(vendor_id)
     if health.get("healthy"):
@@ -733,12 +763,10 @@ def api_create_key(vendor_id):
             updates["models"] = [default_model]
         if default_model:
             updates["default_model"] = default_model
-        updated_key = update_key_data(vendor_id, k["id"], **updates) or k
-        on_key_added(v, updated_key)
+        update_key_data(vendor_id, k["id"], **updates)
     else:
         if bool((get_settings() or {}).get("health_auto_disable")):
             update_key_data(vendor_id, k["id"], enabled=False)
-            on_key_removed(v, k)
             k["enabled"] = False
     reconcile_all()
     log_event(
@@ -756,14 +784,14 @@ def api_update_key(vendor_id, key_id):
     data = request.get_json() or {}
     allowed = {k: data[k] for k in (
         "name", "api_key", "enabled", "models", "default_model",
-        "check_model", "disabled_models", "model_health", "notes", "role",
+        "check_model", "disabled_models", "model_health", "endpoint_capabilities", "notes", "role",
     ) if k in data}
     k = update_key(vendor_id, key_id, **allowed)
     if not k:
         return jsonify({"error": "not found"}), 404
-    v = get_vendor(vendor_id)
-    if v:
-        on_key_updated(v, k)
+    # Reconcile from current persisted state so single-slot adapters apply the
+    # same primary → backup → first-healthy selection as full push.
+    reconcile_all()
     return jsonify(k)
 
 
@@ -771,10 +799,11 @@ def api_update_key(vendor_id, key_id):
 def api_delete_key(vendor_id, key_id):
     v = get_vendor(vendor_id)
     k = get_key(vendor_id, key_id)
-    if v and k:
-        on_key_removed(v, k)
     if not delete_key(vendor_id, key_id):
         return jsonify({"error": "not found"}), 404
+    # Delete first, then rebuild from the new source of truth. This prevents a
+    # removal callback from selecting the key that is about to disappear.
+    reconcile_all()
     log_event("key.delete", vendor_id=vendor_id, key_id=key_id, name=(k or {}).get("name"))
     return jsonify({"success": True})
 
@@ -789,9 +818,10 @@ def api_check_key_health(vendor_id, key_id):
     log_event("health.check", vendor_id=vendor_id, key_id=key_id, healthy=bool(health.get("healthy")), error=(health.get("error") or "")[:200], quick=quick)
     v = get_vendor(vendor_id)
     k = get_key(vendor_id, key_id)
+    should_reconcile = request.args.get("reconcile", "1") != "0"
     if v and k:
         # Healthy → auto-enable + push backends; unhealthy → strip from backends (keep in system)
-        apply_health_to_backends(v, k, health)
+        apply_health_to_backends(v, k, health, reconcile=False)
         # reload key after enable/models update so response reflects persisted state
         k = get_key(vendor_id, key_id) or k
         if k:
@@ -808,11 +838,6 @@ def api_check_key_health(vendor_id, key_id):
             if bool(settings.get("health_auto_failover")):
                 promoted = failover_primary(vendor_id, key_id)
                 if promoted:
-                    v2 = get_vendor(vendor_id)
-                    if v2:
-                        failed = get_key(vendor_id, key_id) or k
-                        on_key_removed(v2, failed)
-                        on_key_added(v2, promoted)
                     health["failover"] = {
                         "promoted_key_id": promoted.get("id"),
                         "promoted_name": promoted.get("name"),
@@ -824,7 +849,7 @@ def api_check_key_health(vendor_id, key_id):
                         promoted_key_id=promoted.get("id"),
                     )
     # Progressive full-check skips per-key reconcile (client does one final /api/sync/push)
-    if request.args.get("reconcile", "1") != "0":
+    if should_reconcile:
         reconcile_all()
         try:
             from core.downstream import rebuild_all_downstream_routes
@@ -843,6 +868,92 @@ def api_check_key_models(vendor_id, key_id):
     return jsonify(result)
 
 
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/quality", methods=["POST"])
+def api_check_key_quality(vendor_id, key_id):
+    result = evaluate_key_quality(vendor_id, key_id)
+    log_event(
+        "quality.check_key",
+        vendor_id=vendor_id,
+        key_id=key_id,
+        ok=result.get("ok", 0),
+        fail=result.get("fail", 0),
+    )
+    return jsonify(result), (400 if result.get("error") else 200)
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/models/<path:model_id>/quality", methods=["POST"])
+def api_check_model_quality(vendor_id, key_id, model_id):
+    result = evaluate_model_quality(vendor_id, key_id, model_id)
+    log_event(
+        "quality.check_model",
+        vendor_id=vendor_id,
+        key_id=key_id,
+        model=model_id,
+        score=result.get("score"),
+        error=(result.get("error") or "")[:200],
+    )
+    return jsonify(result), (400 if result.get("error") else 200)
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/models/<path:model_id>/endpoints", methods=["GET"])
+def api_get_model_endpoints(vendor_id, key_id, model_id):
+    """Return the model×endpoint capability record and current effective choice."""
+    from core.endpoints import endpoint_candidates, effective_model_endpoints
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+    state = (k.get("endpoint_capabilities") or {}).get(model_id) or {}
+    return jsonify({
+        "vendor_id": vendor_id,
+        "key_id": key_id,
+        "model": model_id,
+        "candidates": endpoint_candidates(v),
+        "capabilities": state,
+        "effective": effective_model_endpoints(v, k, model_id),
+    })
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/models/<path:model_id>/endpoints/check", methods=["POST"])
+def api_check_model_endpoints(vendor_id, key_id, model_id):
+    result = check_model_endpoints(vendor_id, key_id, model_id)
+    if result.get("error"):
+        return jsonify(result), 404
+    reconcile_all()
+    return jsonify(result)
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/models/<path:model_id>/endpoints", methods=["PUT"])
+def api_update_model_endpoints(vendor_id, key_id, model_id):
+    data = request.get_json(silent=True) or {}
+    mode = str(data.get("mode") or "auto").lower()
+    if mode not in ("auto", "manual"):
+        return jsonify({"error": "mode must be auto or manual"}), 400
+    selected = data.get("selected")
+    if selected is not None and not isinstance(selected, list):
+        return jsonify({"error": "selected must be an array"}), 400
+    from core.endpoints import endpoint_candidates, expand_endpoint_values
+    selected = expand_endpoint_values(selected or []) if selected is not None else None
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+    allowed = set(endpoint_candidates(v))
+    if selected is not None and any(x not in allowed for x in selected):
+        return jsonify({"error": "selected endpoint is not valid for this vendor"}), 400
+    updated = update_model_endpoint_capabilities(
+        vendor_id, key_id, model_id,
+        mode=mode,
+        selected=selected,
+    )
+    if not updated:
+        return jsonify({"error": "not found"}), 404
+    reconcile_all()
+    state = (updated.get("endpoint_capabilities") or {}).get(model_id) or {}
+    from core.endpoints import effective_model_endpoints
+    return jsonify({"key": updated, "model": model_id, "capabilities": state, "effective": effective_model_endpoints(v, updated, model_id)})
+
+
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>/models/<path:model_id>", methods=["PUT"])
 def api_toggle_key_model(vendor_id, key_id, model_id):
     """Enable/disable a model for backend sync. System always keeps the model in inventory."""
@@ -859,7 +970,6 @@ def api_toggle_key_model(vendor_id, key_id, model_id):
     updated = set_model_enabled(vendor_id, key_id, model_id, bool(data["enabled"]))
     if not updated:
         return jsonify({"error": "not found"}), 404
-    on_key_updated(v, updated)
     reconcile_all()
     return jsonify({
         "key": updated,
@@ -877,7 +987,6 @@ def api_enable_key(vendor_id, key_id):
     if not v or not k:
         return jsonify({"error": "not found"}), 404
     k = update_key(vendor_id, key_id, enabled=True)
-    on_key_added(v, k)
     reconcile_all()
     return jsonify(k)
 
@@ -893,13 +1002,9 @@ def api_promote_key(vendor_id, key_id):
     k = promote_key(vendor_id, key_id, demote_others=bool(demote))
     if not k:
         return jsonify({"error": "not found"}), 404
-    # re-sync: primary enabled, others may have been demoted
-    v = get_vendor(vendor_id)
-    for kk in (v or {}).get("keys") or []:
-        if kk.get("enabled") is False:
-            on_key_removed(v, kk)
-        else:
-            on_key_updated(v, kk)
+    v = get_vendor(vendor_id) or v
+    # Re-sync from the post-promotion state. Backup keys remain available to
+    # multi-slot backends, while single-slot backends prefer the new primary.
     reconcile_all()
     log_event("key.promote", vendor_id=vendor_id, key_id=key_id, name=k.get("name"))
     return jsonify({"key": k, "vendor": v})
@@ -912,7 +1017,6 @@ def api_disable_key(vendor_id, key_id):
     if not v or not k:
         return jsonify({"error": "not found"}), 404
     k = update_key(vendor_id, key_id, enabled=False)
-    on_key_removed(v, k)
     reconcile_all()
     return jsonify(k)
 
@@ -935,16 +1039,14 @@ def api_batch_keys(vendor_id):
             continue
         if action == "enable":
             update_key(vendor_id, kid, enabled=True)
-            on_key_added(v, k)
             results.append({"key_id": kid, "success": True, "action": "enabled"})
         elif action == "disable":
             update_key(vendor_id, kid, enabled=False)
-            on_key_removed(v, k)
             results.append({"key_id": kid, "success": True, "action": "disabled"})
         elif action == "delete":
-            on_key_removed(v, k)
             delete_key(vendor_id, kid)
             results.append({"key_id": kid, "success": True, "action": "deleted"})
+    reconcile_all()
     return jsonify({"results": results, "count": len(results)})
 
 
@@ -1348,6 +1450,7 @@ def api_keys_dedupe_preview():
 def api_keys_dedupe_apply():
     from core.data import dedupe_keys
     result = dedupe_keys(dry_run=False)
+    reconcile_all()
     log_event("keys.dedupe", removed=result.get("removed", 0), groups=result.get("groups", 0))
     return jsonify(result)
 
@@ -1372,6 +1475,7 @@ def api_import_undo_apply():
     from core.data import undo_last_import
     try:
         result = undo_last_import()
+        reconcile_all()
         log_event("import.undo", **{k: result.get(k) for k in ("restored",) if k in result})
         return jsonify({"success": True, **result})
     except Exception as e:
@@ -1698,6 +1802,7 @@ def api_backup_import():
     try:
         with import_transaction({"source": "backup_import", "mode": mode}):
             result = import_backup(payload, mode=mode, password=password)
+        reconcile_all()
         log_event("backup.import", mode=mode, **{k: result.get(k) for k in result if k != "items"})
         return jsonify({"success": True, "undo_available": True, **result})
     except Exception as e:
@@ -1883,6 +1988,7 @@ def api_save_profile():
 def api_switch_profile(name):
     try:
         result = switch_profile(name)
+        reconcile_all()
         log_event("profile.switch", name=name)
         return jsonify(result)
     except FileNotFoundError as e:
@@ -1958,6 +2064,7 @@ def api_import_profile():
             activate=activate,
             mode=mode,
         )
+        reconcile_all()
         log_event(
             "profile.import",
             name=result.get("name"),
@@ -2768,10 +2875,9 @@ def api_dashboard_overview():
                             continue
                         if update_key(str(v["id"]), str(k["id"]), enabled=False):
                             n += 1
-                            try:
-                                on_key_removed(v, k)
-                            except Exception:
-                                pass
+                # Rebuild after all keys are disabled so single-slot adapters
+                # choose from the final state, not an intermediate one.
+                reconcile_all()
                 update_settings(budget_enforced_at=now.isoformat())
                 enforcement = {"applied": True, "action": "disable_keys", "disabled_keys": n, "read_only": False}
                 log_event("budget.enforce", action="disable_keys", disabled_keys=n, alerts=len(crit))

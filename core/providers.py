@@ -4,6 +4,7 @@ import threading
 import warnings
 from contextlib import contextmanager
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
@@ -39,8 +40,30 @@ def _new_session() -> requests.Session:
     if s is None:
         s = requests.Session()
         s.verify = False
+        # Several NewAPI deployments block Requests' default
+        # ``python-requests/*`` user agent at their WAF before authentication.
+        # Use a stable product UA so probes match normal SDK traffic.
+        s.headers.update({
+            "User-Agent": "AI-Switch/2.1 (API compatibility probe)",
+            "Accept": "application/json",
+        })
         _session_local.session = s
     return s
+
+
+def _is_html_response(response) -> bool:
+    content_type = str((response.headers or {}).get("Content-Type") or "").lower()
+    body = str(response.text or "").lstrip().lower()
+    return "text/html" in content_type or body.startswith(("<!doctype html", "<html"))
+
+
+def _html_gateway_error(response, path: str) -> str:
+    """Describe an upstream WAF/proxy page without misclassifying the model."""
+    server = str((response.headers or {}).get("Server") or "").strip()
+    detail = f"HTTP {response.status_code} HTML response on {path}"
+    if server:
+        detail += f" ({server})"
+    return detail + ": request blocked by site WAF/proxy before the API handled it"
 
 
 def get_probe_timeout(default: float = None) -> float:
@@ -254,6 +277,23 @@ def get_provider(provider_id: str) -> Optional[dict]:
     return PROVIDER_MAP.get(provider_id)
 
 
+def official_vendor_info(vendor: dict) -> dict:
+    """Identify direct built-in provider endpoints, not relays using their name."""
+    provider = get_provider(str((vendor or {}).get("provider") or "").strip())
+    if not provider or str((vendor or {}).get("proxy_target") or "").strip():
+        return {"official": False, "official_name": ""}
+    try:
+        actual = urlparse(str((vendor or {}).get("api_url") or "")).hostname or ""
+        expected = urlparse(str(provider.get("base_url") or "")).hostname or ""
+    except Exception:
+        return {"official": False, "official_name": ""}
+    official = bool(actual and expected and actual.lower() == expected.lower())
+    return {
+        "official": official,
+        "official_name": provider.get("name") if official else "",
+    }
+
+
 def _normalize_host(host: str) -> str:
     return re.sub(r"^www\.", "", host.strip().lower())
 
@@ -332,6 +372,16 @@ def _is_quota_exhausted_body(body: str) -> bool:
     )
 
 
+def _requires_agentic_request(body: str) -> bool:
+    lower = str(body or "").lower()
+    return any(marker in lower for marker in (
+        "non_agentic_blocked",
+        "only serves agentic",
+        "agentic (tool-calling) clients",
+        "connect with an agentic client",
+    ))
+
+
 def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[list[str]] = None) -> tuple:
     # Use the URL as-is if it already contains a version path
     base = url.rstrip("/")
@@ -374,8 +424,28 @@ def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[lis
                     return False, f"Quota exhausted: {body}"
                 return True, f"Rate limited: {body}"
             body = r.text[:500]
-            if body.lstrip().startswith("<") and "html" in body[:100].lower():
-                continue
+            if _is_html_response(r):
+                return False, _html_gateway_error(r, "/chat/completions")
+            if _requires_agentic_request(body):
+                agentic_payload = dict(payload)
+                agentic_payload["tools"] = [{
+                    "type": "function",
+                    "function": {
+                        "name": "get_status",
+                        "description": "Get current status",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }]
+                agentic_payload["tool_choice"] = "auto"
+                r = _new_session().post(
+                    chat_url,
+                    json=agentic_payload,
+                    headers=headers,
+                    timeout=get_probe_timeout(),
+                )
+                if r.status_code == 200:
+                    return True, f"[{model}] agentic tool-call request ok"
+                body = r.text[:500]
             if _is_model_error(body):
                 last_model_err = f"[{model or '(none)'}] {body[:220]}"
                 continue
@@ -475,6 +545,8 @@ def _probe_responses(url: str, headers: dict, models_to_try: Optional[list[str]]
                 body = (r.text or "")[:400]
             except Exception:
                 body = ""
+            if _is_html_response(r):
+                return False, _html_gateway_error(r, "/responses")
             last_err = f"HTTP {r.status_code}: {body}"
             if r.status_code == 401:
                 return False, "Auth failed (HTTP 401) on /responses"
@@ -563,32 +635,38 @@ def probe_anthropic(url: str, api_key: str, models_to_try: Optional[list[str]] =
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
-    # Prefer inventory → discovered (gateway-specific) → Claude defaults → common chat models
+    # When a concrete model was supplied, do not silently fall back to another
+    # model: model-level endpoint detection must answer for that exact model.
+    # Legacy key-level probes (models_to_try=None) retain discovery/fallbacks.
     candidates = []
     seen = set()
     for m in (models_to_try or []):
         if m and m not in seen:
             seen.add(m)
             candidates.append(m)
-    # Always try listing: /anthropic often has no /models but host root does
-    for m in _scan_models_anthropic(url, api_key):
-        if m and m not in seen:
-            seen.add(m)
-            candidates.append(m)
-    for m in list(_ANTHROPIC_MODELS) + ["mimo-v2.5-pro", "mimo-v2.5"] + [x for x in _MODEL_CANDIDATES if x]:
-        if m and m not in seen:
-            seen.add(m)
-            candidates.append(m)
+    if models_to_try is not None:
+        candidates = candidates or [""]
+    else:
+        # Prefer inventory → discovered (gateway-specific) → Claude defaults → common chat models
+        for m in _scan_models_anthropic(url, api_key):
+            if m and m not in seen:
+                seen.add(m)
+                candidates.append(m)
+        for m in list(_ANTHROPIC_MODELS) + ["mimo-v2.5-pro", "mimo-v2.5"] + [x for x in _MODEL_CANDIDATES if x]:
+            if m and m not in seen:
+                seen.add(m)
+                candidates.append(m)
     try:
         last_body = ""
         last_code = 0
         all_model_errors = True
         for model in candidates:
-            r = _new_session().post(chat_url, json={
+            payload = {
                 "model": model,
                 "max_tokens": 10,
                 "messages": [{"role": "user", "content": probe_prompt()}],
-            }, headers=headers, timeout=get_probe_timeout())
+            }
+            r = _new_session().post(chat_url, json=payload, headers=headers, timeout=get_probe_timeout())
             last_code = r.status_code
             last_body = r.text[:300]
             if r.status_code == 200:
@@ -613,6 +691,25 @@ def probe_anthropic(url: str, api_key: str, models_to_try: Optional[list[str]] =
                 except Exception:
                     msg = r.text[:200]
                 return True, f"[{model}] {msg[:200]}"
+            if _is_html_response(r):
+                return False, _html_gateway_error(r, "/messages")
+            if _requires_agentic_request(last_body):
+                agentic_payload = dict(payload)
+                agentic_payload["tools"] = [{
+                    "name": "get_status",
+                    "description": "Get current status",
+                    "input_schema": {"type": "object", "properties": {}},
+                }]
+                r = _new_session().post(
+                    chat_url,
+                    json=agentic_payload,
+                    headers=headers,
+                    timeout=get_probe_timeout(),
+                )
+                last_code = r.status_code
+                last_body = r.text[:300]
+                if r.status_code == 200:
+                    return True, f"[{model}] agentic tool-call request ok"
             if r.status_code in (401, 403):
                 body_lower = last_body.lower()
                 if r.status_code == 403 and _is_model_error(last_body):
@@ -713,6 +810,27 @@ def probe_single_model(check_type: str, url: str, api_key: str, model: str) -> t
     if check_type == "openai_responses":
         return _probe_responses(url, headers, [model])
     return _probe_chat_completions(url, headers, [model])
+
+
+def probe_single_model_endpoint(endpoint: str, url: str, api_key: str, model: str) -> tuple:
+    """Probe one concrete endpoint for one concrete model.
+
+    Unlike the legacy ``check_type`` API this function never falls back to a
+    different endpoint.  That distinction is important when a gateway
+    exposes both OpenAI APIs and we need to persist a model×endpoint matrix.
+    """
+    endpoint = str(endpoint or "").strip().lower()
+    if endpoint == "openai_chat":
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        return _probe_chat_completions(url, headers, [model])
+    if endpoint == "openai_responses":
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        return _probe_responses(url, headers, [model])
+    if endpoint == "anthropic_messages":
+        return probe_anthropic(url, api_key, [model])
+    if endpoint == "gemini_generate":
+        return probe_gemini(url, api_key, [model])
+    return False, f"Unknown endpoint: {endpoint}"
 
 
 # ── Model scanning ────────────────────────────────────────

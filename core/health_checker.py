@@ -10,21 +10,28 @@ from core.data import (
     get_vendor,
     get_vendors,
     list_model_ids,
+    model_id_of,
     update_key_data,
 )
 from core.providers import (
     get_provider,
     pick_default_model,
     probe_provider,
+    probe_single_model_endpoint,
     probe_single_model,
     scan_models,
+)
+from core.endpoints import (
+    capability_record,
+    endpoint_candidates,
+    effective_model_endpoints,
 )
 
 # Max models to try after primary check_model (performance cap)
 _MAX_FALLBACK_MODELS = 12
 # Quick/bulk health: fewer fallbacks, shorter wall time on dead keys
 _MAX_FALLBACK_MODELS_QUICK = 3
-from backends import reconcile_all, on_key_updated, on_key_removed
+from backends import reconcile_all
 
 DATA_DIR = Path.home() / ".ai-switch"
 HEALTH_CACHE_PATH = DATA_DIR / "health_cache.json"
@@ -323,6 +330,121 @@ def _probe_model_with_retry(check_type: str, api_url: str, api_key: str, model: 
     return False, f"{last_err} (after {attempts} attempts)" if last_err else f"Network error (after {attempts} attempts)"
 
 
+def _probe_endpoint_with_retry(endpoint: str, api_url: str, api_key: str, model: str) -> tuple:
+    attempts = _network_retry_attempts()
+    last_err = ""
+    for i in range(attempts):
+        healthy, msg = probe_single_model_endpoint(endpoint, api_url, api_key, model)
+        if healthy:
+            return healthy, msg
+        last_err = msg or ""
+        if not _is_network_error(last_err):
+            return False, last_err
+        if i + 1 >= attempts:
+            break
+        time.sleep(_RETRY_BACKOFF_BASE * (i + 1))
+    return False, f"{last_err} (after {attempts} attempts)" if last_err else f"Network error (after {attempts} attempts)"
+
+
+def check_model_endpoints(vendor_id: str, key_id: str, model: str, *, persist: bool = True) -> dict:
+    """Probe every candidate endpoint for one model and persist its matrix."""
+    vendor = get_vendor(vendor_id)
+    key = next((k for k in (vendor or {}).get("keys") or [] if str(k.get("id")) == str(key_id)), None)
+    model = str(model or "").strip()
+    if not vendor or not key:
+        return {"error": "Vendor or key not found", "model": model, "checks": {}}
+    if not model:
+        return {"error": "Model id required", "model": model, "checks": {}}
+
+    checks = {}
+    detected = []
+    started = time.time()
+    for endpoint in endpoint_candidates(vendor):
+        t0 = time.time()
+        healthy, message = _probe_endpoint_with_retry(endpoint, str(vendor.get("proxy_target") or vendor.get("api_url") or ""), key.get("api_key") or "", model)
+        rec = {
+            "healthy": bool(healthy),
+            "latency_ms": int((time.time() - t0) * 1000),
+            "message": message if healthy else None,
+            "error": None if healthy else message,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        checks[endpoint] = rec
+        if healthy:
+            detected.append(endpoint)
+
+    state = capability_record(
+        detected=detected,
+        checks=checks,
+        mode=str((key.get("endpoint_capabilities") or {}).get(model, {}).get("mode") or "auto"),
+        selected=(key.get("endpoint_capabilities") or {}).get(model, {}).get("selected") or [],
+    )
+    if persist:
+        mode = state["mode"]
+        usable = [
+            endpoint for endpoint in (state["selected"] if mode == "manual" else detected)
+            if checks.get(endpoint, {}).get("healthy") is True
+        ]
+        healthy = bool(usable)
+        model_health = dict(key.get("model_health") or {})
+        model_health[model] = {
+            "healthy": healthy,
+            "latency_ms": int((time.time() - started) * 1000),
+            "error": None if healthy else ("No selected endpoint succeeded" if mode == "manual" else "No compatible endpoint found"),
+            "message": "; ".join(
+                str(checks[endpoint].get("message"))
+                for endpoint in usable
+                if checks.get(endpoint, {}).get("message")
+            ) or None,
+            "checked_at": state["checked_at"],
+            "endpoints": usable,
+            "detected_endpoints": detected,
+            "endpoint_checks": checks,
+            "endpoint_mode": mode,
+            "selected_endpoints": state["selected"],
+        }
+        disabled = set(key.get("disabled_models") or [])
+        if healthy:
+            disabled.discard(model)
+        else:
+            disabled.add(model)
+        updated_key = update_key_data(
+            vendor_id,
+            key_id,
+            endpoint_capabilities={**(key.get("endpoint_capabilities") or {}), model: state},
+            model_health=model_health,
+            disabled_models=sorted(disabled),
+        ) or key
+        from core.endpoints import model_is_verified_usable
+        key_healthy = any(
+            model_is_verified_usable(updated_key, mid)
+            for mid in list_model_ids(updated_key)
+        )
+        cache_key = f"{vendor_id}:{key_id}"
+        with _lock:
+            cache = _load_cache()
+            previous_cache = cache.get(cache_key) or {}
+            cache[cache_key] = {
+                **previous_cache,
+                "vendor_id": vendor_id,
+                "key_id": key_id,
+                "healthy": key_healthy,
+                "checked_at": state["checked_at"],
+                "error": None if key_healthy else "No usable model",
+            }
+            _save_cache(cache)
+    return {
+        "vendor_id": vendor_id,
+        "key_id": key_id,
+        "model": model,
+        "detected": detected,
+        "checks": checks,
+        "mode": state["mode"],
+        "selected": state["selected"],
+        "latency_ms": int((time.time() - started) * 1000),
+    }
+
+
 def _load_cache() -> dict:
     if HEALTH_CACHE_PATH.exists():
         with open(HEALTH_CACHE_PATH) as f:
@@ -336,6 +458,9 @@ def _save_cache(cache: dict) -> None:
 
 
 def _resolve_check_type(vendor: dict) -> str:
+    # Legacy compatibility for inventory scans only.  Per-model endpoint
+    # health uses endpoint_candidates()/probe_single_model_endpoint() and does
+    # not consult this vendor-level type.
     endpoint_type = (vendor.get("endpoint_type") or "").lower().strip()
     if endpoint_type in ("openai", "openai_chat"):
         return "openai_chat"
@@ -415,7 +540,7 @@ def _merge_model_ids(*lists) -> list[str]:
     out, seen = [], set()
     for lst in lists:
         for m in lst or []:
-            mid = m.get("id") if isinstance(m, dict) else str(m or "")
+            mid = model_id_of(m)
             mid = (mid or "").strip()
             if mid and mid not in seen:
                 seen.add(mid)
@@ -571,9 +696,10 @@ def _check_key_health_inner(
     scan_type = "openai_chat" if check_type == "openai_responses" else check_type
     scanned = []
     existing_ids = list_model_ids(key_entry)
-    do_scan = bool(scan_models_flag)
-    if quick and existing_ids:
-        do_scan = False
+    # Quick checks may skip inventory refresh only when the key already has a
+    # model list. New imports must scan first, otherwise the endpoint phase has
+    # no model to probe and incorrectly returns "No usable model".
+    do_scan = bool(scan_models_flag) or (quick and not existing_ids)
     if do_scan:
         try:
             scanned = scan_models(scan_type, api_url, api_key) or []
@@ -601,99 +727,94 @@ def _check_key_health_inner(
         except Exception:
             pass
 
-    # 2) Build probe order: primary check_model → shuffled fallbacks
-    layers = {}
-    used_model = None
-    tried_models = []
-
-    if check_type == "openai_responses":
-        order = _build_probe_order(
-            check_model=check_model,
-            inventory=probe_pool or _gptish_models(key_entry),
-            default_model=default_model,
-            prefer_gptish=True,
-        )
-        healthy, error_msg, used_model, tried_models = _probe_models_in_order(
-            "openai_responses", api_url, api_key, order,
-        )
-        layers["responses"] = {"healthy": healthy, "message": error_msg, "tried": tried_models}
-        check_layer = "responses"
-    else:
-        order = _build_probe_order(
-            check_model=check_model,
-            inventory=probe_pool,
-            default_model=default_model,
-            prefer_gptish=False,
-        )
-        healthy, error_msg, used_model, tried_models = _probe_models_in_order(
-            check_type, api_url, api_key, order,
-        )
-        layers["connectivity"] = {
-            "healthy": healthy,
-            "message": error_msg,
-            "tried": tried_models,
-            "primary": check_model or None,
-            "fallback_used": bool(check_model and used_model and used_model != check_model),
-        }
-        check_layer = "model" if check_model else "connectivity"
-
-        # Optional Responses secondary for Codex-suitable keys (skip in quick bulk mode)
-        if healthy and wants_responses and not quick:
-            gpt_pool = [m for m in (probe_pool or []) if m.lower().startswith(("gpt-", "o1", "o3", "o4")) or "codex" in m.lower()]
-            resp_order = _build_probe_order(
-                check_model=check_model if (check_model and check_model in (gpt_pool or [check_model])) else (used_model or ""),
-                inventory=gpt_pool or probe_pool,
-                default_model=default_model,
-                prefer_gptish=True,
-            )
-            rh, rm, r_used, r_tried = _probe_models_in_order(
-                "openai_responses", api_url, api_key, resp_order,
-            )
-            layers["responses"] = {"healthy": rh, "message": rm, "tried": r_tried}
-            if not rh:
-                healthy = False
-                error_msg = f"Chat OK; Responses failed: {rm}"
-                check_layer = "responses"
-            elif r_used:
-                used_model = r_used
-
-    latency_ms = int((time.time() - start) * 1000)
+    # 2) Model-level endpoint matrix.  This is now the authoritative key
+    # health path; the legacy check_type probe below remains only as dead-code
+    # compatibility for older callers that may still inspect its layer shape.
+    endpoint_caps = dict(key_entry.get("endpoint_capabilities") or {})
+    model_health = dict(key_entry.get("model_health") or {})
+    endpoint_results = []
     cache_key = f"{vendor_id}:{key_id}"
+    ordered_models = _build_probe_order(
+        check_model=check_model,
+        inventory=[m for m in probe_pool if m not in disabled] or probe_pool,
+        default_model=default_model,
+        prefer_gptish=False,
+    )
+    for mid in ordered_models:
+        matrix = check_model_endpoints(vendor_id, key_id, mid, persist=False)
+        previous = endpoint_caps.get(mid) if isinstance(endpoint_caps.get(mid), dict) else {}
+        mode = str(previous.get("mode") or "auto").lower()
+        selected = list(previous.get("selected") or [])
+        detected = list(matrix.get("detected") or [])
+        usable = [ep for ep in (selected if mode == "manual" else detected)
+                  if (matrix.get("checks") or {}).get(ep, {}).get("healthy") is True]
+        state = capability_record(detected=detected, checks=matrix.get("checks") or {}, mode=mode, selected=selected)
+        endpoint_caps[mid] = state
+        mh = {
+            "healthy": bool(usable),
+            "latency_ms": matrix.get("latency_ms") or 0,
+            "error": None if usable else ("No selected endpoint succeeded" if mode == "manual" else "No compatible endpoint found"),
+            "message": None,
+            "checked_at": state.get("checked_at"),
+            "endpoints": usable,
+            "detected_endpoints": detected,
+            "endpoint_checks": matrix.get("checks") or {},
+            "endpoint_mode": mode,
+            "selected_endpoints": selected,
+        }
+        model_health[mid] = mh
+        endpoint_results.append({"model": mid, **mh})
+        # Continue through the inventory.  Backend reconciliation needs a
+        # capability verdict for every model, not just the first model that
+        # proves that the key itself is alive.
 
-    # If primary check_model failed but a fallback worked, note it (do not clear user check_model)
-    primary_failed = bool(check_model and used_model and used_model != check_model and healthy)
-
+    key_healthy = any(bool(r.get("healthy")) for r in endpoint_results)
+    failed_now = {r["model"] for r in endpoint_results if not r.get("healthy")}
+    healthy_now = {r["model"] for r in endpoint_results if r.get("healthy")}
+    disabled.update(failed_now)
+    disabled.difference_update(healthy_now)
+    updates = {
+        "endpoint_capabilities": endpoint_caps,
+        "model_health": model_health,
+        "disabled_models": sorted(disabled),
+    }
+    if key_healthy:
+        updates["enabled"] = True
+        if not key_entry.get("default_model"):
+            updates["default_model"] = next((r["model"] for r in endpoint_results if r.get("healthy")), default_model)
+    updated_key = update_key_data(vendor_id, key_id, **updates) or key_entry
+    latency_ms = int((time.time() - start) * 1000)
+    used = next((r["model"] for r in endpoint_results if r.get("healthy")), None)
+    first_error = next((r.get("error") for r in endpoint_results if r.get("error")), "No usable model")
     result = {
         "key_id": key_id,
         "vendor_id": vendor_id,
-        "healthy": healthy,
+        "healthy": key_healthy,
         "latency_ms": latency_ms,
-        "error": None if healthy else error_msg,
-        "message": error_msg if healthy else None,
+        "error": None if key_healthy else first_error,
+        "message": f"[{used}] endpoint ok" if key_healthy and used else None,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "models": models,
-        "default_model": default_model,
+        "default_model": updated_key.get("default_model") or default_model,
         "check_model": check_model,
-        "used_model": used_model,
-        "tried_models": tried_models,
-        "used_check_model": bool(check_model and used_model == check_model),
-        "primary_check_failed": primary_failed,
+        "used_model": used,
+        "tried_models": [r["model"] for r in endpoint_results],
+        "used_check_model": bool(check_model and used == check_model),
+        "primary_check_failed": bool(check_model and used and used != check_model),
         "models_refreshed": bool(scanned) if scan_models_flag else False,
-        "check_layer": check_layer,
-        "check_layers": layers,
-        "wants_responses": wants_responses,
+        "check_layer": "model-endpoints",
+        "check_layers": {"model_endpoints": {"healthy": key_healthy, "results": endpoint_results}},
+        "endpoint_capabilities": endpoint_caps,
+        "wants_responses": False,
     }
     _enrich_health_result(result)
-
     with _lock:
         cache = _load_cache()
         prev = cache.get(cache_key) or {}
         _apply_streak_and_schedule(result, prev)
         cache[cache_key] = result
         _save_cache(cache)
-
     return result
-
 
 def get_key_entry_fresh(vendor_id: str, key_id: str):
     v = get_vendor(vendor_id)
@@ -706,7 +827,13 @@ def get_key_entry_fresh(vendor_id: str, key_id: str):
 
 
 def check_key_models(vendor_id: str, key_id: str) -> dict:
-    """Probe each model on a key. Failures are disabled for backends only (kept in system)."""
+    """Probe each model×endpoint on a key.
+
+    A model is usable when at least one endpoint succeeds.  In manual mode the
+    selected endpoints are authoritative, so a failure on an unselected
+    endpoint does not disable the model.  The complete matrix is retained in
+    ``endpoint_capabilities`` for backend reconciliation and the UI.
+    """
     vendor = get_vendor(vendor_id)
     if not vendor:
         return {"error": "Vendor not found", "results": []}
@@ -721,12 +848,12 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
 
     api_url = vendor.get("proxy_target", "") or vendor.get("api_url", "")
     api_key = key_entry.get("api_key", "")
-    check_type = _resolve_check_type(vendor)
     models = list_model_ids(key_entry)
 
     # If inventory empty, try scanning once (system retains scan results)
     if not models:
-        scanned = scan_models(check_type, api_url, api_key)
+        scan_type = _resolve_check_type(vendor)
+        scanned = scan_models(scan_type, api_url, api_key)
         if scanned:
             default_model = pick_default_model(scanned)
             update_key_data(vendor_id, key_id, models=scanned, default_model=default_model)
@@ -739,11 +866,32 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
     disabled = set(key_entry.get("disabled_models") or [])
     ok_models = []
     fail_models = []
+    endpoint_capabilities = dict(key_entry.get("endpoint_capabilities") or {})
 
     for mid in models:
-        start = time.time()
-        healthy, msg = _probe_model_with_retry(check_type, api_url, api_key, mid)
-        latency_ms = int((time.time() - start) * 1000)
+        matrix = check_model_endpoints(vendor_id, key_id, mid, persist=False)
+        checks = matrix.get("checks") or {}
+        previous = endpoint_capabilities.get(mid) if isinstance(endpoint_capabilities.get(mid), dict) else {}
+        mode = str(previous.get("mode") or "auto").lower()
+        selected = list(previous.get("selected") or [])
+        detected = list(matrix.get("detected") or [])
+        if mode == "manual":
+            usable = [ep for ep in selected if checks.get(ep, {}).get("healthy") is True]
+        else:
+            usable = detected
+        healthy = bool(usable)
+        messages = [checks[ep].get("message") for ep in usable if checks.get(ep, {}).get("message")]
+        msg = "; ".join(str(x) for x in messages[:2]) if messages else (
+            "No selected endpoint succeeded" if mode == "manual" else "No compatible endpoint found"
+        )
+        latency_ms = int(matrix.get("latency_ms") or 0)
+        state = capability_record(
+            detected=detected,
+            checks=checks,
+            mode=mode,
+            selected=selected,
+        )
+        endpoint_capabilities[mid] = state
         entry = {
             "model": mid,
             "healthy": healthy,
@@ -752,6 +900,11 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
             "error": None if healthy else msg,
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "check_layer": "model",
+            "endpoints": usable,
+            "detected_endpoints": detected,
+            "endpoint_checks": checks,
+            "endpoint_mode": mode,
+            "selected_endpoints": selected,
         }
         _enrich_health_result(entry)
         results.append(entry)
@@ -761,6 +914,11 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
             "error": None if healthy else msg,
             "message": msg if healthy else None,
             "checked_at": entry["checked_at"],
+            "endpoints": usable,
+            "detected_endpoints": detected,
+            "endpoint_checks": checks,
+            "endpoint_mode": mode,
+            "selected_endpoints": selected,
         }
         if healthy:
             ok_models.append(mid)
@@ -773,6 +931,7 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
     updates = {
         "disabled_models": sorted(disabled),
         "model_health": model_health,
+        "endpoint_capabilities": endpoint_capabilities,
     }
     # Prefer a working enabled model as default — never overwrite user check_model
     # and only auto-fill default_model when user has not set one.
@@ -813,16 +972,13 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
             "models": list_model_ids(updated) or models,
             "default_model": updated.get("default_model") or "",
             "check_model": updated.get("check_model") or "",
+            "endpoint_capabilities": updated.get("endpoint_capabilities") or {},
         }
         _save_cache(cache)
 
-    # Backend engines: sync enabled models only (failed auto-removed via disabled_models)
-    if updated.get("enabled", True) and get_enabled_models(updated):
-        on_key_updated(vendor, updated)
-    else:
-        # No healthy/enabled models left → drop key models from backends, keep in system
-        on_key_removed(vendor, updated)
-
+    # Rebuild backend configs from the current system state. This is important
+    # for single-slot adapters: model-level failures must select the same
+    # primary/backup key as a normal full push.
     reconcile_all()
 
     return {
@@ -874,7 +1030,7 @@ def is_key_backend_syncable(vendor_id: str, key: dict) -> bool:
 
     - disabled keys: never
     - known unhealthy (latest key health False): never
-    - healthy / not-yet-checked: yes
+    - only a recent successful key and model-endpoint probe: yes
     """
     if not key or not key.get("api_key"):
         return False
@@ -888,12 +1044,20 @@ def is_key_backend_syncable(vendor_id: str, key: dict) -> bool:
     h = cache.get(f"{vendor_id}:{kid}") or {}
     # Latest key-level verdict is authoritative — never keep quota/auth failures
     # because an older model_health entry still says ok.
-    if h.get("healthy") is False:
+    if h.get("healthy") is not True:
         return False
-    return True
+    checked = _parse_iso(h.get("checked_at") or "")
+    if checked is None:
+        return False
+    if checked.tzinfo is None:
+        checked = checked.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - checked > timedelta(hours=24):
+        return False
+    from core.endpoints import model_is_verified_usable
+    return any(model_is_verified_usable(key, mid) for mid in list_model_ids(key))
 
 
-def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
+def apply_health_to_backends(vendor: dict, key: dict, health: dict, *, reconcile: bool = True) -> None:
     """Push healthy keys (auto-enable + sync); strip failed keys from backends.
 
     Policy: only the fresh probe result decides. Stale model_health must not
@@ -912,10 +1076,6 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
             updates["models"] = [default_model]
         if default_model:
             updates["default_model"] = default_model
-        # Clear stale model_health marks that contradict a fresh healthy probe
-        # so later failure paths are not blocked by old per-model ok flags.
-        if key.get("model_health") and health.get("tried_models"):
-            updates["model_health"] = {}
         updated = update_key_data(vendor["id"], key["id"], **updates) or key
         try:
             health["enabled"] = True
@@ -925,10 +1085,7 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
                 health["default_model"] = updates["default_model"]
         except Exception:
             pass
-        on_key_updated(vendor, updated)
     else:
-        # Always remove failed keys from backends so engines match health
-        on_key_removed(vendor, key)
         try:
             from core.data import get_settings
             updates = {}
@@ -943,6 +1100,10 @@ def apply_health_to_backends(vendor: dict, key: dict, health: dict) -> None:
                 update_key_data(vendor["id"], key["id"], **updates)
         except Exception:
             pass
+    # Rebuild once after persistence. Failed keys are now excluded by the
+    # health cache and enabled state, while healthy backups can take over.
+    if reconcile:
+        reconcile_all()
 
 
 def check_all_keys(

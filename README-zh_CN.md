@@ -87,6 +87,13 @@ python3 run.py
 # → http://127.0.0.1:8787
 ```
 
+**npm / npx：**
+
+```bash
+npx github:kingkate2009-droid/ai-switch
+# 或：npm install -g github:kingkate2009-droid/ai-switch && ai-switch
+```
+
 **Docker：**
 
 ```bash
@@ -103,8 +110,8 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 日常只关心三件事：
 
 1. **Key 集中管** — 供应商、标签、智能导入、MetaAPI 合并、去重  
-2. **知道谁还能用** — 分层探测（Chat + Codex Responses）、可读错误、连续成败自适应间隔  
-3. **同步别写错** — Preview · 上次同步摘要 · 未安装零写入 · 按后端切换活跃供应商  
+2. **知道谁还能用** — 模型级端点检测、质量检测、可读错误、自适应间隔
+3. **同步别写错** — 仅同步已验证模型 · Preview · 主备故障转移 · 未安装零写入
 
 进阶能力（按需）：签到 URL、预算告警、加密 Profile、诊断包、下游路由、桌面安装包。
 
@@ -113,9 +120,13 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 
 - 多供应商 + Key 表，搜索 / 标签 / 批量启停删  
 - 26+ 内置供应商 + 自定义 OpenAI 兼容地址  
-- 定时健康监测，可选失败禁用 / 主备切换  
+- 每个模型独立检测 Chat、Responses、Messages、Gemini 端点，支持自动/手动选择
+- 按供应商折叠展示质量检测，支持供应商和单模型检测
+- 定时健康监测，可选失败禁用 / 主备故障转移
 - 同步 OpenClaw、OpenCode、Claude Code、Codex、Cline、Aider、Continue 等  
 - 批量 / 备份 / MetaAPI 导入可撤销  
+- SQLite 事务存储，首次启动自动迁移旧 JSON 数据
+- 支持源码、Docker、桌面包和 npm/npx 启动
 - 浅色/暗色、中英繁  
 - 适配器扩展：[贡献指南](docs/adapter-contribution.md)
 
@@ -137,7 +148,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 - [#1 安装与启动](https://github.com/kingkate2009-droid/ai-switch/issues/1)
 - [#2 Codex 连不上](https://github.com/kingkate2009-droid/ai-switch/issues/2)
 - [#3 导入与合并](https://github.com/kingkate2009-droid/ai-switch/issues/3)
-- 最新版说明：[v2.0.5 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.0.5) · [变更要点](docs/release-notes-2.0.5.md)
+- 最新版说明：[v2.2.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.2.0) · [变更要点](docs/release-notes-2.2.0.md)
 
 ---
 
@@ -151,7 +162,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 
 后端页三态：**未安装** | **已停止（可同步）** | **运行中** — 未安装绝不会写配置。
 
-### 供应商探测类型
+### 模型端点类型
 
 | 类型 | 示例 |
 |------|------|
@@ -159,6 +170,8 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 | `anthropic` | Anthropic 兼容 |
 | `gemini` | Google Gemini |
 | `openai_responses` | Codex 用的 `/v1/responses` |
+
+端点能力按模型检测：自动模式使用已验证端点，手动模式可指定检测通过的协议。后端同步只包含最近健康检测和端点检测成功的模型。质量检测每个模型会发送 4 次短请求，可能消耗供应商额度。
 
 ---
 
@@ -173,7 +186,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 
 ```bash
 bash scripts/build_package.sh   # 本地打包
-./release.sh v2.0.5             # CI 多平台发版
+./release.sh v2.2.0             # CI 多平台发版
 ```
 
 ---
@@ -182,13 +195,15 @@ bash scripts/build_package.sh   # 本地打包
 
 | 项目 | 路径 |
 |------|------|
-| 主数据 | `~/.ai-switch/data.json` |
+| 主数据 | `~/.ai-switch/ai-switch.db` |
 | 用量 | `~/.ai-switch/usage.json` |
 | 端口 | `8787`（`AI_SWITCH_PORT`） |
 
+旧 `data.json` 会在首次启动时自动导入，并保留 `.legacy` 文件便于回退。指定端口被占用时程序会明确报错并退出，不再自动更换端口。
+
 > **Key 只存在 `~/.ai-switch/`，不要提交进 Git。** 局域网暴露可在设置里开 access token。
 
-**技术栈：** Python + Flask · 原生前端 · JSON 存储 · 可插拔适配器 · Apache 2.0
+**技术栈：** Python + Flask · 原生前端 · SQLite 存储 · 可插拔适配器 · Apache 2.0
 
 ---
 

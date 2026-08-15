@@ -532,8 +532,45 @@ class BackendAdapter:
             pass
         sync = config.get("sync_vendors", "all")
         if not isinstance(sync, list):
-            return True
-        return vendor.get("provider") in sync or vendor.get("id") in sync
+            vendor_allowed = True
+        else:
+            vendor_allowed = vendor.get("provider") in sync or vendor.get("id") in sync
+        if not vendor_allowed:
+            return False
+
+        # A key can contain models with different endpoint capabilities.  A
+        # backend is syncable only when at least one enabled model has an
+        # endpoint that this backend can express.  Keys without an inventory
+        # remain compatible with the pre-detection flow and are checked later.
+        try:
+            from core.data import get_enabled_models, list_model_ids
+            from core.endpoints import model_supports_backend
+            model_ids = get_enabled_models(key)
+            if model_ids and not any(
+                model_supports_backend(vendor, key, mid, self.name)
+                for mid in model_ids
+            ):
+                return False
+        except Exception:
+            # Capability filtering must not make legacy data disappear if a
+            # third-party adapter supplies an unusual key shape.
+            pass
+        return True
+
+    def model_endpoints(self, vendor: dict, key: dict, model_id: str) -> list[str]:
+        """Effective model endpoints usable by this backend."""
+        from core.endpoints import effective_model_endpoints
+        return effective_model_endpoints(vendor, key, model_id)
+
+    def selected_model_endpoint(self, vendor: dict, key: dict, model_id: str) -> str:
+        """Choose one endpoint for a model according to this backend's format."""
+        from core.endpoints import selected_model_endpoint
+        return selected_model_endpoint(vendor, key, model_id, self.name)
+
+    def filter_model_ids(self, vendor: dict, key: dict, model_ids) -> list[str]:
+        """Drop models that cannot be represented by this backend."""
+        from core.endpoints import filter_models_for_backend
+        return filter_models_for_backend(vendor, key, model_ids, self.name)
 
     @staticmethod
     def iter_syncable_keys():
@@ -554,21 +591,76 @@ class BackendAdapter:
                     continue
                 yield v, k
 
-    def pick_syncable_key(self, vendor: dict = None, *, providers: set = None):
-        """First syncable key, optionally filtered by vendor or provider set."""
-        want_providers = {p.lower() for p in (providers or set()) if p}
-        for v, k in self.iter_syncable_keys():
-            if vendor is not None and str(v.get("id")) != str(vendor.get("id")):
+    def pick_syncable_key(
+        self,
+        vendor: dict = None,
+        *,
+        providers: set = None,
+        exclude: tuple[str, str] = None,
+        match_endpoint: bool = True,
+    ):
+        """Pick one key for a single-slot backend.
+
+        All single-slot adapters use the same deterministic policy:
+
+        1. an explicitly marked ``primary`` key;
+        2. an explicitly marked ``backup`` key;
+        3. the first remaining healthy/enabled key.
+
+        The original implementation returned the first key encountered, which
+        made the result depend on vendor/key insertion order and caused each
+        adapter to implement a subtly different failover policy.  ``exclude``
+        is used by removal callbacks while the system record still contains
+        the key being removed.
+        """
+        want_providers = {str(p).lower() for p in (providers or set()) if p}
+        exclude_vendor_id = str(exclude[0]) if exclude else ""
+        exclude_key_id = str(exclude[1]) if exclude else ""
+        candidates = []
+
+        for vendor_index, (v, k) in enumerate(self.iter_syncable_keys()):
+            vendor_id = str(v.get("id") or "")
+            key_id = str(k.get("id") or "")
+            if vendor is not None and vendor_id != str(vendor.get("id") or ""):
+                continue
+            if exclude and vendor_id == exclude_vendor_id and key_id == exclude_key_id:
                 continue
             if want_providers:
                 prov = str(v.get("provider") or "").lower()
-                ep = str(v.get("endpoint_type") or "").lower()
-                if prov not in want_providers and ep not in want_providers:
+                provider_hit = prov in want_providers
+                if not provider_hit and match_endpoint:
+                    from core.endpoints import effective_model_endpoints
+                    endpoint_names = set()
+                    for mid in (k.get("models") or []) or [k.get("default_model") or ""]:
+                        model = mid.get("id") if isinstance(mid, dict) else str(mid or "")
+                        endpoint_names.update(effective_model_endpoints(v, k, model))
+                    provider_hit = (
+                        ("anthropic" in want_providers and "anthropic_messages" in endpoint_names)
+                        or ("google" in want_providers and "gemini_generate" in endpoint_names)
+                        or ("gemini" in want_providers and "gemini_generate" in endpoint_names)
+                        or ("openai" in want_providers and bool(endpoint_names & {"openai_chat", "openai_responses"}))
+                    )
+                if not provider_hit:
                     continue
             if not self.should_sync(v, k):
                 continue
-            return v, k
-        return None
+
+            role = str(k.get("role") or "").strip().lower()
+            role_rank = {"primary": 0, "backup": 1}.get(role, 2)
+            try:
+                key_index = next(
+                    i for i, item in enumerate(v.get("keys") or [])
+                    if str(item.get("id") or "") == key_id
+                )
+            except StopIteration:
+                key_index = 0
+            candidates.append((role_rank, vendor_index, key_index, v, k))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[:3])
+        _, _, _, selected_vendor, selected_key = candidates[0]
+        return selected_vendor, selected_key
 
     def on_key_added(self, vendor: dict, key: dict) -> None:
         pass

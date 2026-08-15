@@ -63,19 +63,59 @@ class QwenCodeAdapter(BackendAdapter):
 
     def reconcile(self) -> None:
         settings = self._load_settings()
-        env_keys = list(settings.get("env", {}).keys())
-        if not env_keys:
-            return
-        active_bare = {k["api_key"] for _, k in self.iter_syncable_keys()}
         env = settings.get("env", {})
-        changed = False
-        for ek in env_keys:
-            if env.get(ek, "") not in active_bare:
-                del env[ek]
-                changed = True
-        if changed:
-            settings["env"] = env
-            self._save_settings(settings)
+        from core.data import get_vendors
+
+        def slot_for(provider: str) -> str:
+            prov = provider.lower()
+            if "dashscope" in prov or "qwen" in prov or "bailian" in prov:
+                return "DASHSCOPE_API_KEY"
+            if "deepseek" in prov:
+                return "DEEPSEEK_API_KEY"
+            return "OPENAI_API_KEY"
+
+        slot_providers = {}
+        for v in get_vendors():
+            prov = str(v.get("provider") or "")
+            slot_providers.setdefault(slot_for(prov), set()).add(prov)
+        managed = {"DASHSCOPE_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"}
+        for slot, providers in slot_providers.items():
+            selected = self.pick_syncable_key(providers=providers, match_endpoint=False)
+            if selected:
+                env[slot] = selected[1]["api_key"]
+            else:
+                env.pop(slot, None)
+        for slot in managed - set(slot_providers):
+            env.pop(slot, None)
+        settings["env"] = env
+        model_providers = settings.get("modelProviders") or {}
+        desired_models = []
+        seen = set()
+        for v in get_vendors():
+            prov = str(v.get("provider") or "").lower()
+            selected = self.pick_syncable_key(vendor=v)
+            if not selected or not v.get("api_url"):
+                continue
+            if prov in seen:
+                continue
+            _, selected_key = selected
+            from core.data import get_enabled_models
+            model_ids = self.filter_model_ids(v, selected_key, get_enabled_models(selected_key))
+            if selected_key.get("models") and not model_ids:
+                continue
+            seen.add(prov)
+            slot = slot_for(prov)
+            desired_models.append({
+                "id": prov,
+                "baseUrl": v["api_url"],
+                "envKey": slot,
+                "model": "qwen-coder-plus",
+            })
+        # The manager owns this provider list; rebuilding it removes entries
+        # for deleted/disabled keys instead of accumulating duplicates.
+        model_providers["openai"] = desired_models
+        settings["modelProviders"] = model_providers
+        self._save_settings(settings)
 
     def sync_from_backend(self) -> list[dict]:
         settings = self._load_settings()

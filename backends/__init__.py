@@ -1,10 +1,12 @@
 import importlib
 import pkgutil
+import threading
 from typing import Optional
 
 from backends.base import BackendAdapter
 
 _adapters: dict[str, BackendAdapter] = {}
+_reconcile_lock = threading.Lock()
 
 
 def register(adapter: BackendAdapter) -> None:
@@ -198,56 +200,66 @@ def reconcile_all() -> dict:
     from core.data import get_backend_config, _load_data, _save_data
     import logging
     log = logging.getLogger(__name__)
-    results = {}
-    at = datetime.now(timezone.utc).isoformat()
-    for adapter in _adapters.values():
-        name = adapter.name
-        try:
-            cfg = get_backend_config(name)
-            if cfg.get("disabled"):
-                results[name] = {"ok": False, "skipped": True, "error": "disabled"}
-                continue
+    # Flask serves requests concurrently. A full reconcile writes several
+    # files per adapter, so overlapping pushes can otherwise interleave and
+    # leave a backend with a mixture of two system snapshots.
+    with _reconcile_lock:
+        results = {}
+        at = datetime.now(timezone.utc).isoformat()
+        for adapter in _adapters.values():
+            name = adapter.name
             try:
-                if not adapter.is_installed():
-                    results[name] = {"ok": False, "skipped": True, "error": "not installed"}
+                cfg = get_backend_config(name)
+                if cfg.get("disabled"):
+                    results[name] = {"ok": False, "skipped": True, "error": "disabled"}
                     continue
-            except Exception:
-                # Fail closed: unknown install state must not write configs
-                results[name] = {"ok": False, "skipped": True, "error": "install check failed"}
-                continue
-            adapter.reconcile()
-            results[name] = {"ok": True, "skipped": False, "error": None}
-        except Exception as e:
-            log.warning("Backend %s reconcile failed: %s", name, e)
-            results[name] = {"ok": False, "skipped": False, "error": str(e)[:300]}
-        # per-backend last sync summary
+                try:
+                    if not adapter.is_installed():
+                        results[name] = {"ok": False, "skipped": True, "error": "not installed"}
+                        continue
+                except Exception:
+                    # Fail closed: unknown install state must not write configs
+                    results[name] = {"ok": False, "skipped": True, "error": "install check failed"}
+                    continue
+                runtime = adapter.reconcile()
+                results[name] = {"ok": True, "skipped": False, "error": None}
+                if isinstance(runtime, dict):
+                    results[name].update({
+                        key: runtime[key]
+                        for key in ("runtime_applied", "runtime_message")
+                        if key in runtime
+                    })
+            except Exception as e:
+                log.warning("Backend %s reconcile failed: %s", name, e)
+                results[name] = {"ok": False, "skipped": False, "error": str(e)[:300]}
+            # per-backend last sync summary
+            try:
+                r = results.get(name) or {}
+                data = _load_data()
+                backends = data.setdefault("backends", {})
+                bcfg = dict(backends.get(name) or {})
+                bcfg["last_sync"] = {
+                    "at": at,
+                    "ok": bool(r.get("ok")),
+                    "skipped": bool(r.get("skipped")),
+                    "error": r.get("error"),
+                }
+                backends[name] = bcfg
+                _save_data(data)
+            except Exception as e:
+                log.warning("Failed to save last_sync for %s: %s", name, e)
+        # persist last push summary in settings
         try:
-            r = results.get(name) or {}
             data = _load_data()
-            backends = data.setdefault("backends", {})
-            bcfg = dict(backends.get(name) or {})
-            bcfg["last_sync"] = {
+            settings = data.setdefault("settings", {})
+            settings["last_push"] = {
                 "at": at,
-                "ok": bool(r.get("ok")),
-                "skipped": bool(r.get("skipped")),
-                "error": r.get("error"),
+                "results": results,
+                "ok": sum(1 for r in results.values() if r.get("ok")),
+                "fail": sum(1 for r in results.values() if not r.get("ok") and not r.get("skipped")),
+                "skipped": sum(1 for r in results.values() if r.get("skipped")),
             }
-            backends[name] = bcfg
             _save_data(data)
         except Exception as e:
-            log.warning("Failed to save last_sync for %s: %s", name, e)
-    # persist last push summary in settings
-    try:
-        data = _load_data()
-        settings = data.setdefault("settings", {})
-        settings["last_push"] = {
-            "at": at,
-            "results": results,
-            "ok": sum(1 for r in results.values() if r.get("ok")),
-            "fail": sum(1 for r in results.values() if not r.get("ok") and not r.get("skipped")),
-            "skipped": sum(1 for r in results.values() if r.get("skipped")),
-        }
-        _save_data(data)
-    except Exception as e:
-        log.warning("Failed to save last_push: %s", e)
-    return results
+            log.warning("Failed to save last_push: %s", e)
+        return results

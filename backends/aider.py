@@ -73,22 +73,32 @@ class AiderAdapter(BackendAdapter):
         config = self._load_config()
         if isinstance(config, dict) and "_raw" in config:
             return
-        api_keys = config.get("api-key", [])
-        if isinstance(api_keys, str):
-            api_keys = [api_keys]
         from core.data import get_vendors
-        from core.health_checker import is_key_backend_syncable
-        active_bare = {
-            k["api_key"]
-            for v in get_vendors()
-            for k in v.get("keys", [])
-            if k.get("enabled", True)
-            and k.get("api_key")
-            and is_key_backend_syncable(str(v.get("id") or ""), k)
+        provider_map = {
+            "openai": "openai",
+            "anthropic": "anthropic",
+            "deepseek": "deepseek",
+            "google": "gemini",
+            "gemini": "gemini",
+            "openrouter": "openrouter",
         }
-        kept = [entry for entry in api_keys if "=" in entry and entry.split("=", 1)[1] in active_bare]
-        if len(kept) != len(api_keys):
-            config["api-key"] = kept
+        desired = []
+        seen = set()
+        for v in get_vendors():
+            aider_prov = provider_map.get(str(v.get("provider") or "").lower(), "openai")
+            for k in v.get("keys") or []:
+                if not self.should_sync(v, k):
+                    continue
+                from core.data import get_enabled_models
+                models = self.filter_model_ids(v, k, get_enabled_models(k))
+                if k.get("models") and not models:
+                    continue
+                entry = f"{aider_prov}={k['api_key']}"
+                if entry not in seen:
+                    seen.add(entry)
+                    desired.append(entry)
+        if config.get("api-key") != desired:
+            config["api-key"] = desired
             self._save_config(config)
 
     def sync_from_backend(self) -> list[dict]:

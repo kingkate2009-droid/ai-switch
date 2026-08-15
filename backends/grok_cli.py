@@ -139,7 +139,10 @@ class GrokCliAdapter(BackendAdapter):
 
     def on_key_removed(self, vendor: dict, key: dict) -> None:
         env_var, alias = self._resolve_key_env(vendor)
-        other = self.pick_syncable_key(providers={str(vendor.get("provider") or "").lower()})
+        other = self.pick_syncable_key(
+            providers={str(vendor.get("provider") or "").lower()},
+            exclude=(str(vendor.get("id") or ""), str(key.get("id") or "")),
+        )
         if other and other[1].get("id") != key.get("id"):
             self.on_key_added(other[0], other[1])
             return

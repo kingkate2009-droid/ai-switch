@@ -3,8 +3,12 @@ import logging
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
+from urllib.parse import quote
+
+import requests
 
 from backends.base import BackendAdapter, home_config_dir, home_data_dir
 
@@ -36,6 +40,12 @@ class OpenCodeAdapter(BackendAdapter):
     name = "opencode"
     display_name = "OpenCode"
     MANAGED_TAG = "ai-switch"
+
+    def __init__(self):
+        self._last_runtime_apply = {
+            "runtime_applied": False,
+            "runtime_message": "New OpenCode sessions will use the updated config",
+        }
 
     @property
     def _auth_path(self) -> Path:
@@ -82,9 +92,17 @@ class OpenCodeAdapter(BackendAdapter):
 
     def _save_auth(self, data: dict) -> None:
         self._auth_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._auth_path, "w") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
+        fd, tmp_name = tempfile.mkstemp(prefix="auth.", suffix=".tmp", dir=str(self._auth_path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, self._auth_path)
+        finally:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
 
     @staticmethod
     def _auth_entry(api_key: str) -> dict:
@@ -153,9 +171,57 @@ class OpenCodeAdapter(BackendAdapter):
         # Keep plain .json in sync for tools that read it
         plain = self._config_dir / "opencode.json"
         try:
-            plain.write_text(text, encoding="utf-8")
+            plain_tmp = plain.with_suffix(".json.tmp")
+            plain_tmp.write_text(text, encoding="utf-8")
+            plain_tmp.replace(plain)
         except Exception:
             pass
+
+    def _apply_running_server(self, auth: dict, config: dict) -> dict:
+        """Apply config to a known OpenCode HTTP server and verify it."""
+        configured = str(os.environ.get("OPENCODE_SERVER_URL") or "").strip().rstrip("/")
+        urls = [configured] if configured else ["http://127.0.0.1:4096"]
+        username = str(os.environ.get("OPENCODE_SERVER_USERNAME") or "opencode")
+        password = str(os.environ.get("OPENCODE_SERVER_PASSWORD") or "")
+        basic_auth = (username, password) if password else None
+        last_error = ""
+        for base_url in urls:
+            try:
+                health = requests.get(f"{base_url}/global/health", auth=basic_auth, timeout=1.5)
+                if health.status_code != 200 or not (health.json() or {}).get("healthy"):
+                    continue
+                for provider_id, credentials in auth.items():
+                    response = requests.put(
+                        f"{base_url}/auth/{quote(str(provider_id), safe='')}",
+                        json=credentials,
+                        auth=basic_auth,
+                        timeout=3,
+                    )
+                    response.raise_for_status()
+                response = requests.patch(
+                    f"{base_url}/config",
+                    json=config,
+                    auth=basic_auth,
+                    timeout=5,
+                )
+                response.raise_for_status()
+                verify = requests.get(f"{base_url}/config", auth=basic_auth, timeout=3)
+                verify.raise_for_status()
+                actual = verify.json() or {}
+                expected_ids = set((config.get("provider") or {}).keys())
+                actual_ids = set((actual.get("provider") or {}).keys())
+                if not expected_ids.issubset(actual_ids):
+                    raise RuntimeError("OpenCode runtime config verification failed")
+                return {
+                    "runtime_applied": True,
+                    "runtime_message": f"Applied to running OpenCode server at {base_url}",
+                }
+            except Exception as exc:
+                last_error = str(exc)[:200]
+        message = "New OpenCode sessions will use the updated config"
+        if configured and last_error:
+            message += f"; runtime apply failed: {last_error}"
+        return {"runtime_applied": False, "runtime_message": message}
 
     @staticmethod
     def _provider_id(vendor: dict) -> str:
@@ -267,16 +333,30 @@ class OpenCodeAdapter(BackendAdapter):
         return True
 
     def _build_provider_block(self, vendor: dict, key: dict, existing: Optional[dict] = None) -> dict:
+        """Build one OpenCode provider block.
+
+        OpenCode selects one SDK implementation per provider block.  The
+        public helper below splits a mixed key into several blocks; this
+        method deliberately receives the already-filtered model map so a
+        block can never contain models for another SDK.
+        """
         api_url = vendor.get("proxy_target") or vendor.get("api_url") or ""
         ep = vendor.get("endpoint_type") or "openai"
         # Infer anthropic from URL when endpoint_type missing
         if (not ep or ep == "openai") and ("/anthropic" in (api_url or "").lower() or "api.anthropic.com" in (api_url or "").lower()):
             ep = "anthropic"
         base_url = self._normalize_base_url(api_url, ep)
-        models = self._models_map(key)
-        # Preserve existing models if new key has none
-        if not models and existing:
-            models = dict(existing.get("models") or {})
+        models = dict(existing.get("models") or {}) if existing and existing.get("models") else self._models_map(key)
+        selected_endpoint = next(iter(models), "")
+        if selected_endpoint:
+            selected_endpoint = self.selected_model_endpoint(vendor, key, selected_endpoint)
+        if selected_endpoint == "anthropic_messages":
+            ep = "anthropic"
+        elif selected_endpoint == "gemini_generate":
+            ep = "google"
+        else:
+            ep = "openai"
+        base_url = self._normalize_base_url(api_url, ep)
         block = {
             "npm": self._npm_for_endpoint(ep),
             "name": vendor.get("name") or self._provider_id(vendor),
@@ -295,30 +375,71 @@ class OpenCodeAdapter(BackendAdapter):
                 block["options"]["baseURL"] = prev
         return block
 
-    def _pick_best_key(self, vendor: dict) -> Optional[dict]:
-        """Prefer healthy, enabled key that has models list."""
-        from core.data import get_enabled_models
-        from core.health_checker import is_key_backend_syncable
-        best = None
-        best_score = -1
-        for k in vendor.get("keys", []):
-            if not k.get("enabled", True) or not k.get("api_key"):
-                continue
-            if not is_key_backend_syncable(vendor.get("id") or "", k):
-                continue
-            score = 0
-            models = get_enabled_models(k)
-            score += len(models) * 10
-            if k.get("default_model") and k.get("default_model") in set(models or [k.get("default_model")]):
-                score += 5
-            # Prefer non-imported names
-            name = (k.get("name") or "").lower()
-            if name.startswith("from "):
-                score -= 3
-            if score > best_score:
-                best_score = score
-                best = k
-        return best
+    @staticmethod
+    def _endpoint_family(endpoint: str) -> str:
+        if endpoint == "anthropic_messages":
+            return "anthropic"
+        if endpoint == "gemini_generate":
+            return "google"
+        if endpoint == "openai_chat":
+            return "openai"
+        return ""
+
+    def _build_provider_blocks(self, vendor: dict, key: dict, base_pid: str,
+                               existing: Optional[dict] = None) -> dict[str, dict]:
+        """Return provider blocks grouped by the SDK endpoint family.
+
+        A single OpenCode provider cannot mix ``@ai-sdk/openai-compatible``
+        with ``@ai-sdk/anthropic`` or ``@ai-sdk/google``.  Grouping here keeps
+        model-level endpoint selection intact while preserving one API key.
+        Responses-only models are excluded because OpenCode's compatible
+        provider does not expose the Responses API.
+        """
+        raw = self._models_map(key)
+        usable = self.filter_model_ids(vendor, key, raw.keys())
+        groups: dict[str, dict] = {}
+        for mid in usable:
+            family = self._endpoint_family(self.selected_model_endpoint(vendor, key, mid))
+            if family:
+                groups.setdefault(family, {})[mid] = raw[mid]
+        if not groups and existing:
+            # Preserve a legacy block only when it still has no inventory
+            # metadata to evaluate. A detected/manual empty endpoint set must
+            # not be resurrected here.
+            if not key.get("models") and not key.get("endpoint_capabilities"):
+                groups["openai"] = dict(existing.get("models") or {})
+        if not groups:
+            return {}
+        multiple = len(groups) > 1
+        out = {}
+        for family, models in groups.items():
+            pid = base_pid if not multiple else f"{base_pid}-{family}"
+            previous = existing if pid == base_pid else None
+            out[pid] = self._build_provider_block_for_models(vendor, key, models, family, previous)
+        return out
+
+    def _build_provider_block_for_models(self, vendor: dict, key: dict, models: dict,
+                                         family: str, existing: Optional[dict] = None) -> dict:
+        api_url = vendor.get("proxy_target") or vendor.get("api_url") or ""
+        ep = {"openai": "openai", "anthropic": "anthropic", "google": "google"}.get(family, "openai")
+        block = {
+            "npm": self._npm_for_endpoint(ep),
+            "name": vendor.get("name") or self._provider_id(vendor),
+            "options": {"baseURL": self._normalize_base_url(api_url, ep), "_managed": self.MANAGED_TAG},
+            "models": models,
+        }
+        if key.get("api_key"):
+            block["options"]["apiKey"] = key["api_key"]
+        if not block["options"]["baseURL"] and existing:
+            prev = (existing.get("options") or {}).get("baseURL")
+            if prev:
+                block["options"]["baseURL"] = prev
+        return block
+
+    def _pick_best_key(self, vendor: dict, *, exclude: tuple[str, str] = None) -> Optional[dict]:
+        """Return the unified primary → backup → first-healthy key."""
+        selected = self.pick_syncable_key(vendor=vendor, exclude=exclude)
+        return selected[1] if selected else None
 
     # ── lifecycle ──────────────────────────────────────────
 
@@ -352,7 +473,20 @@ class OpenCodeAdapter(BackendAdapter):
             cfg = self._load_config()
             cfg.setdefault("provider", {})
             existing = cfg["provider"].get(pid) or {}
-            cfg["provider"][pid] = self._build_provider_block(vendor, key, existing)
+            blocks = self._build_provider_blocks(vendor, key, pid, existing)
+            desired_pids = set(blocks)
+            for old_pid, old_entry in list(cfg["provider"].items()):
+                if (old_pid == pid or old_pid.startswith(pid + "-")) and \
+                        (old_entry.get("options") or {}).get("_managed") == self.MANAGED_TAG \
+                        and old_pid not in desired_pids:
+                    del cfg["provider"][old_pid]
+            cfg["provider"].update(blocks)
+            for auth_pid in list(auth):
+                if (auth_pid == pid or auth_pid.startswith(pid + "-")) and auth_pid not in desired_pids:
+                    del auth[auth_pid]
+            for block_pid in desired_pids:
+                auth[block_pid] = self._auth_entry(key["api_key"])
+            self._save_auth(auth)
             self._save_config(cfg)
             log.info("OpenCode: provider '%s' + auth synced", pid)
         else:
@@ -377,28 +511,36 @@ class OpenCodeAdapter(BackendAdapter):
         for v in get_vendors():
             if self._effective_provider_id(v) != pid:
                 continue
-            other = self._pick_best_key(v)
+            other = self._pick_best_key(
+                v,
+                exclude=(str(vendor.get("id") or ""), str(key.get("id") or "")),
+            )
             if other and other.get("id") != key.get("id"):
                 self.on_key_added(v, other)
                 return
 
         auth = self._load_auth()
-        if pid in auth:
-            del auth[pid]
-            self._save_auth(auth)
-        # Also drop legacy pid if Zen was stored under a non-opencode id
+        # Also drop endpoint-split ids (for example provider-anthropic) and
+        # the legacy id if Zen was stored under a non-opencode id.
         legacy = self._provider_id(vendor)
-        if legacy != pid and legacy in auth:
-            del auth[legacy]
+        drop_ids = {pid, legacy}
+        auth_changed = False
+        for auth_pid in list(auth):
+            if any(auth_pid == drop or auth_pid.startswith(drop + "-") for drop in drop_ids):
+                del auth[auth_pid]
+                auth_changed = True
+        if auth_changed:
             self._save_auth(auth)
 
         cfg = self._load_config()
         changed = False
         for drop_pid in {pid, legacy}:
-            entry = (cfg.get("provider") or {}).get(drop_pid)
-            if entry and (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG:
-                del cfg["provider"][drop_pid]
-                changed = True
+            for config_pid, entry in list((cfg.get("provider") or {}).items()):
+                if config_pid != drop_pid and not config_pid.startswith(drop_pid + "-"):
+                    continue
+                if entry and (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG:
+                    del cfg["provider"][config_pid]
+                    changed = True
         if changed:
             self._save_config(cfg)
             log.info("OpenCode: removed managed provider '%s'", pid)
@@ -438,6 +580,13 @@ class OpenCodeAdapter(BackendAdapter):
             seen.add(pid)
             models = get_enabled_models(k) or []
             pcfg = providers_cfg.get(pid) or {}
+            if not pcfg:
+                split = [
+                    (split_pid, split_cfg) for split_pid, split_cfg in providers_cfg.items()
+                    if split_pid.startswith(pid + "-") and isinstance(split_cfg, dict)
+                ]
+                if split:
+                    pcfg = split[0][1]
             opts = pcfg.get("options") or {}
             base = opts.get("baseURL") or opts.get("baseUrl") or (v.get("proxy_target") or v.get("api_url") or "")
             if self._is_opencode_zen(v):
@@ -457,9 +606,11 @@ class OpenCodeAdapter(BackendAdapter):
                 "key_name": k.get("name") or "",
                 "models": model_list,
                 "model_preview": preview,
-                "active": bool(preferred and preferred == pid) or (not preferred and pid in auth),
+                "active": bool(
+                    preferred and (preferred == pid or preferred.startswith(pid + "-"))
+                ) or (not preferred and (pid in auth or any(x.startswith(pid + "-") for x in auth))),
                 "managed": True,
-                "has_auth": pid in auth,
+                "has_auth": pid in auth or any(x.startswith(pid + "-") for x in auth),
                 "auth_only": self._is_opencode_zen(v),
             })
 
@@ -523,7 +674,11 @@ class OpenCodeAdapter(BackendAdapter):
         key = None
         if key_id:
             for k in vendor.get("keys") or []:
-                if str(k.get("id")) == str(key_id) and k.get("api_key"):
+                if (
+                    str(k.get("id")) == str(key_id)
+                    and k.get("api_key")
+                    and self.should_sync(vendor, k)
+                ):
                     key = k
                     break
         if not key:
@@ -563,14 +718,33 @@ class OpenCodeAdapter(BackendAdapter):
             }
 
         existing = cfg["provider"].get(pid) or {}
+        blocks = {}
         if not existing or (existing.get("options") or {}).get("_managed") == self.MANAGED_TAG or self._is_custom(vendor):
-            cfg["provider"][pid] = self._build_provider_block(vendor, key, existing)
+            blocks = self._build_provider_blocks(vendor, key, pid, existing)
+            for old_pid, old_entry in list(cfg["provider"].items()):
+                if (old_pid == pid or old_pid.startswith(pid + "-")) and \
+                        (old_entry.get("options") or {}).get("_managed") == self.MANAGED_TAG \
+                        and old_pid not in blocks:
+                    del cfg["provider"][old_pid]
+            cfg["provider"].update(blocks)
+            auth = self._load_auth()
+            for auth_pid in list(auth):
+                if (auth_pid == pid or auth_pid.startswith(pid + "-")) and auth_pid not in blocks:
+                    del auth[auth_pid]
+            for block_pid in blocks:
+                auth[block_pid] = self._auth_entry(key["api_key"])
+            self._save_auth(auth)
 
         models = get_enabled_models(key) or []
         if not models and key.get("default_model"):
             models = [str(key.get("default_model"))]
         if models:
-            cfg["model"] = f"{pid}/{models[0]}"
+            usable = [mid for mid in models if self.selected_model_endpoint(vendor, key, mid)]
+            if usable:
+                mid = usable[0]
+                family = self._endpoint_family(self.selected_model_endpoint(vendor, key, mid))
+                target_pid = pid if len(blocks) <= 1 else f"{pid}-{family}"
+                cfg["model"] = f"{target_pid}/{mid}"
         self._save_config(cfg)
 
         return {
@@ -626,9 +800,10 @@ class OpenCodeAdapter(BackendAdapter):
         new_auth = {k: v for k, v in auth.items()
                     if isinstance(v, dict) and v.get("type") in ("oauth", "token")}
 
+        desired_config_pids: set[str] = set()
         for pid, (v, k) in desired.items():
-            new_auth[pid] = self._auth_entry(k["api_key"])
             if pid in auth_only_pids or self._is_opencode_zen(v):
+                new_auth[pid] = self._auth_entry(k["api_key"])
                 # Keep models.dev catalog — strip our previous managed override
                 existing = cfg["provider"].get(pid) or {}
                 if existing and (existing.get("options") or {}).get("_managed") == self.MANAGED_TAG:
@@ -636,12 +811,21 @@ class OpenCodeAdapter(BackendAdapter):
                 continue
             if self._is_custom(v) or k.get("models") or v.get("proxy_target") or v.get("api_url"):
                 existing = cfg["provider"].get(pid) or {}
-                if not existing or (existing.get("options") or {}).get("_managed") == self.MANAGED_TAG:
-                    cfg["provider"][pid] = self._build_provider_block(v, k, existing)
+                blocks = self._build_provider_blocks(v, k, pid, existing)
+                desired_config_pids.update(blocks)
+                for block_pid in blocks:
+                    new_auth[block_pid] = self._auth_entry(k["api_key"])
+                for old_pid, old_entry in list(cfg["provider"].items()):
+                    if (old_pid == pid or old_pid.startswith(pid + "-")) and \
+                            (old_entry.get("options") or {}).get("_managed") == self.MANAGED_TAG \
+                            and old_pid not in blocks:
+                        del cfg["provider"][old_pid]
+                cfg["provider"].update(blocks)
 
         # Drop managed providers no longer desired
         for pid, entry in list(cfg.get("provider", {}).items()):
-            if (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG and pid not in desired:
+            if (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG and \
+                    pid not in desired and pid not in desired_config_pids:
                 del cfg["provider"][pid]
             # Always drop managed override on auth-only pids (e.g. zen free models)
             if pid in auth_only_pids and (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG:
@@ -649,8 +833,10 @@ class OpenCodeAdapter(BackendAdapter):
 
         self._save_auth(new_auth)
         self._save_config(cfg)
+        self._last_runtime_apply = self._apply_running_server(new_auth, cfg)
         log.info("OpenCode reconcile: %d provider(s), %d credential(s)",
-                 len(cfg.get("provider") or {}), len(new_auth))
+                  len(cfg.get("provider") or {}), len(new_auth))
+        return dict(self._last_runtime_apply)
 
     def sync_from_backend(self) -> list[dict]:
         auth = self._load_auth()

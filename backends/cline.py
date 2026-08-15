@@ -48,6 +48,12 @@ class ClineAdapter(BackendAdapter):
         api_url = vendor.get("api_url", "")
         prov = vendor.get("provider", "").lower()
         ep = vendor.get("endpoint_type", "openai")
+        model_id = str(key.get("default_model") or "")
+        selected_endpoint = self.selected_model_endpoint(vendor, key, model_id) if model_id else ""
+        if selected_endpoint == "anthropic_messages":
+            ep = "anthropic"
+        elif selected_endpoint:
+            ep = "openai"
 
         # Cline stores per-provider secrets
         if ep == "anthropic" or prov == "anthropic":
@@ -77,8 +83,14 @@ class ClineAdapter(BackendAdapter):
         # Only clear slot if no other healthy key of same type remains
         ep = vendor.get("endpoint_type", "openai")
         prov = vendor.get("provider", "").lower()
-        want = "anthropic" if (ep == "anthropic" or prov == "anthropic") else "openai"
-        other = self.pick_syncable_key(providers={want})
+        from core.endpoints import ANTHROPIC_MESSAGES
+        model_id = str(key.get("default_model") or "")
+        selected_endpoint = self.selected_model_endpoint(vendor, key, model_id) if model_id else ""
+        want = "anthropic" if (selected_endpoint == ANTHROPIC_MESSAGES or ep == "anthropic" or prov == "anthropic") else "openai"
+        other = self.pick_syncable_key(
+            providers={want},
+            exclude=(str(vendor.get("id") or ""), str(key.get("id") or "")),
+        )
         if other:
             self.on_key_added(other[0], other[1])
             return

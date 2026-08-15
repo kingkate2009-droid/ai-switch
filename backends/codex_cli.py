@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -258,6 +259,9 @@ def _vendor_all_models(vendor: dict) -> list[str]:
             s = str(mid or "").strip()
             if not s or s in seen:
                 continue
+            from core.endpoints import selected_model_endpoint
+            if not selected_model_endpoint(vendor, k, s, "codex-cli"):
+                continue
             seen.add(s)
             out.append(s)
     return out
@@ -340,15 +344,33 @@ class CodexCliAdapter(BackendAdapter):
 
     def _save_auth(self, data: dict) -> None:
         self._codex_dir.mkdir(parents=True, exist_ok=True)
-        with open(self._auth_path, "w") as f:
-            json.dump(data, f, indent=2)
+        fd, tmp_name = tempfile.mkstemp(prefix="auth.", suffix=".tmp", dir=str(self._codex_dir))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, self._auth_path)
+        finally:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
 
     def _load_config(self) -> dict:
         return _load_toml(self._config_path)
 
     def _save_config(self, data: dict) -> None:
         self._codex_dir.mkdir(parents=True, exist_ok=True)
-        self._config_path.write_text(_dump_toml(data), encoding="utf-8")
+        fd, tmp_name = tempfile.mkstemp(prefix="config.", suffix=".tmp", dir=str(self._codex_dir))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(_dump_toml(data))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, self._config_path)
+        finally:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
 
     def _sync_vendor_to_config(self, vendor: dict, key: dict) -> None:
         """Write or update a vendor entry in config.toml model_providers."""
@@ -445,17 +467,17 @@ class CodexCliAdapter(BackendAdapter):
         for v in vendors:
             if not _vendor_is_codex_switchable(v):
                 continue
-            for k in v.get("keys", []):
-                if not k.get("enabled", True) or not k.get("api_key"):
-                    continue
-                if not self.should_sync(v, k):
-                    continue
-                pid = _provider_id(v["id"])
-                valid_ids.add(pid)
-                # Ensure provider exists in config (with token so IDE does not need env)
-                base_url = _base_url(v)
-                if base_url:
-                    providers[pid] = _provider_entry(v, k.get("api_key") or "")
+            selected = self.pick_syncable_key(vendor=v)
+            if not selected:
+                continue
+            _, k = selected
+            pid = _provider_id(v["id"])
+            valid_ids.add(pid)
+            # A Codex provider is a single slot per vendor. The selected key
+            # follows the common primary → backup → first-healthy policy.
+            base_url = _base_url(v)
+            if base_url:
+                providers[pid] = _provider_entry(v, k.get("api_key") or "")
 
         # Remove stale managed providers
         stale = [pid for pid in providers if pid.startswith(_MANAGED_PREFIX) and pid not in valid_ids]
@@ -469,7 +491,16 @@ class CodexCliAdapter(BackendAdapter):
 
         # Check if active provider still valid; if not, pick first valid managed provider.
         active = cfg.get("model_provider") or ""
-        if active.startswith(_MANAGED_PREFIX) and active not in valid_ids:
+        if not active and valid_ids:
+            def _pid_sort(pid: str):
+                tail = pid[len(_MANAGED_PREFIX):]
+                try:
+                    return (0, int(tail))
+                except Exception:
+                    return (1, tail)
+            active = sorted(valid_ids, key=_pid_sort)[0]
+            cfg["model_provider"] = active
+        elif active.startswith(_MANAGED_PREFIX) and active not in valid_ids:
             if valid_ids:
                 # Prefer keeping a deterministic order by vendor id numeric
                 def _pid_sort(pid: str):
@@ -491,16 +522,16 @@ class CodexCliAdapter(BackendAdapter):
             for v in vendors:
                 if str(v.get("id")) != str(vid):
                     continue
-                for k in v.get("keys") or []:
-                    if k.get("enabled", True) and k.get("api_key") and self.should_sync(v, k):
-                        active_key = k["api_key"]
-                        # ensure active provider entry has token
-                        providers[active] = _provider_entry(v, active_key)
-                        models = _vendor_codex_models(v)
-                        if models and not (cfg.get("model") or "").strip():
-                            cfg["model"] = models[0]
-                        _apply_third_party_safe_defaults(cfg, v)
-                        break
+                selected = self.pick_syncable_key(vendor=v)
+                if selected:
+                    _, k = selected
+                    active_key = k["api_key"]
+                    # ensure active provider entry has token
+                    providers[active] = _provider_entry(v, active_key)
+                    models = _vendor_codex_models(v)
+                    if models and not (cfg.get("model") or "").strip():
+                        cfg["model"] = models[0]
+                    _apply_third_party_safe_defaults(cfg, v)
                 break
 
         if providers:
@@ -520,6 +551,10 @@ class CodexCliAdapter(BackendAdapter):
                 auth = self._load_auth()
                 if auth.pop("OPENAI_API_KEY", None):
                     self._save_auth(auth)
+        return {
+            "runtime_applied": False,
+            "runtime_message": "New Codex sessions will use the updated config; existing sessions cannot be hot-reloaded safely",
+        }
 
     @property
     def supports_active_switch(self) -> bool:
@@ -550,12 +585,11 @@ class CodexCliAdapter(BackendAdapter):
             # Find the key to use
             if key_id:
                 key = get_key(vendor_id, key_id)
-                if not key:
+                if not key or not self.should_sync(vendor, key):
                     return {"success": False, "message": f"Key {key_id} not found"}
             else:
-                # Use first enabled key with api_key
-                keys = vendor.get("keys") or []
-                key = next((k for k in keys if k.get("enabled", True) and k.get("api_key")), None)
+                selected = self.pick_syncable_key(vendor=vendor)
+                key = selected[1] if selected else None
                 if not key:
                     return {"success": False, "message": "No enabled key found for vendor"}
 
@@ -577,8 +611,8 @@ class CodexCliAdapter(BackendAdapter):
                 if vendor:
                     if not _vendor_is_codex_switchable(vendor):
                         return {"success": False, "message": "Vendor is not OpenAI-compatible for Codex"}
-                    keys = vendor.get("keys") or []
-                    key = next((k for k in keys if k.get("enabled", True) and k.get("api_key")), None)
+                    selected = self.pick_syncable_key(vendor=vendor)
+                    key = selected[1] if selected else None
                     if key:
                         self._sync_vendor_to_config(vendor, key)
                         self._set_active_auth(key.get("api_key") or "")
@@ -604,7 +638,8 @@ class CodexCliAdapter(BackendAdapter):
                 if models:
                     cfg["model"] = models[0]
                 # ensure active provider entry includes bearer token
-                key = next((k for k in (vendor.get("keys") or []) if k.get("enabled", True) and k.get("api_key")), None)
+                selected = self.pick_syncable_key(vendor=vendor)
+                key = selected[1] if selected else None
                 if key:
                     providers = cfg.setdefault("model_providers", {})
                     providers[provider_id] = _provider_entry(vendor, key.get("api_key") or "")

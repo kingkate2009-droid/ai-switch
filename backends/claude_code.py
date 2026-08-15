@@ -31,8 +31,7 @@ class ClaudeCodeAdapter(BackendAdapter):
         from core.data import get_vendors
         results = []
         for v in get_vendors():
-            ep = v.get("endpoint_type", "")
-            if ep == "anthropic" or v.get("provider", "").lower() in ("anthropic",):
+            if self._is_anthropic_vendor(v):
                 for k in v.get("keys", []):
                     if k.get("enabled", True) and k.get("api_key"):
                         results.append((v["provider"], k["name"], k["api_key"]))
@@ -41,9 +40,8 @@ class ClaudeCodeAdapter(BackendAdapter):
     def on_key_added(self, vendor: dict, key: dict) -> None:
         if not key.get("api_key") or not key.get("enabled", True):
             return
-        ep = vendor.get("endpoint_type", "")
         prov = vendor.get("provider", "").lower()
-        if ep != "anthropic" and prov != "anthropic":
+        if not self._is_anthropic_vendor(vendor) and prov != "anthropic":
             return
         settings = self._load_settings()
         settings.setdefault("env", {})
@@ -56,10 +54,14 @@ class ClaudeCodeAdapter(BackendAdapter):
     def on_key_removed(self, vendor: dict, key: dict) -> None:
         settings = self._load_settings()
         env = settings.get("env", {})
-        # Only clear if no other anthropic keys exist
-        others = self._find_anthropic_keys()
-        others = [(p, n, k) for p, n, k in others if n != key.get("name", "")]
-        if not others:
+        other = self.pick_syncable_key(
+            providers={"anthropic", "claude"},
+            exclude=(str(vendor.get("id") or ""), str(key.get("id") or "")),
+        )
+        if other:
+            self.on_key_added(other[0], other[1])
+            return
+        if env.get("ANTHROPIC_API_KEY"):
             env.pop("ANTHROPIC_API_KEY", None)
             env.pop("ANTHROPIC_BASE_URL", None)
             if env:
@@ -69,26 +71,28 @@ class ClaudeCodeAdapter(BackendAdapter):
             self._save_settings(settings)
 
     def _is_anthropic_vendor(self, vendor: dict) -> bool:
-        ep = (vendor.get("endpoint_type") or "").lower()
+        from core.endpoints import ANTHROPIC_MESSAGES, effective_model_endpoints
         prov = (vendor.get("provider") or "").lower()
-        return ep == "anthropic" or prov in ("anthropic", "claude")
+        for key in vendor.get("keys") or []:
+            mids = key.get("models") or [key.get("default_model") or ""]
+            for item in mids:
+                mid = item.get("id") if isinstance(item, dict) else str(item or "")
+                if mid and ANTHROPIC_MESSAGES in effective_model_endpoints(vendor, key, mid):
+                    return True
+        return prov in ("anthropic", "claude")
 
     def _pick_key(self, vendor: dict, key_id: str = ""):
-        keys = vendor.get("keys") or []
         if key_id:
-            for k in keys:
-                if str(k.get("id")) == str(key_id) and k.get("api_key"):
+            for k in vendor.get("keys") or []:
+                if (
+                    str(k.get("id")) == str(key_id)
+                    and k.get("api_key")
+                    and self.should_sync(vendor, k)
+                ):
                     return k
             return None
-        for k in keys:
-            if k.get("enabled") is False:
-                continue
-            if k.get("api_key") and self.should_sync(vendor, k):
-                return k
-        for k in keys:
-            if k.get("enabled") is not False and k.get("api_key"):
-                return k
-        return None
+        selected = self.pick_syncable_key(vendor=vendor)
+        return selected[1] if selected else None
 
     @property
     def supports_active_switch(self) -> bool:
@@ -195,20 +199,15 @@ class ClaudeCodeAdapter(BackendAdapter):
 
     def reconcile(self) -> None:
         from core.data import get_vendors
-        from core.health_checker import is_key_backend_syncable
-        best = None
+        candidates = []
         for v in get_vendors():
-            if not self._is_anthropic_vendor(v):
-                continue
-            for k in v.get("keys", []):
-                if not k.get("enabled", True) or not k.get("api_key"):
-                    continue
-                if not is_key_backend_syncable(str(v.get("id") or ""), k):
-                    continue
-                best = (v, k)
-                break
-            if best:
-                break
+            if self._is_anthropic_vendor(v):
+                candidates.append(v)
+        best = None
+        if candidates:
+            # The base selector applies the same primary/backup policy, while
+            # keeping Claude Code restricted to Anthropic-compatible vendors.
+            best = self.pick_syncable_key(providers={"anthropic", "claude"})
         settings = self._load_settings()
         env = settings.setdefault("env", {})
         if not best:

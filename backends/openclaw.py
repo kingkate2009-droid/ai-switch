@@ -358,6 +358,13 @@ class OpenClawAdapter(BackendAdapter):
             raw_models, key.get("default_model", ""), key.get("disabled_models") or [],
             provider_id=provider_id,
         )
+        # Endpoint capability is model-scoped.  OpenClaw provider entries use
+        # one API format, so keep only models that have a usable endpoint and
+        # choose the dominant format for this key (reconcile handles mixed
+        # formats by creating endpoint-specific entries).
+        models = [m for m in models if self.selected_model_endpoint(vendor, key, m.get("id", ""))]
+        models = [m for m in models if self._api_type_for_model(vendor, key, m.get("id", ""))]
+        model_formats = {m.get("id"): self._api_type_for_model(vendor, key, m.get("id", "")) for m in models}
 
         # If all known models are disabled, remove from openclaw instead of inventing models
         if not models and (key.get("models") or key.get("disabled_models")):
@@ -374,29 +381,71 @@ class OpenClawAdapter(BackendAdapter):
                 existing.get("models", []), key.get("default_model", ""),
                 provider_id=provider_id,
             )
+            models = [m for m in models if self.selected_model_endpoint(vendor, key, m.get("id", ""))]
+            # The fallback list may have come from an older config, so its
+            # endpoint formats must be calculated again before grouping.
+            model_formats = {
+                m.get("id"): self._api_type_for_model(vendor, key, m.get("id", ""))
+                for m in models
+            }
         if not models:
-            # OpenClaw requires ≥1 model on custom providers
+            # A known inventory with no effective endpoint must not be
+            # replaced by a fake model; otherwise backend sync would violate
+            # the user's endpoint selection.  Only an entirely new key may
+            # use the compatibility placeholder.
+            if key.get("models") or key.get("disabled_models") or key.get("endpoint_capabilities"):
+                self._remove_from_openclaw(ocp_key)
+                return
             models = [{"id": "default", "name": "default"}]
 
         cfg.setdefault("models", {}).setdefault("providers", {})
-        cfg["models"]["providers"][ocp_key] = {
-            "apiKey": api_key,
-            "baseUrl": ocp_url,
-            "api": api_type,
-            "models": models,
-        }
+        # One OpenClaw provider block has one API type.  Use endpoint-suffixed
+        # blocks for mixed model capabilities so a Responses model is never
+        # sent through Chat Completions (or vice versa).
+        groups = {}
+        for model in models:
+            groups.setdefault(model_formats.get(model.get("id"), api_type), []).append(model)
+        group_key_by_api = {}
+        for group_api, group_models in groups.items():
+            group_key = ocp_key if len(groups) == 1 else f"{ocp_key}@{group_api.replace('-', '_')}"
+            group_key_by_api[group_api] = group_key
+            cfg["models"]["providers"][group_key] = {
+                "apiKey": api_key,
+                "baseUrl": ocp_url,
+                "api": group_api,
+                "models": group_models,
+            }
+        if len(groups) > 1 and ocp_key in cfg["models"]["providers"]:
+            del cfg["models"]["providers"][ocp_key]
 
-        cfg.setdefault("auth", {}).setdefault("profiles", {})
-        cfg["auth"]["profiles"][ocp_key] = {
-            "provider": provider_id,
-            "mode": "api_key",
+        # Reconcile paths are authoritative and must remove stale suffix
+        # entries when a later check collapses a mixed set to one endpoint.
+        desired_group_keys = {
+            ocp_key if len(groups) == 1 else f"{ocp_key}@{group_api.replace('-', '_')}"
+            for group_api in groups
         }
+        for stale_key in list(cfg["models"]["providers"]):
+            if stale_key.startswith(ocp_key + "@") and stale_key not in desired_group_keys:
+                del cfg["models"]["providers"][stale_key]
+                cfg.setdefault("auth", {}).setdefault("profiles", {}).pop(stale_key, None)
+                order = cfg.setdefault("auth", {}).setdefault("order", {}).get(provider_id, [])
+                if isinstance(order, list) and stale_key in order:
+                    order.remove(stale_key)
 
+        group_keys = []
+        for group_api in groups:
+            group_key = ocp_key if len(groups) == 1 else f"{ocp_key}@{group_api.replace('-', '_')}"
+            group_keys.append(group_key)
+            cfg.setdefault("auth", {}).setdefault("profiles", {})[group_key] = {
+                "provider": provider_id,
+                "mode": "api_key",
+            }
         order = cfg.setdefault("auth", {}).setdefault("order", {})
         if provider_id not in order:
-            order[provider_id] = [ocp_key]
-        elif ocp_key not in order[provider_id]:
-            order[provider_id].append(ocp_key)
+            order[provider_id] = []
+        for group_key in group_keys:
+            if group_key not in order[provider_id]:
+                order[provider_id].append(group_key)
 
         cfg.setdefault("agents", {}).setdefault("defaults", {}).setdefault("models", {})
         defaults_models = cfg["agents"]["defaults"]["models"]
@@ -408,7 +457,9 @@ class OpenClawAdapter(BackendAdapter):
             mid = m["id"]
             if _is_blocked_openclaw_model(mid, provider_id):
                 continue
-            defaults_models[f"{provider_id}/{mid}"] = {}
+            group_api = model_formats.get(mid, api_type)
+            group_key = group_key_by_api.get(group_api, ocp_key)
+            defaults_models[f"{group_key}/{mid}"] = {}
         _sanitize_openclaw_defaults_models(defaults_models)
 
         self._rebuild_provider_aggregate(cfg, provider_id)
@@ -418,15 +469,26 @@ class OpenClawAdapter(BackendAdapter):
         self._save_auth_profiles(force_sync=True)
         self._save_agent_models_config(get_vendors())
 
-    def _get_api_type_for_vendor(self, vendor: dict) -> str:
-        ep = (vendor.get("endpoint_type") or "").lower()
-        if ep in ("anthropic", "claude"):
+    def _api_type_for_model(self, vendor: dict, key: dict, model_id: str) -> str:
+        endpoint = self.selected_model_endpoint(vendor, key, model_id)
+        if endpoint == "anthropic_messages":
             return "anthropic-messages"
-        if ep in ("google", "gemini"):
+        if endpoint == "gemini_generate":
             return "google-generative-ai"
-        url = (vendor.get("proxy_target") or vendor.get("api_url") or "").lower()
-        if "/anthropic" in url or "api.anthropic.com" in url:
+        if endpoint == "openai_responses":
+            # OpenClaw's current config schema has no Responses API type. The
+            # endpoint matrix filters this model before it reaches here.
+            return ""
+        return "openai-completions"
+
+    def _get_api_type_for_vendor(self, vendor: dict) -> str:
+        # Kept only for provider-level aggregate compatibility.  Concrete
+        # model entries use _api_type_for_model(), never this vendor field.
+        provider = str(vendor.get("provider") or "").lower()
+        if provider in ("anthropic", "claude"):
             return "anthropic-messages"
+        if provider in ("google", "gemini"):
+            return "google-generative-ai"
         return "openai-completions"
 
     def _get_api_type(self, provider_id: str) -> str:
@@ -438,11 +500,15 @@ class OpenClawAdapter(BackendAdapter):
     def _rebuild_provider_aggregate(self, cfg: dict, provider_id: str) -> None:
         """Build models.providers.<provider> with apiKey (required by OpenClaw auth fallback)."""
         providers = cfg.get("models", {}).get("providers", {})
-        api_type = self._get_api_type(provider_id)
-        agg = {"api": api_type, "models": {}, "baseUrl": "", "apiKey": ""}
+        entries = []
+        agg = {"api": "", "models": {}, "baseUrl": "", "apiKey": ""}
         for ocp_key, entry in providers.items():
             if "@" not in ocp_key or ocp_key.split("@")[0] != provider_id:
                 continue
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("api"):
+                entries.append(entry)
             for m in entry.get("models", []):
                 mid = m["id"] if isinstance(m, dict) else m
                 if not mid or mid in agg["models"]:
@@ -455,7 +521,16 @@ class OpenClawAdapter(BackendAdapter):
             # Prefer first non-empty key for aggregate apiKey fallback
             if not agg["apiKey"] and entry.get("apiKey"):
                 agg["apiKey"] = entry["apiKey"]
-        if agg["models"]:
+        formats = {entry.get("api") for entry in entries if entry.get("api")}
+        if len(formats) > 1:
+            # A provider aggregate has one API format, while the suffixed
+            # entries above may intentionally contain Chat and Messages
+            # models. Keeping a guessed aggregate would route one of those
+            # models through the wrong API, so remove it entirely.
+            providers.pop(provider_id, None)
+            return
+        agg["api"] = next(iter(formats), "")
+        if agg["models"] and agg["api"]:
             providers[provider_id] = {
                 "api": agg["api"],
                 "baseUrl": agg["baseUrl"],
@@ -471,20 +546,31 @@ class OpenClawAdapter(BackendAdapter):
         changed = False
 
         models = cfg.get("models", {}).get("providers", {})
-        if ocp_key in models:
-            del models[ocp_key]
-            changed = True
+        model_keys = [ocp_key]
+        if "@" in ocp_key:
+            model_keys.extend(k for k in models if k.startswith(ocp_key + "@"))
+        for model_key in model_keys:
+            if model_key in models:
+                del models[model_key]
+                changed = True
 
         profiles = cfg.get("auth", {}).get("profiles", {})
-        if ocp_key in profiles:
-            del profiles[ocp_key]
-            changed = True
+        profile_keys = [ocp_key]
+        if "@" in ocp_key:
+            profile_keys.extend(k for k in profiles if k.startswith(ocp_key + "@"))
+        for profile_key in profile_keys:
+            if profile_key in profiles:
+                del profiles[profile_key]
+                changed = True
 
         order = cfg.get("auth", {}).get("order", {})
         for pname, pkey in list(order.items()):
             pk_list = pkey if isinstance(pkey, list) else [pkey]
-            if ocp_key in pk_list:
-                pk_list.remove(ocp_key)
+            removed = [item for item in pk_list if item == ocp_key or (
+                "@" in ocp_key and str(item).startswith(ocp_key + "@")
+            )]
+            if removed:
+                pk_list[:] = [item for item in pk_list if item not in removed]
                 if pk_list:
                     order[pname] = pk_list
                 else:
@@ -494,8 +580,9 @@ class OpenClawAdapter(BackendAdapter):
 
         defaults_models = cfg.get("agents", {}).get("defaults", {}).get("models", {})
         provider_name = ocp_key.split("@")[0]
+        ref_prefix = f"{ocp_key}/" if "@" in ocp_key else f"{provider_name}/"
         for model_ref in list(defaults_models.keys()):
-            if model_ref.startswith(f"{provider_name}/"):
+            if model_ref.startswith(ref_prefix):
                 del defaults_models[model_ref]
                 changed = True
 
@@ -537,35 +624,45 @@ class OpenClawAdapter(BackendAdapter):
                     k.get("models", []), k.get("default_model", ""), k.get("disabled_models") or [],
                     provider_id=pname,
                 )
+                models_list = [m for m in models_list if self.selected_model_endpoint(v, k, m.get("id", ""))]
+                models_list = [m for m in models_list if self._api_type_for_model(v, k, m.get("id", ""))]
                 # Skip keys whose models were all disabled (kept in system only)
                 if not models_list and (k.get("models") or k.get("disabled_models")):
                     continue
                 if not models_list:
+                    if k.get("endpoint_capabilities"):
+                        continue
                     models_list = [{"id": "default", "name": "default"}]
 
-                ocp_key = f"{pname}@{k['name']}"
+                base_ocp_key = f"{pname}@{k['name']}"
                 api_key = k["api_key"]
                 api_url = v.get("proxy_target", "") or v.get("api_url", "")
                 ocp_url = self._ocp_url(api_url, v.get("endpoint_type", "")) if api_url else ""
 
-                new_models_provs[ocp_key] = {
-                    "apiKey": api_key,
-                    "baseUrl": ocp_url,
-                    "api": api_type,
-                    "models": models_list,
-                }
-                new_profiles[ocp_key] = {"provider": pname, "mode": "api_key"}
-
-                if pname not in new_order:
-                    new_order[pname] = [ocp_key]
-                elif ocp_key not in new_order[pname]:
-                    new_order[pname].append(ocp_key)
+                grouped = {}
+                for model in models_list:
+                    grouped.setdefault(self._api_type_for_model(v, k, model.get("id", "")), []).append(model)
+                for group_api, group_models in grouped.items():
+                    ocp_key = base_ocp_key if len(grouped) == 1 else f"{base_ocp_key}@{group_api.replace('-', '_')}"
+                    new_models_provs[ocp_key] = {
+                        "apiKey": api_key,
+                        "baseUrl": ocp_url,
+                        "api": group_api,
+                        "models": group_models,
+                    }
+                    new_profiles[ocp_key] = {"provider": pname, "mode": "api_key"}
+                    if pname not in new_order:
+                        new_order[pname] = [ocp_key]
+                    elif ocp_key not in new_order[pname]:
+                        new_order[pname].append(ocp_key)
 
                 for m in models_list:
                     mid = m["id"]
                     if _is_blocked_openclaw_model(mid, pname):
                         continue
-                    new_defaults[f"{pname}/{mid}"] = {}
+                    group_api = self._api_type_for_model(v, k, mid)
+                    group_key = base_ocp_key if len(grouped) == 1 else f"{base_ocp_key}@{group_api.replace('-', '_')}"
+                    new_defaults[f"{group_key}/{mid}"] = {}
 
         # Build provider-level aggregate entries (must include apiKey for OpenClaw fallback)
         provider_aggs = {}
@@ -585,7 +682,19 @@ class OpenClawAdapter(BackendAdapter):
                 provider_aggs[pname]["baseUrl"] = entry["baseUrl"]
             if not provider_aggs[pname].get("apiKey") and entry.get("apiKey"):
                 provider_aggs[pname]["apiKey"] = entry["apiKey"]
+        # A provider-level aggregate is safe only when all model entries use
+        # the same API format. Mixed Chat/Messages/Responses models must remain
+        # endpoint-specific; otherwise OpenClaw routes them through one wrong
+        # API and silently breaks only some models.
         for pname, agg in provider_aggs.items():
+            entries = [
+                entry for ocp_key, entry in new_models_provs.items()
+                if "@" in ocp_key and ocp_key.split("@")[0] == pname
+            ]
+            formats = {entry.get("api") for entry in entries if entry.get("api")}
+            if len(formats) > 1:
+                continue
+            agg["api"] = next(iter(formats), self._get_api_type(pname))
             new_models_provs[pname] = {
                 "api": agg["api"],
                 "baseUrl": agg["baseUrl"],
@@ -607,7 +716,6 @@ class OpenClawAdapter(BackendAdapter):
     def _save_agent_models_config(self, vendors: list[dict]) -> None:
         """Write agent models.json with full provider entries (apiKey/baseUrl/api/models)."""
         mdata = {"providers": {}}
-        active_ocp_keys = set()
         active_providers = set()
 
         for v in vendors:
@@ -624,29 +732,41 @@ class OpenClawAdapter(BackendAdapter):
                     k.get("models", []), k.get("default_model", ""), k.get("disabled_models") or [],
                     provider_id=pname,
                 )
+                models = [m for m in models if self.selected_model_endpoint(v, k, m.get("id", ""))]
+                models = [m for m in models if self._api_type_for_model(v, k, m.get("id", ""))]
                 if not models and (k.get("models") or k.get("disabled_models")):
                     continue
                 if not models:
+                    if k.get("endpoint_capabilities"):
+                        continue
                     models = [{"id": "default", "name": "default"}]
                 active_providers.add(pname)
                 ocp_key = f"{pname}@{k['name']}"
-                active_ocp_keys.add(ocp_key)
-                mdata["providers"][ocp_key] = {
-                    "apiKey": k["api_key"],
-                    "baseUrl": ocp_url,
-                    "api": api_type,
-                    "models": models,
-                }
+                selected_formats = {}
+                for model in models:
+                    selected_formats.setdefault(
+                        self._api_type_for_model(v, k, model.get("id", "")), []
+                    ).append(model)
+                for group_api, group_models in selected_formats.items():
+                    group_key = ocp_key if len(selected_formats) == 1 else f"{ocp_key}@{group_api.replace('-', '_')}"
+                    mdata["providers"][group_key] = {
+                        "apiKey": k["api_key"],
+                        "baseUrl": ocp_url,
+                        "api": group_api,
+                        "models": group_models,
+                    }
 
         # Aggregate per provider (with apiKey fallback)
         for pname in active_providers:
             agg_models = {}
             base_url = ""
             api_key = ""
-            api_type = self._get_api_type(pname)
+            group_formats = set()
             for pk, pv in mdata["providers"].items():
                 if "@" not in pk or pk.split("@")[0] != pname:
                     continue
+                if pv.get("api"):
+                    group_formats.add(pv.get("api"))
                 for m in pv.get("models", []):
                     mid = m["id"] if isinstance(m, dict) else m
                     if not mid or mid in agg_models:
@@ -658,7 +778,8 @@ class OpenClawAdapter(BackendAdapter):
                     base_url = pv["baseUrl"]
                 if not api_key and pv.get("apiKey"):
                     api_key = pv["apiKey"]
-            if agg_models:
+            if agg_models and len(group_formats) <= 1:
+                api_type = next(iter(group_formats), self._get_api_type(pname))
                 mdata["providers"][pname] = {
                     "apiKey": api_key,
                     "baseUrl": base_url,

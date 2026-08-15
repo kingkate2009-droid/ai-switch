@@ -224,13 +224,20 @@ def _list_models(key: dict, vendor: dict) -> list[str]:
     except Exception:
         ids = []
     ids = [str(m).strip() for m in ids if str(m).strip()]
+    ids = [m for m in ids if _selected_kimi_endpoint(vendor, key, m)]
     if ids:
         return ids
     if _is_kimi_like(vendor):
-        return [m[0] for m in _DEFAULT_KIMI_MODELS]
+        return [m for m in (x[0] for x in _DEFAULT_KIMI_MODELS)
+                if _selected_kimi_endpoint(vendor, key, m)]
     # generic fallback
     dm = (key.get("default_model") or "").strip()
-    return [dm] if dm else ["default"]
+    return [dm] if dm and _selected_kimi_endpoint(vendor, key, dm) else []
+
+
+def _selected_kimi_endpoint(vendor: dict, key: dict, model: str) -> str:
+    from core.endpoints import selected_model_endpoint
+    return selected_model_endpoint(vendor, key, model, "kimi-code")
 
 
 class KimiCodeAdapter(BackendAdapter):

@@ -61,13 +61,21 @@ pip install -r requirements.txt
 python3 run.py
 ```
 
+也可透過 npm/npx 啟動：
+
+```bash
+npx github:kingkate2009-droid/ai-switch
+```
+
 圖文：[docs/quickstart.md](docs/quickstart.md) · Codex：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 
 ## 它解決什麼
 
 1. **Key 集中管** — 匯入、去重、標籤  
-2. **知道誰還能用** — 健康檢測、可讀錯誤  
-3. **同步別寫錯** — Preview、未安裝零寫入  
+2. **知道誰還能用** — 模型端點檢測、品質檢測、可讀錯誤
+3. **同步別寫錯** — 僅同步已驗證模型、Preview、主備故障轉移、未安裝零寫入
+
+品質檢測按供應商摺疊展示，可整個供應商檢測，也可展開後檢測單一模型。每個模型可自動或手動選擇 Chat、Responses、Messages、Gemini 等已驗證端點。
 
 完整說明見 [簡體 README](README-zh_CN.md) / [English](README.md)。
 
@@ -78,7 +86,9 @@ OpenClaw · OpenCode · Claude Code · Codex CLI · Cline · Aider · Continue.d
 
 ## 設定與安全
 
-資料在 `~/.ai-switch/`，**不要提交進 Git**。埠 `8787`。
+主資料儲存在 `~/.ai-switch/ai-switch.db`，舊 `data.json` 會在首次啟動時匯入並保留 `.legacy` 備份。**不要提交 `~/.ai-switch/`。** 埠 `8787` 被占用時程式會報錯退出。
+
+最新版：[v2.2.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.2.0) · [版本說明](docs/release-notes-2.2.0.md)
 
 ## 連結
 

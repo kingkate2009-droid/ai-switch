@@ -2,8 +2,10 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import threading
 import time
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -11,11 +13,14 @@ DATA_DIR = Path.home() / ".ai-switch"
 
 log = logging.getLogger(__name__)
 DATA_PATH = DATA_DIR / "data.json"
+SQLITE_PATH = DATA_DIR / "ai-switch.db"
 USAGE_PATH = DATA_DIR / "usage.json"
 _OLD_DATA_DIR = Path.home() / ".openclaw-auto-manager"
 _OLD_DATA_PATH = _OLD_DATA_DIR / "data.json"
 _DATA_LOCK = threading.RLock()
+_SQLITE_INIT_LOCK = threading.Lock()
 _USAGE_LOCK = threading.RLock()
+_SQLITE_READY = False
 _DEFAULT_DATA = {
     "vendors": [],
     "settings": {
@@ -42,6 +47,98 @@ def _migrate_old_data() -> None:
 
 def _ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _sqlite_connection() -> sqlite3.Connection:
+    _ensure_dirs()
+    conn = sqlite3.connect(str(SQLITE_PATH), timeout=30, isolation_level=None)
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=FULL")
+    return conn
+
+
+def _valid_json_source() -> tuple[dict, str]:
+    """Find the newest valid legacy JSON snapshot for the SQLite migration."""
+    candidates = [DATA_PATH, *_backup_candidates()]
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            data = _read_json_file(path)
+            if isinstance(data.get("vendors"), list):
+                return data, path.name
+        except Exception:
+            continue
+    return dict(_DEFAULT_DATA), "empty"
+
+
+def _ensure_sqlite() -> None:
+    """Create the SQL store and migrate legacy JSON exactly once."""
+    global _SQLITE_READY
+    if _SQLITE_READY and SQLITE_PATH.exists():
+        return
+    with _SQLITE_INIT_LOCK:
+        if _SQLITE_READY and SQLITE_PATH.exists():
+            return
+        conn = _sqlite_connection()
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+            row = conn.execute("SELECT payload FROM app_state WHERE key='document'").fetchone()
+            if row is None:
+                data, source = _valid_json_source()
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "INSERT OR REPLACE INTO app_state(key, payload) VALUES('document', ?)",
+                    (json.dumps(data, ensure_ascii=False, separators=(",", ":")),),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO app_state(key, payload) VALUES('migration', ?)",
+                    (json.dumps({"source": source, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False),),
+                )
+                conn.commit()
+                log.info("SQLite data store initialized from %s (%d vendors)", source, len(data.get("vendors") or []))
+                # Keep legacy snapshots for manual rollback, but never use them at runtime.
+                for path in [DATA_PATH, *_backup_candidates()]:
+                    if path.exists():
+                        archived = path.with_name(path.name + ".legacy")
+                        try:
+                            if not archived.exists():
+                                path.replace(archived)
+                        except OSError:
+                            pass
+        finally:
+            conn.close()
+        _SQLITE_READY = True
+
+
+def _load_sqlite_document() -> dict:
+    _ensure_sqlite()
+    conn = _sqlite_connection()
+    try:
+        row = conn.execute("SELECT payload FROM app_state WHERE key='document'").fetchone()
+        if not row:
+            return dict(_DEFAULT_DATA)
+        data = json.loads(row[0])
+        return data if isinstance(data, dict) else dict(_DEFAULT_DATA)
+    finally:
+        conn.close()
+
+
+def _save_sqlite_document(data: dict) -> None:
+    _ensure_sqlite()
+    if not isinstance(data, dict):
+        raise TypeError("data must be a dict")
+    conn = _sqlite_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "INSERT OR REPLACE INTO app_state(key, payload) VALUES('document', ?)",
+            (json.dumps(data, ensure_ascii=False, separators=(",", ":")),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _backup_candidates() -> list[Path]:
@@ -232,15 +329,7 @@ def _migrate_usage_out_of_data(data: dict) -> dict:
 
 def _load_data() -> dict:
     with _DATA_LOCK:
-        _migrate_old_data()
-        _ensure_dirs()
-        if not DATA_PATH.exists():
-            data = dict(_DEFAULT_DATA)
-        else:
-            try:
-                data = _read_json_file(DATA_PATH)
-            except Exception as e:
-                data = _recover_data_from_backups(e)
+        data = _load_sqlite_document()
         # one-time / residual: split usage out of main config
         if isinstance(data, dict) and "usage" in data:
             data = _migrate_usage_out_of_data(data)
@@ -257,8 +346,7 @@ def _chmod_private(path: Path) -> None:
 
 
 def _save_data_core(data: dict) -> None:
-    """Atomic write with rotating backups (data.json.bak, .bak.1, .bak.2)."""
-    _ensure_dirs()
+    """Persist the application document transactionally in SQLite."""
     # never persist clearly broken payload
     if not isinstance(data, dict):
         raise TypeError("data must be a dict")
@@ -266,50 +354,13 @@ def _save_data_core(data: dict) -> None:
     if "usage" in data:
         data = dict(data)
         data.pop("usage", None)
-    # Encrypt secrets on disk when vault is enabled + unlocked
+    # Encrypt secrets before storing the document in SQLite.
     data = _prepare_data_for_disk(data)
-    # rotate backups before overwrite
-    try:
-        if DATA_PATH.exists():
-            # only back up if current file is valid JSON
-            try:
-                _read_json_file(DATA_PATH)
-                bak0 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak")
-                bak1 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.1")
-                bak2 = DATA_PATH.with_suffix(DATA_PATH.suffix + ".bak.2")
-                if bak1.exists():
-                    try:
-                        if bak2.exists():
-                            bak2.unlink()
-                        bak1.replace(bak2)
-                    except OSError:
-                        pass
-                if bak0.exists():
-                    try:
-                        bak0.replace(bak1)
-                    except OSError:
-                        pass
-                try:
-                    shutil.copy2(DATA_PATH, bak0)
-                    _chmod_private(bak0)
-                except OSError:
-                    pass
-            except Exception:
-                # current data.json is already corrupt — don't rotate it into backups
-                pass
-    except Exception:
-        pass
-    tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp.replace(DATA_PATH)
-    _chmod_private(DATA_PATH)
+    _save_sqlite_document(data)
 
 
 def _save_data(data: dict) -> None:
-    """Atomic write with rotating backups (data.json.bak, .bak.1, .bak.2)."""
+    """Persist one document transactionally in SQLite."""
     with _DATA_LOCK:
         _save_data_core(data)
 
@@ -719,7 +770,7 @@ def batch_import_entries(entries: list) -> dict:
 _KEY_FIELDS = (
     "name", "api_key", "enabled", "models", "default_model",
     "check_model",  # primary model for health / scheduled checks; empty = auto
-    "disabled_models", "model_health", "notes", "role",
+    "disabled_models", "model_health", "endpoint_capabilities", "quality_scores", "notes", "role",
 )
 
 # role: "" | "primary" | "backup"
@@ -734,7 +785,7 @@ def _normalize_role(role) -> str:
 
 def model_id_of(m) -> str:
     if isinstance(m, dict):
-        return str(m.get("id") or m.get("name") or "")
+        return str(m.get("id") or m.get("name") or m.get("model") or "")
     return str(m or "")
 
 
@@ -758,6 +809,69 @@ def get_enabled_models(key: dict) -> list[str]:
         return []
     disabled = set(key.get("disabled_models") or [])
     return [m for m in ids if m not in disabled]
+
+
+def get_model_endpoint_capabilities(key: dict, model: str = "") -> dict:
+    """Return model endpoint capability records stored on a key.
+
+    The value is intentionally a copy: callers can inspect it without
+    mutating the in-memory data returned by ``get_vendors``.  Missing records
+    are normal for keys created before model-level endpoint detection existed.
+    """
+    raw = key.get("endpoint_capabilities") if isinstance(key, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    if model:
+        value = raw.get(str(model))
+        return dict(value) if isinstance(value, dict) else {}
+    return {
+        str(mid): dict(value)
+        for mid, value in raw.items()
+        if isinstance(value, dict)
+    }
+
+
+def update_model_endpoint_capabilities(
+    vendor_id: str,
+    key_id: str,
+    model: str,
+    *,
+    mode: str = None,
+    selected=None,
+    detected=None,
+    checks=None,
+) -> Optional[dict]:
+    """Patch one model's endpoint capability state and persist it."""
+    data = _load_data()
+    for vendor in data.get("vendors") or []:
+        if str(vendor.get("id")) != str(vendor_id):
+            continue
+        for key in vendor.get("keys") or []:
+            if str(key.get("id")) != str(key_id):
+                continue
+            mid = str(model or "").strip()
+            if not mid:
+                return key
+            caps = key.setdefault("endpoint_capabilities", {})
+            previous = caps.get(mid) if isinstance(caps.get(mid), dict) else {}
+            state = dict(previous)
+            if mode is not None:
+                state["mode"] = "manual" if str(mode).lower() == "manual" else "auto"
+            if selected is not None:
+                state["selected"] = list(selected or [])
+            if detected is not None:
+                state["detected"] = list(detected or [])
+            if checks is not None:
+                state["checks"] = dict(checks or {})
+            state.setdefault("mode", "auto")
+            state.setdefault("selected", [])
+            state.setdefault("detected", [])
+            state.setdefault("checks", {})
+            state["checked_at"] = state.get("checked_at") or ""
+            caps[mid] = state
+            _save_data(data)
+            return key
+    return None
 
 
 def set_model_enabled(vendor_id: str, key_id: str, model: str, enabled: bool) -> Optional[dict]:
@@ -851,26 +965,46 @@ def failover_primary(vendor_id: str, failed_key_id: str) -> Optional[dict]:
 
 
 def update_key(vendor_id: str, key_id: str, **kwargs) -> Optional[dict]:
-    data = _load_data()
-    for v in data["vendors"]:
-        if v["id"] == vendor_id:
-            for k in v["keys"]:
-                if k["id"] == key_id:
-                    _apply_key_fields(k, kwargs)
-                    _save_data(data)
-                    return k
+    with _DATA_LOCK:
+        data = _load_data()
+        for v in data["vendors"]:
+            if v["id"] == vendor_id:
+                for k in v["keys"]:
+                    if k["id"] == key_id:
+                        _apply_key_fields(k, kwargs)
+                        _save_data_core(data)
+                        return k
     return None
 
 
 def update_key_data(vendor_id: str, key_id: str, **kwargs) -> Optional[dict]:
-    data = _load_data()
-    for v in data["vendors"]:
-        if v["id"] == vendor_id:
-            for k in v["keys"]:
-                if k["id"] == key_id:
-                    _apply_key_fields(k, kwargs)
-                    _save_data(data)
-                    return k
+    with _DATA_LOCK:
+        data = _load_data()
+        for v in data["vendors"]:
+            if v["id"] == vendor_id:
+                for k in v["keys"]:
+                    if k["id"] == key_id:
+                        _apply_key_fields(k, kwargs)
+                        _save_data_core(data)
+                        return k
+    return None
+
+
+def update_model_quality_score(vendor_id: str, key_id: str, model_id: str, record: dict) -> Optional[dict]:
+    """Merge one quality result into the latest key snapshot atomically."""
+    with _DATA_LOCK:
+        data = _load_data()
+        for vendor in data.get("vendors") or []:
+            if str(vendor.get("id")) != str(vendor_id):
+                continue
+            for key in vendor.get("keys") or []:
+                if str(key.get("id")) != str(key_id):
+                    continue
+                scores = dict(key.get("quality_scores") or {})
+                scores[str(model_id)] = dict(record or {})
+                key["quality_scores"] = scores
+                _save_data_core(data)
+                return key
     return None
 
 
@@ -958,10 +1092,7 @@ def secrets_encryption_enabled(settings: Optional[dict] = None) -> bool:
 def _load_data_raw_settings() -> dict:
     """Read settings without full hydrate (avoid recursion)."""
     try:
-        if DATA_PATH.exists():
-            raw = _read_json_file(DATA_PATH)
-            if isinstance(raw, dict):
-                return raw.get("settings") or {}
+        return (_load_sqlite_document().get("settings") or {})
     except Exception:
         pass
     return {}
@@ -1015,7 +1146,7 @@ def unlock_secrets(password: str) -> dict:
     if not password:
         raise ValueError("password required")
     with _DATA_LOCK:
-        data = _read_json_file(DATA_PATH) if DATA_PATH.exists() else dict(_DEFAULT_DATA)
+        data = _load_sqlite_document()
         if not isinstance(data, dict):
             data = dict(_DEFAULT_DATA)
         settings = data.setdefault("settings", {})
@@ -1055,19 +1186,12 @@ def _master_key() -> Optional[bytes]:
 
 def _save_data_core_plain(data: dict) -> None:
     """Internal save without re-entering encrypt prepare (for kdf bootstrap)."""
-    _ensure_dirs()
     if not isinstance(data, dict):
         raise TypeError("data must be a dict")
     if "usage" in data:
         data = dict(data)
         data.pop("usage", None)
-    tmp = DATA_PATH.with_suffix(DATA_PATH.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp.replace(DATA_PATH)
-    _chmod_private(DATA_PATH)
+    _save_sqlite_document(data)
 
 
 def _walk_encrypt_secrets(data: dict, master: bytes) -> dict:
@@ -1225,11 +1349,8 @@ def enable_secrets_encryption(password: str) -> dict:
     if len(password) < 6:
         raise ValueError("password must be at least 6 characters")
     with _DATA_LOCK:
-        # load raw disk (may already have plaintext)
-        if DATA_PATH.exists():
-            data = _read_json_file(DATA_PATH)
-        else:
-            data = dict(_DEFAULT_DATA)
+        # Load the current SQLite document; legacy JSON is migration-only.
+        data = _load_sqlite_document()
         if not isinstance(data, dict):
             data = dict(_DEFAULT_DATA)
         # if already encrypted on disk, unlock first conceptually by reading via hydrate
@@ -1263,9 +1384,7 @@ def disable_secrets_encryption(password: str) -> dict:
     if not password:
         raise ValueError("password required")
     with _DATA_LOCK:
-        if not DATA_PATH.exists():
-            raise ValueError("no data file")
-        data = _read_json_file(DATA_PATH)
+        data = _load_sqlite_document()
         settings = data.get("settings") or {}
         kdf = settings.get("secrets_kdf") if isinstance(settings.get("secrets_kdf"), dict) else {}
         if not kdf.get("salt"):
@@ -1311,10 +1430,20 @@ def get_models_catalog() -> dict:
 
     locations are unique vendors (full vendor name), preferring enabled keys.
     """
+    from core.endpoints import model_is_verified_usable
+    from core.health_checker import get_all_health_status
+    from core.providers import official_vendor_info
+
+    health = get_all_health_status()
     by_model: dict[str, dict] = {}
     for v in get_vendors():
         vid = v.get("id")
         vname = (v.get("name") or "").strip() or (v.get("provider") or "vendor")
+        official = official_vendor_info(v)
+        vendor_healthy = any(
+            (health.get(f"{vid}:{key.get('id')}") or {}).get("healthy") is True
+            for key in v.get("keys") or []
+        )
         for k in v.get("keys") or []:
             kid, kname = k.get("id"), k.get("name") or ""
             enabled_key = k.get("enabled") is not False
@@ -1334,7 +1463,7 @@ def get_models_catalog() -> dict:
                 })
                 rec["key_count"] += 1
                 rec["_vendors"].add(vid)
-                model_on = mid not in disabled and enabled_key
+                model_on = enabled_key and mid not in disabled and model_is_verified_usable(k, mid)
                 if model_on:
                     rec["enabled_count"] += 1
                 # one location entry per vendor; prefer enabled key as jump target
@@ -1346,8 +1475,12 @@ def get_models_catalog() -> dict:
                         "key_id": kid,
                         "key_name": kname,
                         "key_enabled": enabled_key,
-                        "model_enabled": mid not in disabled,
-                        "active": bool(model_on),
+                        "model_enabled": bool(model_on),
+                        "model_syncable": bool(model_on),
+                        "vendor_healthy": vendor_healthy,
+                        "verified": model_is_verified_usable(k, mid),
+                        "active": vendor_healthy,
+                        **official,
                         "key_count": 1,
                     }
                 else:
@@ -1362,9 +1495,7 @@ def get_models_catalog() -> dict:
         # active (normal/enabled) vendors first, then full name
         locations = list(loc_map.values())
         locations.sort(key=lambda x: (0 if x.get("active") else 1, str(x.get("vendor_name") or "").lower()))
-        # only show normal (active) vendors in locations; keep count of all
-        active_locs = [x for x in locations if x.get("active")]
-        rec["locations"] = active_locs if active_locs else locations
+        rec["locations"] = locations
         rec["vendor_count"] = len(rec.pop("_vendors", set()))
         items.append(rec)
     items.sort(key=lambda r: (-r["key_count"], str(r["model"]).lower()))

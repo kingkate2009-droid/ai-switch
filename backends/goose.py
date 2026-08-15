@@ -74,7 +74,11 @@ class GooseAdapter(BackendAdapter):
         env_var = self._provider_env_map.get(vendor.get("provider", ""))
         if not env_var:
             return
-        other = self.pick_syncable_key(providers={str(vendor.get("provider") or "").lower()})
+        other = self.pick_syncable_key(
+            providers={str(vendor.get("provider") or "").lower()},
+            exclude=(str(vendor.get("id") or ""), str(key.get("id") or "")),
+            match_endpoint=False,
+        )
         if other and other[1].get("id") != key.get("id"):
             self.on_key_added(other[0], other[1])
             return
@@ -83,24 +87,31 @@ class GooseAdapter(BackendAdapter):
         self._save_secrets(secrets)
 
     def reconcile(self) -> None:
+        from core.data import get_vendors
+        slot_providers = {}
+        for v in get_vendors():
+            prov = str(v.get("provider") or "")
+            env_var = self._provider_env_map.get(prov)
+            if env_var:
+                slot_providers.setdefault(env_var, set()).add(prov)
+
         active_envs = set()
-        for v, k in self.iter_syncable_keys():
-            env_var = self._provider_env_map.get(v.get("provider", ""))
-            if env_var and self.should_sync(v, k):
+        selected_secrets = self._load_secrets()
+        for env_var, providers in slot_providers.items():
+            selected = self.pick_syncable_key(providers=providers, match_endpoint=False)
+            if selected:
+                selected_secrets[env_var] = selected[1]["api_key"]
                 active_envs.add(env_var)
-                # Refresh secret from best remaining key
-                secrets = self._load_secrets()
-                if secrets.get(env_var) != k["api_key"]:
-                    secrets[env_var] = k["api_key"]
-                    self._save_secrets(secrets)
-        secrets = self._load_secrets()
+        original = self._load_secrets()
         changed = False
         for env_var in self._provider_env_map.values():
-            if env_var not in active_envs and env_var in secrets:
-                del secrets[env_var]
+            if env_var not in active_envs and env_var in selected_secrets:
+                del selected_secrets[env_var]
                 changed = True
+        if selected_secrets != original:
+            changed = True
         if changed:
-            self._save_secrets(secrets)
+            self._save_secrets(selected_secrets)
 
     def sync_from_backend(self) -> list[dict]:
         secrets = self._load_secrets()

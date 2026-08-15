@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title data-i18n="app.title">{{ t('app.title') }}</title>
-<link rel="stylesheet" href="/static/style.css?v=task-center-1">
+<link rel="stylesheet" href="/static/style.css?v=dashboard-pad-2">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -57,6 +57,10 @@
         <a href="#" class="nav-item" data-view="models" onclick="switchView('models');return false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="20" cy="18" r="2"/></svg>
           <span data-i18n="nav.models">{{ t('nav.models') }}</span>
+        </a>
+        <a href="#" class="nav-item" data-view="quality" onclick="switchView('quality');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/><circle cx="18" cy="6" r="2"/></svg>
+          <span data-i18n="nav.quality">{{ t('nav.quality') }}</span>
         </a>
         <a href="#" class="nav-item" data-view="routes" onclick="switchView('routes');return false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-7 6M12 11l7 6"/></svg>
@@ -198,37 +202,6 @@
           </div>
           <div id="dashBackendCards" class="backend-grid"></div>
         </div>
-      </div>
-
-      <div class="dash-section">
-        <div class="dash-section-head">
-          <h3 data-i18n="dashboard.quickActions">{{ t('dashboard.quickActions') }}</h3>
-        </div>
-        <div class="quick-actions-grid">
-          <button class="btn btn-primary" onclick="switchView('vendors'); showAddVendorModal()">
-            <svg width="16" height="16"><use href="#ico-plus"/></svg>
-            <span data-i18n="dashboard.addVendor">{{ t('dashboard.addVendor') }}</span>
-          </button>
-          <button class="btn" onclick="showBatchImportModal()">
-            <svg width="16" height="16"><use href="#ico-upload"/></svg>
-            <span data-i18n="dashboard.batchImport">{{ t('dashboard.batchImport') }}</span>
-          </button>
-          <button class="btn" onclick="pushToBackends()" title="{{ t('sync.pushHint') }}">
-            <svg width="16" height="16"><use href="#ico-sync"/></svg>
-            <span data-i18n="sync.push">{{ t('sync.push') }}</span>
-          </button>
-          <button class="btn" onclick="showSyncImportModal()" title="{{ t('sync.importHint') }}">
-            <svg width="16" height="16"><use href="#ico-upload"/></svg>
-            <span data-i18n="sync.importFromBackends">{{ t('sync.importFromBackends') }}</span>
-          </button>
-          <button class="btn" onclick="exportBackup()" title="{{ t('backup.exportHint') }}">
-            <span data-i18n="backup.export">{{ t('backup.export') }}</span>
-          </button>
-          <button class="btn" onclick="triggerImportBackup()" title="{{ t('backup.importHint') }}">
-            <span data-i18n="backup.import">{{ t('backup.import') }}</span>
-          </button>
-        </div>
-        <input type="file" id="backupFileInput" accept="application/json,.json" style="display:none" onchange="onBackupFileSelected(event)">
       </div>
       </div>
     </div>
@@ -626,6 +599,7 @@
         </div>
         <div class="page-actions">
           <input type="text" id="modelsCatalogSearch" class="page-search" data-i18n-placeholder="models.searchPh" placeholder="{{ t('models.searchPh') }}" oninput="filterModelsCatalog()">
+          <label class="checkbox-label models-hide-unavailable"><input type="checkbox" id="modelsHideUnavailable" onchange="onModelsHideUnavailableChange()"> <span data-i18n="models.hideUnavailable">{{ t('models.hideUnavailable') }}</span></label>
           <button class="btn" onclick="loadModelsCatalog()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
@@ -658,6 +632,51 @@
           </table>
         </div>
       </div>
+      </div>
+    </div>
+
+    <!-- Quality inspection -->
+    <div class="view" id="view-quality">
+      <div class="page-head">
+        <div class="page-head-main">
+          <h2 data-i18n="quality.navTitle">{{ t('quality.navTitle') }}</h2>
+          <p class="page-desc" data-i18n="quality.navDesc">{{ t('quality.navDesc') }}</p>
+        </div>
+        <div class="page-actions quality-inspection-actions">
+          <button class="btn" onclick="runQualityInspection('unchecked')"><span data-i18n="quality.runUnchecked">{{ t('quality.runUnchecked') }}</span></button>
+          <button class="btn btn-primary" onclick="runQualityInspection('all')"><span data-i18n="quality.runAll">{{ t('quality.runAll') }}</span></button>
+        </div>
+      </div>
+      <div class="page-body">
+        <div class="quality-inspection-toolbar">
+          <input id="qualityInspectionSearch" class="page-search" type="search" oninput="renderQualityInspection()" data-i18n-placeholder="quality.searchPh" placeholder="{{ t('quality.searchPh') }}">
+          <select id="qualityInspectionStatus" onchange="renderQualityInspection()">
+            <option value="all" data-i18n="quality.filterAll">{{ t('quality.filterAll') }}</option>
+            <option value="checked" data-i18n="quality.filterChecked">{{ t('quality.filterChecked') }}</option>
+            <option value="unchecked" data-i18n="quality.filterUnchecked">{{ t('quality.filterUnchecked') }}</option>
+          </select>
+          <select id="qualityInspectionVendor" onchange="renderQualityInspection()"><option value="" data-i18n="quality.allVendors">{{ t('quality.allVendors') }}</option></select>
+        </div>
+        <div class="quality-inspection-summary" id="qualityInspectionSummary"></div>
+        <div class="dash-section">
+          <div class="table-wrap">
+            <table class="quality-inspection-table models-catalog-table">
+              <colgroup>
+                <col class="col-quality-vendor">
+                <col class="col-quality-status">
+                <col class="col-quality-models">
+                <col class="col-quality-action">
+              </colgroup>
+              <thead><tr>
+                <th data-i18n="quality.colVendor">{{ t('quality.colVendor') }}</th>
+                <th data-i18n="quality.colStatus">{{ t('quality.colStatus') }}</th>
+                <th data-i18n="quality.colModel">{{ t('quality.colModel') }}</th>
+                <th data-i18n="quality.colAction">{{ t('quality.colAction') }}</th>
+              </tr></thead>
+              <tbody id="qualityInspectionBody"><tr><td colspan="4" class="todo-empty">{{ t('common.loading') }}</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1193,7 +1212,7 @@
         <label for="vendorApiUrl" data-i18n="vendorModal.apiUrl">{{ t('vendorModal.apiUrl') }}</label>
         <input type="text" id="vendorApiUrl" placeholder="{{ t('vendorModal.placeholderApiUrl') }}" data-i18n-placeholder="vendorModal.placeholderApiUrl">
       </div>
-      <div class="form-group">
+      <div class="form-group" style="display:none" aria-hidden="true">
         <label for="vendorEndpointType" data-i18n="vendorModal.endpointType">{{ t('vendorModal.endpointType') }}</label>
         <select id="vendorEndpointType">
           <option value="openai" data-i18n="endpoint.openai">{{ t('endpoint.openai') }}</option>
@@ -1318,6 +1337,9 @@
         <button class="btn btn-sm" id="modelsCheckBtn" onclick="checkKeyModelsFromModal()">
           <svg width="12" height="12"><use href="#ico-play"/></svg>
           <span data-i18n="modelsModal.checkModels">{{ t('modelsModal.checkModels') }}</span>
+        </button>
+        <button class="btn btn-sm" id="modelsQualityBtn" onclick="checkKeyQualityFromModal()">
+          <span data-i18n="quality.evaluateKey">{{ t('quality.evaluateKey') }}</span>
         </button>
         <span class="models-modal-hint" data-i18n="modelsModal.hint">{{ t('modelsModal.hint') }}</span>
       </div>
@@ -1511,7 +1533,141 @@ async function loadModelsCatalog() {
     return;
   }
   _modelsCatalogCache = res.models || [];
+  var hide = false;
+  try { hide = localStorage.getItem('aiswitch_models_hide_unavailable') === '1'; } catch (e) {}
+  if ($('modelsHideUnavailable')) $('modelsHideUnavailable').checked = hide;
   filterModelsCatalog();
+}
+
+function onModelsHideUnavailableChange() {
+  var on = !!($('modelsHideUnavailable') && $('modelsHideUnavailable').checked);
+  try { localStorage.setItem('aiswitch_models_hide_unavailable', on ? '1' : '0'); } catch (e) {}
+  filterModelsCatalog();
+}
+
+var _qualityInspectionRows = [];
+var _qualityExpandedVendors = {};
+
+async function loadQualityInspection() {
+  var body = $('qualityInspectionBody');
+  if (body) body.innerHTML = '<tr><td colspan="4" class="todo-empty">' + esc(_('common.loading') || 'Loading...') + '</td></tr>';
+  var res = await api('/api/models/quality-catalog');
+  if (res.error) { if (body) body.innerHTML = '<tr><td colspan="4" class="todo-empty">' + esc(res.error) + '</td></tr>'; return; }
+  _qualityInspectionRows = res.rows || [];
+  var vendorSelect = $('qualityInspectionVendor');
+  if (vendorSelect) {
+    var names = {};
+    _qualityInspectionRows.forEach(function(row) { names[row.vendor_id] = row.vendor_name; });
+    var old = vendorSelect.value;
+    vendorSelect.innerHTML = '<option value="">' + esc(_('quality.allVendors') || 'All vendors') + '</option>' + Object.keys(names).sort(function(a,b){ return String(names[a]).localeCompare(String(names[b])); }).map(function(id) { return '<option value="' + esc(id) + '">' + esc(names[id]) + '</option>'; }).join('');
+    if (names[old]) vendorSelect.value = old;
+  }
+  renderQualityInspection();
+}
+
+function renderQualityInspection() {
+  var body = $('qualityInspectionBody');
+  if (!body) return;
+  var q = String(($('qualityInspectionSearch') || {}).value || '').trim().toLowerCase();
+  var state = String(($('qualityInspectionStatus') || {}).value || 'all');
+  var vendorId = String(($('qualityInspectionVendor') || {}).value || '');
+  var locations = (_qualityInspectionRows || []).filter(function(row) {
+    if (state === 'checked' && !row.quality_checked) return false;
+    if (state === 'unchecked' && row.quality_checked) return false;
+    if (vendorId && row.vendor_id !== vendorId) return false;
+    if (q && (String(row.vendor_name) + ' ' + String(row.model)).toLowerCase().indexOf(q) < 0) return false;
+    return true;
+  });
+  var checked = (_qualityInspectionRows || []).filter(function(row) { return row.quality_checked; }).length;
+  var summary = $('qualityInspectionSummary');
+  if (summary) summary.textContent = (_('quality.inspectionSummary') || '{visible} shown · {checked} checked · {total} total').replace('{visible}', locations.length).replace('{checked}', checked).replace('{total}', (_qualityInspectionRows || []).length);
+  if (!locations.length) { body.innerHTML = '<tr><td colspan="4" class="todo-empty">' + esc(_('quality.empty') || 'No models') + '</td></tr>'; return; }
+  var byVendor = {};
+  locations.forEach(function(row) {
+    (byVendor[row.vendor_id] || (byVendor[row.vendor_id] = [])).push(row);
+  });
+  body.innerHTML = Object.keys(byVendor).sort(function(a, b) {
+    return String(byVendor[a][0].vendor_name).localeCompare(String(byVendor[b][0].vendor_name));
+  }).map(function(vendorKey) {
+    var rows = byVendor[vendorKey].slice().sort(function(a, b) { return String(a.model).localeCompare(String(b.model)); });
+    var vendor = rows[0];
+    var checkedRows = rows.filter(function(row) { return row.quality_checked; });
+    var scores = checkedRows.map(function(row) { return Number(row.quality && row.quality.score); }).filter(Number.isFinite);
+    var average = scores.length ? Math.round(scores.reduce(function(total, score) { return total + score; }, 0) / scores.length) : null;
+    var statusClass = !checkedRows.length ? 'quality-status-unchecked' : (average >= 75 ? 'quality-status-good' : 'quality-status-poor');
+    var statusText = !checkedRows.length ? (_('quality.unchecked') || 'Not checked') : (checkedRows.length + '/' + rows.length + ' · ' + (_('quality.checked') || 'Checked'));
+    var expanded = !!_qualityExpandedVendors[vendorKey];
+    var vendorTargetIndex = _qualityInspectionRows.indexOf(vendor);
+    var html = '<tr class="quality-vendor-row' + (expanded ? ' expanded' : '') + '" onclick="toggleQualityVendor(' + vendorTargetIndex + ')">' +
+      '<td><span class="quality-vendor-toggle" aria-hidden="true">›</span><strong>' + esc(vendor.vendor_name) + '</strong>' + (vendor.official ? ' <span class="official-badge">' + esc(_('vendor.official') || 'Official') + '</span>' : '') + '</td>' +
+      '<td><span class="quality-status-pill ' + statusClass + '">' + esc(statusText) + '</span>' + (average == null ? '' : '<span class="quality-model-average">' + average + '</span>') + '</td>' +
+      '<td class="quality-model-count">' + rows.length + ' ' + esc(_('quality.models') || 'models') + '</td>' +
+      '<td><button class="btn btn-sm" type="button" onclick="event.stopPropagation();runVendorQualityInspection(' + vendorTargetIndex + ')">' + esc(checkedRows.length === rows.length ? (_('quality.rerunVendor') || 'Rerun vendor') : (_('quality.runVendor') || 'Check vendor')) + '</button></td>' +
+    '</tr>';
+    if (!expanded) return html;
+    html += rows.map(function(row) {
+      var score = row.quality && row.quality.score != null ? Number(row.quality.score) : null;
+      var targetIndex = _qualityInspectionRows.indexOf(row);
+      var modelStatusClass = !row.quality_checked ? 'quality-status-unchecked' : (score >= 75 ? 'quality-status-good' : 'quality-status-poor');
+      var modelStatusText = !row.quality_checked ? (_('quality.unchecked') || 'Not checked') : (score >= 75 ? (_('quality.checked') || 'Checked') : (_('quality.lowQuality') || 'Low quality'));
+      return '<tr class="quality-model-row">' +
+        '<td><span class="quality-model-branch">└</span><code title="' + esc(row.model) + '">' + esc(row.model) + '</code></td>' +
+        '<td><span class="quality-status-pill ' + modelStatusClass + '">' + esc(modelStatusText) + '</span></td>' +
+        '<td>' + (score == null ? '—' : '<strong class="quality-table-score">' + score + '</strong>') + (row.model_syncable ? '' : ' <span class="model-sync-state">' + esc(_('models.notSyncable') || 'Endpoint not verified') + '</span>') + '</td>' +
+        '<td><button class="btn btn-sm" type="button" onclick="runQualityInspectionTarget(' + targetIndex + ')">' + esc(row.quality_checked ? (_('quality.rerun') || 'Rerun') : (_('quality.runOne') || 'Evaluate')) + '</button></td>' +
+      '</tr>';
+    }).join('');
+    return html;
+  }).join('');
+}
+
+function toggleQualityVendor(index) {
+  var row = (_qualityInspectionRows || [])[index];
+  if (!row) return;
+  _qualityExpandedVendors[row.vendor_id] = !_qualityExpandedVendors[row.vendor_id];
+  renderQualityInspection();
+}
+
+async function runQualityInspectionTarget(index) {
+  var target = (_qualityInspectionRows || [])[index];
+  if (!target) return;
+  return runQualityTargets([target]);
+}
+
+async function runVendorQualityInspection(index) {
+  var source = (_qualityInspectionRows || [])[index];
+  if (!source) return;
+  var targets = (_qualityInspectionRows || []).filter(function(row) { return row.vendor_id === source.vendor_id; });
+  if (!targets.length) { showToast(_('quality.noTargets') || 'No models in this scope', 'info'); return; }
+  return runQualityTargets(targets);
+}
+
+async function runQualityInspection(mode) {
+  var rows = (_qualityInspectionRows || []).filter(function(row) { return mode === 'all' || !row.quality_checked; });
+  if (!rows.length) { showToast(_('quality.noTargets') || 'No models in this scope', 'info'); return; }
+  return runQualityTargets(rows);
+}
+
+async function runQualityTargets(targets) {
+  var taskId = createTask({ type: 'quality', title: _('quality.evaluatingAll') || 'Evaluating model quality', detail: '0 / ' + targets.length, cur: 0, total: targets.length });
+  var ok = 0, fail = 0, done = 0, next = 0;
+  async function worker() {
+    while (true) {
+      var i = next++;
+      if (i >= targets.length) return;
+      var target = targets[i];
+      try { var res = await api('/api/vendors/' + target.vendor_id + '/keys/' + target.key_id + '/models/' + encodeURIComponent(target.model) + '/quality', { method: 'POST' }); if (res.error) throw new Error(res.error); ok++; }
+      catch (e) { fail++; }
+      done++;
+      updateTask(taskId, { cur: done, total: targets.length, detail: (target.vendor_name || target.model) + ' · ' + done + '/' + targets.length });
+    }
+  }
+  await Promise.all([worker(), worker()]);
+  var detail = (_('quality.batchResult') || '{ok} completed, {fail} failed').replace('{ok}', ok).replace('{fail}', fail);
+  completeTask(taskId, { status: fail ? (ok ? 'partial' : 'error') : 'success', error: fail && !ok ? detail : '', detail: detail, cur: targets.length, total: targets.length });
+  showToast(detail, fail ? 'error' : 'success');
+  await loadQualityInspection();
+  return { ok: ok, fail: fail, total: targets.length };
 }
 
 function filterModelsCatalog() {
@@ -1520,6 +1676,14 @@ function filterModelsCatalog() {
   var q = '';
   try { q = (($('modelsCatalogSearch') && $('modelsCatalogSearch').value) || '').trim().toLowerCase(); } catch (e) {}
   var rows = _modelsCatalogCache || [];
+  var hideUnavailable = !!($('modelsHideUnavailable') && $('modelsHideUnavailable').checked);
+  if (hideUnavailable) {
+    rows = rows.map(function(m) {
+      var copy = Object.assign({}, m);
+      copy.locations = (m.locations || []).filter(function(l) { return l.vendor_healthy === true; });
+      return copy;
+    }).filter(function(m) { return (m.locations || []).length > 0; });
+  }
   if (q) {
     rows = rows.filter(function(m) {
       var loc = (m.locations || []).map(function(l){ return (l.vendor_name || '') + ' ' + (l.key_name || ''); }).join(' ');
@@ -1536,9 +1700,11 @@ function filterModelsCatalog() {
     var chips = (m.locations || []).map(function(l) {
       var name = String(l.vendor_name || '').trim() || ('#' + String(l.vendor_id || ''));
       var label = esc(name);
-      var off = (l.active === false || l.key_enabled === false || l.model_enabled === false) ? ' muted' : '';
+      var official = l.official ? ' <span class="official-badge">' + esc(_('vendor.official') || 'Official') + '</span>' : '';
+      var off = l.vendor_healthy === false ? ' muted' : '';
+      var syncState = l.model_syncable ? '' : ' <span class="model-sync-state">' + esc(_('models.notSyncable') || 'Endpoint not verified') + '</span>';
       var nkeys = l.key_count > 1 ? (' <span class="models-loc-count">×' + l.key_count + '</span>') : '';
-      return '<a href="#" class="models-loc-chip' + off + '" title="' + label + '" onclick="openModelLocation(\'' + esc(String(l.vendor_id)).replace(/'/g, "\\'") + '\',\'' + esc(String(l.key_id || '')).replace(/'/g, "\\'") + '\');return false"><span class="models-loc-name">' + label + '</span>' + nkeys + '</a>';
+      return '<a href="#" class="models-loc-chip' + off + '" title="' + label + '" onclick="openModelLocation(\'' + esc(String(l.vendor_id)).replace(/'/g, "\\'") + '\',\'' + esc(String(l.key_id || '')).replace(/'/g, "\\'") + '\');return false"><span class="models-loc-name">' + label + '</span>' + official + syncState + nkeys + '</a>';
     }).join('');
     tr.innerHTML =
       '<td class="models-name-cell"><code title="' + esc(m.model) + '">' + esc(m.model) + '</code></td>' +
@@ -1770,6 +1936,8 @@ function _taskTypeLabel(type) {
     import: _('tasks.typeImport') || 'Import',
     health: _('tasks.typeHealth') || 'Health check',
     sync: _('tasks.typeSync') || 'Sync backends',
+    detect: _('tasks.typeHealth') || 'Detection',
+    quality: _('quality.title') || 'Quality evaluation',
   };
   return map[type] || type || 'Task';
 }
@@ -1781,7 +1949,7 @@ function createTask(opts) {
     type: opts.type || 'job',
     title: opts.title || (_('tasks.running') || 'Running…'),
     detail: opts.detail || '',
-    status: 'running', // running | success | error
+    status: opts.status || 'running', // running | success | partial | error
     cur: opts.cur || 0,
     total: opts.total || 0,
     startedAt: Date.now(),
@@ -1799,20 +1967,23 @@ function createTask(opts) {
 function updateTask(id, patch) {
   var t = _tasks.find(function(x) { return x.id === id; });
   if (!t) return;
-  Object.keys(patch || {}).forEach(function(k) { t[k] = patch[k]; });
+  Object.keys(patch || {}).forEach(function(k) {
+    if (patch[k] !== undefined) t[k] = patch[k];
+  });
   renderTaskCenter();
 }
 
 function completeTask(id, opts) {
   opts = opts || {};
-  updateTask(id, {
-    status: opts.error ? 'error' : 'success',
-    detail: opts.detail != null ? opts.detail : undefined,
+  var patch = {
+    status: opts.status || (opts.error ? 'error' : 'success'),
     error: opts.error || '',
-    cur: opts.cur != null ? opts.cur : undefined,
-    total: opts.total != null ? opts.total : undefined,
     finishedAt: Date.now(),
-  });
+  };
+  if (opts.detail != null) patch.detail = opts.detail;
+  if (opts.cur != null) patch.cur = opts.cur;
+  if (opts.total != null) patch.total = opts.total;
+  updateTask(id, patch);
 }
 
 function clearFinishedTasks() {
@@ -1870,10 +2041,10 @@ function renderTaskCenter() {
   }
   body.innerHTML = _tasks.map(function(t) {
     var pct = t.total > 0 ? Math.min(100, Math.round((t.cur / t.total) * 100)) : (t.status === 'running' ? 15 : 100);
-    var statusCls = t.status === 'success' ? 'ok' : (t.status === 'error' ? 'err' : 'run');
+    var statusCls = t.status === 'success' ? 'ok' : (t.status === 'partial' ? 'warn' : (t.status === 'error' ? 'err' : 'run'));
     var statusLab = t.status === 'success'
       ? (_('tasks.done') || 'Done')
-      : (t.status === 'error' ? (_('tasks.failed') || 'Failed') : (_('tasks.running') || 'Running'));
+      : (t.status === 'partial' ? (_('tasks.partial') || 'Partial') : (t.status === 'error' ? (_('tasks.failed') || 'Failed') : (_('tasks.running') || 'Running')));
     var progressText = t.total > 0
       ? ((t.cur || 0) + ' / ' + t.total + (t.total ? ' (' + pct + '%)' : ''))
       : '';
@@ -1895,7 +2066,7 @@ function renderTaskCenter() {
 
 function switchView(name, opts) {
   opts = opts || {};
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, routes: 1, health: 1, checkin: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, checkin: 1, diagnostics: 1, settings: 1 };
   if (!allowed[name]) name = 'dashboard';
 
   document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
@@ -1922,6 +2093,7 @@ function switchView(name, opts) {
   if (name === 'backends') loadBackends();
   if (name === 'stats') loadStats();
   if (name === 'models') loadModelsCatalog();
+  if (name === 'quality') loadQualityInspection();
   if (name === 'routes') loadRoutesPage();
   if (name === 'health') loadHealthMonitor();
   if (name === 'checkin') loadCheckinPage();
@@ -1938,7 +2110,7 @@ function getInitialView() {
   var fromStore = '';
   try { fromStore = localStorage.getItem('aiswitch_view') || ''; } catch (e) {}
   var name = fromHash || fromStore || 'dashboard';
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, routes: 1, health: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, diagnostics: 1, settings: 1 };
   return allowed[name] ? name : 'dashboard';
 }
 
@@ -3314,7 +3486,7 @@ function renderVendorList() {
       '<div class="vendor-item-top">' +
         '<button type="button" class="vendor-fav-btn' + (fav ? ' active' : '') + '" title="' + esc(_('vendorList.favorite') || 'Favorite') + '" onclick="toggleFavoriteVendor(\'' + esc(String(v.id)).replace(/'/g, "\\'") + '\', event)">' + (fav ? '★' : '☆') + '</button>' +
         '<span class="dot ' + esc(st.status === 'partial' ? 'partial' : st.status) + '"></span>' +
-        '<div class="vendor-item-name">' + esc(v.name) + '</div>' +
+        '<div class="vendor-item-name">' + esc(v.name) + (v.official ? ' <span class="official-badge">' + esc(_('vendor.official') || 'Official') + '</span>' : '') + '</div>' +
         '<span class="vendor-item-badge">' + esc(st.label) + '</span>' +
       '</div>' +
       '<div class="vendor-item-url"><code>' + esc(v.api_url) + '</code></div>' +
@@ -3893,29 +4065,36 @@ async function saveKey() {
     check_model: _readKeyCheckModel(),
   };
   if (!data.name || !data.api_key) { alert(_('validation.nameAndKeyRequired') || 'Name and API Key are required'); return; }
+  var keyIdToCheck = null;
+  var vendorIdToCheck = selectedVendorId;
   if (kid) {
     await api('/api/vendors/' + selectedVendorId + '/keys/' + kid, { method: 'PUT', body: JSON.stringify(data) });
     if (data.role === 'primary') {
       await api('/api/vendors/' + selectedVendorId + '/keys/' + kid + '/promote', { method: 'POST', body: JSON.stringify({ demote_others: true }) });
     }
+    keyIdToCheck = kid;
   } else {
+    data.skip_health_check = true;
     var created = await api('/api/vendors/' + selectedVendorId + '/keys', { method: 'POST', body: JSON.stringify(data) });
     if (created && created.key && data.role === 'primary') {
       await api('/api/vendors/' + selectedVendorId + '/keys/' + created.key.id + '/promote', { method: 'POST', body: JSON.stringify({ demote_others: true }) });
     } else if (created && created.key && data.role) {
       await api('/api/vendors/' + selectedVendorId + '/keys/' + created.key.id, { method: 'PUT', body: JSON.stringify({ role: data.role }) });
     }
-    // Persist check_model on create (POST may ignore unknown extras on some paths)
     if (created && created.key && data.check_model) {
       await api('/api/vendors/' + selectedVendorId + '/keys/' + created.key.id, {
         method: 'PUT',
         body: JSON.stringify({ check_model: data.check_model }),
       });
     }
+    keyIdToCheck = created && created.key && created.key.id;
   }
   closeKeyModal();
-  if (selectedVendorId) { await selectVendor(selectedVendorId); }
-  else { loadVendors(); }
+  if (keyIdToCheck && vendorIdToCheck) {
+    checkKeyHealth(vendorIdToCheck, keyIdToCheck);
+  }
+  if (selectedVendorId) selectVendor(selectedVendorId);
+  else loadVendors();
 }
 
 async function editKey(vendorId, keyId) {
@@ -4151,8 +4330,18 @@ async function checkHealthTargets(targets, opts) {
           });
         }
         if (blocking) updateGlobalLoading(_('sync.pushing') || 'Syncing backends…');
-        await api('/api/sync/push', { method: 'POST' });
-        if (syncTaskId) completeTask(syncTaskId, { detail: _('sync.pushDone') || 'Backends synced', cur: 1, total: 1 });
+        var syncRes = await api('/api/sync/push', { method: 'POST' });
+        if (syncRes.error) throw new Error(syncRes.error);
+        if (syncTaskId) {
+          var syncDetail = syncRes.message || (_('sync.pushDone') || 'Backends synced');
+          completeTask(syncTaskId, {
+            status: syncRes.fail > 0 ? (syncRes.ok > 0 ? 'partial' : 'error') : 'success',
+            error: syncRes.fail > 0 && !syncRes.ok ? syncDetail : '',
+            detail: syncDetail,
+            cur: 1,
+            total: 1,
+          });
+        }
       } catch (e) {
         var serr = String(e && e.message || e);
         if (syncTaskId) completeTask(syncTaskId, { error: serr, detail: serr, cur: 1, total: 1 });
@@ -4180,6 +4369,7 @@ async function checkHealthTargets(targets, opts) {
       .replace('{ok}', ok).replace('{fail}', fail);
     if (taskId) {
       completeTask(taskId, {
+        status: fail ? (ok ? 'partial' : 'error') : 'success',
         error: fail && !ok ? doneDetail : '',
         detail: doneDetail,
         cur: targets.length,
@@ -4329,7 +4519,75 @@ async function checkAllHealth() {
 var _modelsModalCtx = { vendorId: '', keyId: '' };
 
 function _modelId(m) {
-  return typeof m === 'string' ? m : (m && (m.id || m.name) || '');
+  return typeof m === 'string' ? m : (m && (m.id || m.name || m.model) || '');
+}
+
+function _modelEndpointCandidates(k, mid) {
+  var state = (k.endpoint_capabilities || {})[mid] || {};
+  var checks = state.checks || {};
+  var found = Object.keys(checks);
+  if (found.length) return found;
+  var v = (_currentVendor && _currentVendor.id === _modelsModalCtx.vendorId) ? _currentVendor : null;
+  var ep = String((v && v.endpoint_type) || '').toLowerCase();
+  var prov = String((v && v.provider) || '').toLowerCase();
+  if (ep === 'anthropic' || prov === 'anthropic' || prov === 'claude') return ['anthropic_messages'];
+  if (ep === 'google' || ep === 'gemini' || prov === 'google' || prov === 'gemini') return ['gemini_generate'];
+  return ['openai_chat', 'openai_responses'];
+}
+
+function _endpointLabel(ep) {
+  return ({
+    openai_chat: 'Chat',
+    openai_responses: 'Responses',
+    anthropic_messages: 'Messages',
+    gemini_generate: 'Gemini',
+  })[ep] || ep;
+}
+
+async function checkModelEndpoints(vendorId, keyId, modelId) {
+  var taskId = createTask({ type: 'detect', title: (_('action.checking') || 'Checking') + ': ' + modelId, detail: 'Checking model endpoints', cur: 0, total: 1 });
+  showToast(((_('action.checking') || 'Checking') + ': ' + modelId), 'info');
+  try {
+    var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/models/' + encodeURIComponent(modelId) + '/endpoints/check', { method: 'POST' });
+    if (res.error) { completeTask(taskId, { error: res.error, detail: res.error, cur: 1, total: 1 }); showToast(res.error, 'error'); return res; }
+    var ok = (res.detected || []).length > 0;
+    var detail = ok ? ('Endpoint OK: ' + (res.detected || []).map(_endpointLabel).join(', ')) : ('No endpoint OK: ' + modelId);
+    completeTask(taskId, { status: ok ? 'success' : 'error', error: ok ? '' : detail, detail: detail, cur: 1, total: 1 });
+    showToast(detail, ok ? 'success' : 'error');
+    await selectVendor(vendorId);
+    return res;
+  } catch (e) {
+    var err = String(e && e.message || e);
+    completeTask(taskId, { error: err, detail: err, cur: 1, total: 1 });
+    throw e;
+  }
+}
+
+async function setModelEndpointMode(vendorId, keyId, modelId, mode) {
+  var selected = [];
+  document.querySelectorAll('[data-endpoint-model="' + CSS.escape(modelId) + '"] input[type=checkbox]:checked').forEach(function(cb) { selected.push(cb.value); });
+  var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/models/' + encodeURIComponent(modelId) + '/endpoints', {
+    method: 'PUT', body: JSON.stringify({ mode: mode, selected: selected }),
+  });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  await selectVendor(vendorId);
+  var v = _allVendorsData.find(function(x) { return x.id === vendorId; });
+  var k = v && (v.keys || []).find(function(x) { return x.id === keyId; });
+  if (k) renderModelsModalList(k);
+}
+
+async function setModelEndpointSelection(vendorId, keyId, modelId) {
+  var row = document.querySelector('[data-endpoint-model="' + CSS.escape(modelId) + '"]');
+  var selected = [];
+  if (row) row.querySelectorAll('input[type=checkbox]:checked').forEach(function(cb) { selected.push(cb.value); });
+  var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/models/' + encodeURIComponent(modelId) + '/endpoints', {
+    method: 'PUT', body: JSON.stringify({ mode: 'manual', selected: selected }),
+  });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  await selectVendor(vendorId);
+  var v = _allVendorsData.find(function(x) { return x.id === vendorId; });
+  var k = v && (v.keys || []).find(function(x) { return x.id === keyId; });
+  if (k) renderModelsModalList(k);
 }
 
 function renderModelsModalList(k) {
@@ -4395,6 +4653,13 @@ function renderModelsModalList(k) {
     var enabled = !disabled.has(mid);
     var isPrimary = checkModel && mid === checkModel;
     var mh = healthMap[mid] || {};
+    var cap = (k.endpoint_capabilities || {})[mid] || {};
+    var endpointChecks = cap.checks || {};
+    var endpointCandidates = _modelEndpointCandidates(k, mid);
+    var detected = new Set(cap.detected || []);
+    var selectedEndpoints = new Set(cap.selected || []);
+    var endpointMode = String(cap.mode || 'auto').toLowerCase();
+    var quality = (k.quality_scores || {})[mid] || {};
     var hClass = mh.healthy === true ? 'ok' : mh.healthy === false ? 'fail' : 'unknown';
     var hText = mh.healthy === true ? _('health.healthy')
       : mh.healthy === false ? (mh.error || _('health.unhealthy'))
@@ -4405,8 +4670,9 @@ function renderModelsModalList(k) {
     row.innerHTML = [
       '<div class="model-row-main">',
         '<span class="dot ' + (mh.healthy === true ? 'healthy' : mh.healthy === false ? 'unhealthy' : 'unknown') + '"></span>',
-        '<code class="model-id">' + esc(mid) + '</code>',
+        '<code class="model-id" title="' + esc(mid) + '">' + esc(mid) + '</code>',
         (isPrimary ? '<span class="badge badge-ok" style="margin-left:6px">' + esc(_('keyModal.checkModelBadge') || 'Check') + '</span>' : ''),
+        (quality.score != null ? '<span class="quality-inline-score" title="' + esc(_('quality.score') || 'Quality score') + '">' + Number(quality.score) + '</span>' : ''),
         '<span class="model-health ' + hClass + '" title="' + esc(hText) + '">' + esc(hText) + (latency ? ' · ' + latency : '') + '</span>',
       '</div>',
       '<div class="model-row-actions">',
@@ -4418,6 +4684,21 @@ function renderModelsModalList(k) {
           '<span>' + (enabled ? _('modelsModal.synced') : _('modelsModal.notSynced')) + '</span>',
         '</label>',
         '<button class="btn btn-sm" onclick="checkSingleModel(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">' + _('action.check') + '</button>',
+        '<button class="btn btn-sm" onclick="checkModelQuality(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">' + esc(_('quality.evaluate') || 'Evaluate quality') + '</button>',
+      '</div>',
+      '<div class="model-endpoints" data-endpoint-model="' + esc(mid) + '">',
+        '<span class="form-hint">Endpoint:</span>',
+        '<select class="model-endpoint-mode" onchange="setModelEndpointMode(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\', this.value)">',
+          '<option value="auto" ' + (endpointMode === 'auto' ? 'selected' : '') + '>Auto detected</option>',
+          '<option value="manual" ' + (endpointMode === 'manual' ? 'selected' : '') + '>Manual selection</option>',
+        '</select>',
+        endpointCandidates.map(function(ep) {
+          var ck = endpointChecks[ep] || {};
+          var stateClass = ck.healthy === true ? 'endpoint-ok' : ck.healthy === false ? 'endpoint-fail' : 'endpoint-unknown';
+          var stateLabel = ck.healthy === true ? (_('quality.supported') || 'Supported') : ck.healthy === false ? (_('quality.unsupported') || 'Unsupported') : (_('health.notChecked') || 'Not checked');
+          return '<label class="model-endpoint-option ' + stateClass + '" title="' + esc(ck.error || ck.message || stateLabel) + '"><input type="checkbox" value="' + esc(ep) + '" ' + (selectedEndpoints.has(ep) ? 'checked' : '') + ' ' + (endpointMode === 'auto' ? 'disabled' : '') + ' onchange="setModelEndpointSelection(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')"><span>' + esc(_endpointLabel(ep)) + '</span><strong>' + esc(stateLabel) + '</strong></label>';
+        }).join(''),
+        '<button class="btn btn-sm" onclick="checkModelEndpoints(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">Check endpoints</button>',
       '</div>',
     ].join('');
     list.appendChild(row);
@@ -4514,19 +4795,25 @@ function closeModelsModal() {
 }
 
 async function checkKeyModels(vendorId, keyId) {
+  var taskId = createTask({ type: 'detect', title: _('action.checking') || 'Checking models', detail: 'Checking models and compatible endpoints', cur: 0, total: 1 });
   showToast(_('action.checking'), 'info');
   try {
     var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/check-models', { method: 'POST' });
     if (res.error) {
+      completeTask(taskId, { error: res.error, detail: res.error, cur: 1, total: 1 });
       showToast(res.error, 'error');
       return res;
     }
     showToast(_('toast.checkModelsDone')
       .replace('{ok}', res.ok || 0)
       .replace('{fail}', res.fail || 0), (res.fail || 0) > 0 ? 'error' : 'success');
+    var status = (res.fail || 0) === 0 ? 'success' : ((res.ok || 0) === 0 ? 'error' : 'partial');
+    var detail = _('toast.checkModelsDone').replace('{ok}', res.ok || 0).replace('{fail}', res.fail || 0);
+    completeTask(taskId, { status: status, error: status === 'error' ? detail : '', detail: detail, cur: 1, total: 1 });
     await selectVendor(vendorId);
     return res;
   } catch (e) {
+    completeTask(taskId, { error: String(e && e.message || e), detail: String(e && e.message || e), cur: 1, total: 1 });
     showToast(String(e), 'error');
   }
 }
@@ -4545,16 +4832,81 @@ async function checkKeyModelsFromModal() {
   }
 }
 
+async function checkModelQuality(vendorId, keyId, modelId) {
+  var title = (_('quality.evaluating') || 'Evaluating quality') + ': ' + modelId;
+  var taskId = createTask({ type: 'quality', title: title, detail: _('quality.costNote') || 'Runs four short benchmark requests', cur: 0, total: 4 });
+  try {
+    var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/models/' + encodeURIComponent(modelId) + '/quality', { method: 'POST' });
+    var detail = (_('quality.result') || 'Score {score}, {correct}/{total} correct, {latency}ms')
+      .replace('{score}', res.score != null ? res.score : 0)
+      .replace('{correct}', res.correct != null ? res.correct : 0)
+      .replace('{total}', res.total != null ? res.total : 0)
+      .replace('{latency}', res.avg_latency_ms != null ? res.avg_latency_ms : 0);
+    var status = (res.correct || 0) === (res.total || 0) ? 'success' : ((res.correct || 0) ? 'partial' : 'error');
+    completeTask(taskId, { status: status, error: status === 'error' ? detail : '', detail: detail, cur: 4, total: 4 });
+    showToast(detail, status === 'success' ? 'success' : 'error');
+    await selectVendor(vendorId);
+    var vendor = (_allVendorsData || []).find(function(v) { return v.id === vendorId; });
+    var key = vendor && (vendor.keys || []).find(function(k) { return k.id === keyId; });
+    if (key) renderModelsModalList(key);
+    if ($('view-quality') && $('view-quality').classList.contains('active')) loadQualityInspection();
+    return res;
+  } catch (e) {
+    var err = String(e && e.message || e);
+    completeTask(taskId, { error: err, detail: err, cur: 4, total: 4 });
+    showToast(err, 'error');
+  }
+}
+
+async function checkKeyQualityFromModal() {
+  var vendorId = _modelsModalCtx.vendorId;
+  var keyId = _modelsModalCtx.keyId;
+  if (!vendorId || !keyId) return;
+  var vendor = (_allVendorsData || []).find(function(v) { return v.id === vendorId; });
+  var key = vendor && (vendor.keys || []).find(function(k) { return k.id === keyId; });
+  var models = (key && key.models || []).map(_modelId).filter(Boolean);
+  var taskId = createTask({ type: 'quality', title: _('quality.evaluatingKey') || 'Evaluating all usable models', detail: _('quality.costNote') || 'Runs four short requests per model', cur: 0, total: Math.max(1, models.length * 4) });
+  var btn = $('modelsQualityBtn');
+  if (btn) btn.disabled = true;
+  try {
+    var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/quality', { method: 'POST' });
+    var detail = (_('quality.keyResult') || '{ok} models evaluated, {fail} failed').replace('{ok}', res.ok || 0).replace('{fail}', res.fail || 0);
+    completeTask(taskId, { status: res.fail ? (res.ok ? 'partial' : 'error') : 'success', error: res.fail && !res.ok ? detail : '', detail: detail, cur: Math.max(1, models.length * 4), total: Math.max(1, models.length * 4) });
+    showToast(detail, res.fail ? 'error' : 'success');
+    await selectVendor(vendorId);
+    var refreshed = (_allVendorsData || []).find(function(v) { return v.id === vendorId; });
+    var refreshedKey = refreshed && (refreshed.keys || []).find(function(k) { return k.id === keyId; });
+    if (refreshedKey) renderModelsModalList(refreshedKey);
+    if ($('view-quality') && $('view-quality').classList.contains('active')) loadQualityInspection();
+  } catch (e) {
+    var err = String(e && e.message || e);
+    completeTask(taskId, { error: err, detail: err });
+    showToast(err, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function checkSingleModel(vendorId, keyId, modelId) {
   // Re-run full per-model check for accuracy (backend removes failed from engines)
   showToast(_('action.checking') + ': ' + modelId, 'info');
-  var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/check-models', { method: 'POST' });
-  if (res.error) showToast(res.error, 'error');
+  var taskId = createTask({ type: 'detect', title: (_('action.checking') || 'Checking') + ': ' + modelId, detail: 'Checking model and compatible endpoints', cur: 0, total: 1 });
+  var res;
+  try {
+    res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/check-models', { method: 'POST' });
+  } catch (e) {
+    var requestErr = String(e && e.message || e);
+    completeTask(taskId, { error: requestErr, detail: requestErr, cur: 1, total: 1 });
+    showToast(requestErr, 'error');
+    return;
+  }
+  if (res.error) { completeTask(taskId, { error: res.error, detail: res.error, cur: 1, total: 1 }); showToast(res.error, 'error'); }
   else {
     var hit = (res.results || []).find(function(r) { return r.model === modelId; });
-    if (hit && hit.healthy) showToast(_('toast.checkOk') + ': ' + modelId, 'success');
+    if (hit && hit.healthy) { completeTask(taskId, { detail: modelId + ' OK', cur: 1, total: 1 }); showToast(_('toast.checkOk') + ': ' + modelId, 'success'); }
     else {
       var failRes = hit || { error: 'failed', healthy: false };
+      completeTask(taskId, { error: failRes.error || 'failed', detail: (failRes.error || 'failed') + ': ' + modelId, cur: 1, total: 1 });
       showToast(formatHealthFailToast(failRes) + ': ' + modelId, 'error', { duration: 8000 });
     }
   }
@@ -4794,9 +5146,9 @@ function renderBatchPreview() {
       + 'placeholder="https://..." oninput="_markBatchDirty()" title="' + esc(e.api_url || '') + '"></td>'
       + '<td class="col-key"><input class="batch-key" type="text" value="' + esc(e.api_key || '') + '" '
       + 'placeholder="sk-..." oninput="_markBatchDirty();renderBatchPreview()" spellcheck="false" autocomplete="off"></td>'
-      + '<td><select class="batch-endpoint" onchange="_markBatchDirty()">'
-      + '<option value="openai"' + (e.endpoint_type !== 'anthropic' ? ' selected' : '') + '>' + esc(_('endpoint.openaiShort') || 'OpenAI') + '</option>'
-      + '<option value="anthropic"' + (e.endpoint_type === 'anthropic' ? ' selected' : '') + '>' + esc(_('endpoint.anthropic') || 'Anthropic') + '</option>'
+      + '<td><select class="batch-endpoint" onchange="_markBatchDirty()" title="Legacy import hint; models are checked after import">'
+      + '<option value="openai"' + (e.endpoint_type !== 'anthropic' ? ' selected' : '') + '>' + esc(_('endpoint.openaiShort') || 'OpenAI') + ' (auto-detect)</option>'
+      + '<option value="anthropic"' + (e.endpoint_type === 'anthropic' ? ' selected' : '') + '>' + esc(_('endpoint.anthropic') || 'Anthropic') + ' (compatibility hint)</option>'
       + '</select></td>'
       + '<td>' + statusHtml + '</td>'
       + '<td class="batch-row-actions">'
@@ -4860,6 +5212,7 @@ async function parseBatchImport(force) {
 
   var parseBtn = $('batchParseBtn');
   var showBusy = !!force;
+  var parseTaskId = showBusy ? createTask({ type: 'detect', title: _('batchImport.parsing') || 'Parsing…', detail: _('batchImport.parsingHint') || 'Recognizing vendors and keys…', cur: 0, total: 1 }) : null;
   if (showBusy) {
     setButtonLoading(parseBtn, true, _('batchImport.parsing') || 'Parsing…');
     showGlobalLoading(_('batchImport.parsing') || 'Parsing…', _('batchImport.parsingHint') || 'Recognizing vendors and keys…');
@@ -4867,6 +5220,7 @@ async function parseBatchImport(force) {
   try {
     const res = await api('/api/batch/parse', { method: 'POST', body: JSON.stringify({ text: text }) });
     if (res.error) {
+      if (parseTaskId) completeTask(parseTaskId, { error: res.error, detail: res.error, cur: 1, total: 1 });
       $('batchImportError').textContent = res.error;
       $('batchImportError').style.display = '';
       return;
@@ -4882,6 +5236,7 @@ async function parseBatchImport(force) {
     });
 
     if (!parsed.length) {
+      if (parseTaskId) completeTask(parseTaskId, { error: _('batchImport.noEntries') || 'No entries', detail: _('batchImport.noEntries') || 'No entries', cur: 1, total: 1 });
       if (force) {
         showToast(_('batchImport.noEntries'), 'error');
         // still show empty editable row for manual fill
@@ -4896,12 +5251,17 @@ async function parseBatchImport(force) {
     }
 
     _batchEntries = parsed;
+    if (parseTaskId) completeTask(parseTaskId, { detail: (_('batchImport.parsed') || 'Recognized {n} entr(y/ies)').replace('{n}', parsed.length), cur: 1, total: 1 });
     _batchDirty = false;
     _batchAutoParse = true;
     renderBatchPreview();
     if (force) {
       showToast((_('batchImport.parsed') || 'Recognized {n} entr(y/ies)').replace('{n}', parsed.length), 'success');
     }
+  } catch (e) {
+    var parseErr = String(e && e.message || e);
+    if (parseTaskId) completeTask(parseTaskId, { error: parseErr, detail: parseErr, cur: 1, total: 1 });
+    if (force) showToast(parseErr, 'error');
   } finally {
     if (showBusy) {
       setButtonLoading(parseBtn, false);
@@ -4998,6 +5358,7 @@ async function applyBatchImport() {
     }
     if (importTaskId) {
       completeTask(importTaskId, {
+        status: errN ? (imported ? 'partial' : 'error') : 'success',
         detail: msg,
         cur: payload.length,
         total: payload.length,
@@ -5166,13 +5527,16 @@ async function confirmPushToBackends() {
   var btn = $('pushPreviewConfirmBtn');
   if (btn) btn.disabled = true;
   showToast(_('action.checking') || 'Working...', 'info');
+  var taskId = createTask({ type: 'sync', title: _('sync.pushing') || 'Syncing backends…', detail: _('sync.pushing') || 'Syncing backends…', cur: 0, total: 1 });
   var res = await api('/api/sync/push', { method: 'POST' });
   closePushPreviewModal();
   if (res.error) {
+    completeTask(taskId, { error: res.error, detail: res.error, cur: 1, total: 1 });
     showToast(res.error, 'error');
     return;
   }
   var msg = res.message || (_('sync.pushDone') || 'Pushed to backends');
+  completeTask(taskId, { status: res.fail > 0 ? (res.ok > 0 ? 'partial' : 'error') : 'success', error: res.fail > 0 && !res.ok ? msg : '', detail: msg, cur: 1, total: 1 });
   showToast(msg, (res.fail > 0) ? 'error' : 'success');
   if (typeof loadLastPushPanel === 'function') loadLastPushPanel();
   if (typeof loadBackends === 'function' && document.querySelector('#view-backends.active')) loadBackends();
@@ -5482,7 +5846,8 @@ async function loadLastPushPanel() {
       st = r.ok ? (_('health.healthy') || 'ok') : (_('health.unhealthy') || 'fail');
     }
     var err = r.error ? (' — ' + r.error) : '';
-    lines.push('<li><strong>' + esc(name) + '</strong>: ' + esc(st) + esc(err) + '</li>');
+    var runtime = r.runtime_message ? (' — ' + r.runtime_message) : '';
+    lines.push('<li><strong>' + esc(name) + '</strong>: ' + esc(st) + esc(err) + esc(runtime) + '</li>');
   });
   el.innerHTML =
     '<div class="last-push-title">' + esc(_('sync.lastPush') || 'Last push to backends') +
@@ -7230,17 +7595,31 @@ async function healthMonitorResume() {
 async function healthRunNow() {
   var btn = $('hmRunNowBtn');
   if (btn) btn.disabled = true;
+  var taskId = createTask({ type: 'health', title: _('health.running') || 'Running full check…', detail: _('health.running') || 'Running full check…', cur: 0, total: 1 });
   showToast(_('health.running') || 'Running full check…', 'info');
-  var res = await api('/api/health/monitor/run', { method: 'POST', body: JSON.stringify({ source: 'manual' }) });
-  if (btn) btn.disabled = false;
-  if (res.error || res.success === false) {
-    showToast(res.error || (_('health.busy') || 'Busy'), 'error');
+  var res;
+  try {
+    res = await api('/api/health/monitor/run', { method: 'POST', body: JSON.stringify({ source: 'manual' }) });
+    if (res.error || res.success === false) {
+      var err = res.error || (_('health.busy') || 'Busy');
+      completeTask(taskId, { error: err, detail: err, cur: 1, total: 1 });
+      showToast(err, 'error');
+      return;
+    }
+  } catch (e) {
+    var requestErr = String(e && e.message || e);
+    completeTask(taskId, { error: requestErr, detail: requestErr, cur: 1, total: 1 });
+    showToast(requestErr, 'error');
     return;
+  } finally {
+    if (btn) btn.disabled = false;
   }
   var s = res.summary || {};
-  showToast((_('health.runDone') || 'Done: {ok} ok, {fail} fail')
+  var detail = (_('health.runDone') || 'Done: {ok} ok, {fail} fail')
     .replace('{ok}', s.ok != null ? s.ok : 0)
-    .replace('{fail}', s.fail != null ? s.fail : 0), 'success');
+    .replace('{fail}', s.fail != null ? s.fail : 0);
+  completeTask(taskId, { status: s.fail ? (s.ok ? 'partial' : 'error') : 'success', error: s.fail && !s.ok ? detail : '', detail: detail, cur: 1, total: 1 });
+  showToast(detail, s.fail ? 'error' : 'success');
   loadHealthMonitor();
 }
 

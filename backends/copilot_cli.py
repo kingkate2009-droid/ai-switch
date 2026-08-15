@@ -51,7 +51,9 @@ class CopilotCliAdapter(BackendAdapter):
             json.dump(settings, f, indent=2)
 
     def on_key_removed(self, vendor: dict, key: dict) -> None:
-        other = self.pick_syncable_key()
+        other = self.pick_syncable_key(
+            exclude=(str(vendor.get("id") or ""), str(key.get("id") or "")),
+        )
         if other and other[1].get("id") != key.get("id"):
             self.on_key_added(other[0], other[1])
             return

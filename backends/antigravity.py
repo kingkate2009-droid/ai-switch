@@ -45,7 +45,10 @@ class AntigravityAdapter(BackendAdapter):
     def on_key_removed(self, vendor: dict, key: dict) -> None:
         if vendor.get("provider", "").lower() != "google":
             return
-        other = self.pick_syncable_key(providers={"google", "gemini"})
+        other = self.pick_syncable_key(
+            providers={"google", "gemini"},
+            exclude=(str(vendor.get("id") or ""), str(key.get("id") or "")),
+        )
         if other and other[1].get("id") != key.get("id"):
             self.on_key_added(other[0], other[1])
             return

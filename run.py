@@ -41,26 +41,18 @@ def _open_browser(url: str) -> None:
 
 
 if __name__ == "__main__":
-    default_port = int(os.environ.get("AI_SWITCH_PORT", "8787"))
+    port = int(os.environ.get("AI_SWITCH_PORT", "8787"))
     host = os.environ.get("AI_SWITCH_HOST", "127.0.0.1")
-    port = default_port
     version = get_version()
-    for _ in range(20):
-        try:
-            url = f"http://{host}:{port}"
-            print(f"AI Switch v{version}")
-            print(f"Running at {url}")
-            if os.environ.get("AI_SWITCH_OPEN_BROWSER", "1").lower() in ("1", "true", "yes"):
-                threading.Timer(0.8, _open_browser, args=(url,)).start()
-            app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
-            break
-        except OSError:
-            print(f"Port {port} is already in use.")
-            print(f"  → Trying next port {port + 1}...")
-            print(f"  Tip: stop the other process, or start with AI_SWITCH_PORT={port + 1}")
-            port += 1
-
-    print("")
-    print("Could not start: no free port found in range.")
-    print("Set a free port explicitly, e.g.:")
-    print("  AI_SWITCH_PORT=8790 python3 run.py")
+    url = f"http://{host}:{port}"
+    print(f"AI Switch v{version}")
+    print(f"Running at {url}")
+    if os.environ.get("AI_SWITCH_OPEN_BROWSER", "1").lower() in ("1", "true", "yes"):
+        threading.Timer(0.8, _open_browser, args=(url,)).start()
+    try:
+        app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
+    except OSError as e:
+        print(f"Port {port} is already in use.")
+        print(f"Stop the other process or set a different port:")
+        print(f"  AI_SWITCH_PORT=8790 python3 run.py")
+        sys.exit(1)
