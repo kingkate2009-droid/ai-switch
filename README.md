@@ -125,10 +125,10 @@ Requires **Python 3.9+** for source/npm installs.
 Only three outcomes matter day-to-day:
 
 1. **One place for keys** — vendors, tags, batch import, MetaAPI merge, dedupe  
-2. **Know what’s alive** — model-level endpoint detection, quality checks, readable errors, adaptive interval
+2. **Know what’s alive** — model-level endpoint detection, quality checks, readable errors, adaptive interval, **archive of dead keys**
 3. **Safe sync** — verified models only · preview · primary/backup failover · never write to uninstalled tools
 
-Also included when you need them: check-in URLs, budgets, encrypted profile export, diagnostics pack, downstream routes, desktop packages.
+Also included when you need them: **vendor types (Public/Relay/Raw key)** with filtering in the model catalog & check-in, **archiving** (hide + exclude from health checks + restore), check-in URLs, budgets, encrypted profile export, diagnostics pack, downstream routes, desktop packages.
 
 <details>
 <summary><strong>Feature list (expand)</strong></summary>
@@ -137,6 +137,8 @@ Also included when you need them: check-in URLs, budgets, encrypted profile expo
 - 26+ built-in providers + custom OpenAI-compatible endpoints  
 - Per-model endpoint detection (Chat, Responses, Messages, Gemini) with auto/manual selection
 - Vendor-grouped quality checks with per-vendor and per-model actions
+- **Vendor types (Public/Relay/Raw key) with filtering in catalog & check-in**
+- **Archive view: hide dead vendors/keys everywhere, exclude from health checks, restore anytime**
 - Health monitor (scheduled), auto-disable / primary-backup failover (optional)
 - Sync to OpenClaw, OpenCode, Claude Code, Codex, Cline, Aider, Continue, …  
 - Batch / backup / MetaAPI import with undo  
@@ -163,7 +165,7 @@ Also included when you need them: check-in URLs, budgets, encrypted profile expo
 - [#1 Install & start](https://github.com/kingkate2009-droid/ai-switch/issues/1)
 - [#2 Codex connectivity](https://github.com/kingkate2009-droid/ai-switch/issues/2)
 - [#3 Import & merge](https://github.com/kingkate2009-droid/ai-switch/issues/3)
-- Latest: [v2.2.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.2.0) · [notes](docs/release-notes-2.2.0.md)
+- Latest: [v2.3.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.3.0) · [notes](docs/release-notes-2.3.0.md)
 
 ---
 
@@ -206,7 +208,7 @@ Endpoint support is detected per model. Automatic mode uses verified endpoints; 
 # Local package
 bash scripts/build_package.sh
 # Multi-platform release via CI
-./release.sh v2.2.0
+./release.sh v2.3.0
 ```
 
 ---

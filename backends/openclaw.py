@@ -607,8 +607,10 @@ class OpenClawAdapter(BackendAdapter):
         new_order = {}
         new_defaults = {}
 
-        from core.health_checker import is_key_backend_syncable
+        from core.health_checker import get_health_cache_snapshot, is_key_backend_syncable
 
+        health_cache = get_health_cache_snapshot()
+        self._health_cache_snap = health_cache
         for v in vendors:
             pname = v["provider"]
             api_type = self._get_api_type_for_vendor(v)
@@ -616,7 +618,7 @@ class OpenClawAdapter(BackendAdapter):
                 if not k.get("enabled", True) or not k.get("api_key"):
                     continue
                 # Failed health checks must not remain in OpenClaw config
-                if not is_key_backend_syncable(v["id"], k):
+                if not is_key_backend_syncable(v["id"], k, cache=health_cache):
                     continue
                 if not self.should_sync(v, k):
                     continue

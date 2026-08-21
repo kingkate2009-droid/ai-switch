@@ -525,8 +525,11 @@ class BackendAdapter:
         except Exception:
             return False
         try:
-            from core.health_checker import is_key_backend_syncable
-            if not is_key_backend_syncable(str(vendor.get("id") or ""), key):
+            from core.health_checker import is_key_backend_syncable, get_health_cache_snapshot
+            cache = getattr(self, "_health_cache_snap", None)
+            if cache is None:
+                cache = get_health_cache_snapshot()
+            if not is_key_backend_syncable(str(vendor.get("id") or ""), key, cache=cache):
                 return False
         except Exception:
             pass
@@ -538,6 +541,16 @@ class BackendAdapter:
         if not vendor_allowed:
             return False
 
+        # Scoped reconcile (single-key / single-vendor push): skip any vendor
+        # that is not in the active push scope.
+        try:
+            from backends import _scope_vendor_ids
+            scope = _scope_vendor_ids()
+            if scope is not None and str(vendor.get("id") or "") not in scope:
+                return False
+        except Exception:
+            pass
+
         # A key can contain models with different endpoint capabilities.  A
         # backend is syncable only when at least one enabled model has an
         # endpoint that this backend can express.  Keys without an inventory
@@ -546,9 +559,10 @@ class BackendAdapter:
             from core.data import get_enabled_models, list_model_ids
             from core.endpoints import model_supports_backend
             model_ids = get_enabled_models(key)
+            # Cap: finding one supported model is enough for should_sync
             if model_ids and not any(
                 model_supports_backend(vendor, key, mid, self.name)
-                for mid in model_ids
+                for mid in model_ids[:40]
             ):
                 return False
         except Exception:
@@ -580,14 +594,15 @@ class BackendAdapter:
         stripped on reconcile even when health_auto_disable left enabled=True.
         """
         from core.data import get_vendors
-        from core.health_checker import is_key_backend_syncable
+        from core.health_checker import get_health_cache_snapshot, is_key_backend_syncable
 
+        cache = get_health_cache_snapshot()
         for v in get_vendors():
             vid = str(v.get("id") or "")
             for k in v.get("keys") or []:
                 if not k.get("api_key") or k.get("enabled") is False:
                     continue
-                if not is_key_backend_syncable(vid, k):
+                if not is_key_backend_syncable(vid, k, cache=cache):
                     continue
                 yield v, k
 

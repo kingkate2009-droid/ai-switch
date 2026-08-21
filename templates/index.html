@@ -81,6 +81,10 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           <span data-i18n="nav.checkin">{{ t('nav.checkin') }}</span>
         </a>
+        <a href="#" class="nav-item" data-view="archived" onclick="switchView('archived');return false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><path d="M3 4h18v4H3z"/><path d="M10 12h4"/></svg>
+          <span data-i18n="nav.archived">{{ t('nav.archived') }}</span>
+        </a>
       </div>
       <div class="nav-group">
         <span class="nav-group-label" data-i18n="nav.groupSystem">{{ t('nav.groupSystem') }}</span>
@@ -296,6 +300,7 @@
             <div class="detail-head">
               <div class="detail-head-left">
                 <h3 id="detailVendorName"></h3>
+                <span id="detailVendorType" class="badge" style="display:none;margin-left:10px"></span>
                 <code id="detailVendorUrl" class="detail-url"></code>
                 <button class="btn-icon" onclick="copyText(_currentVendor.api_url)" title="{{ t('common.copyUrl') }}" data-i18n-title="common.copyUrl"><svg width="14" height="14"><use href="#ico-copy"/></svg></button>
               </div>
@@ -306,6 +311,7 @@
                 </button>
                 <button class="btn btn-sm" onclick="copyVendorImportText()" style="display:none" id="copyImportTextBtn" data-i18n="vendorList.copyImportText">{{ t('vendorList.copyImportText') }}</button>
                 <button class="btn btn-sm" onclick="editVendor()" style="display:none" id="editVendorBtn" data-i18n="action.edit">{{ t('action.edit') }}</button>
+                <button id="archiveVendorBtn" class="btn btn-sm" onclick="archiveVendorCurrent()" style="display:none" data-i18n="vendorList.archive">{{ t('vendorList.archive') }}</button>
                 <button id="deleteVendorBtn" class="btn btn-sm btn-danger" onclick="deleteVendor()" style="display:none">{{ t('vendorList.deleteVendor') }}</button>
               </div>
             </div>
@@ -599,6 +605,15 @@
         </div>
         <div class="page-actions">
           <input type="text" id="modelsCatalogSearch" class="page-search" data-i18n-placeholder="models.searchPh" placeholder="{{ t('models.searchPh') }}" oninput="filterModelsCatalog()">
+          <select id="modelsCatalogEndpoint" class="page-search" style="max-width:180px" onchange="filterModelsCatalog()" title="{{ t('models.filterEndpoint') }}">
+            <option value="" data-i18n="models.filterAllEndpoints">{{ t('models.filterAllEndpoints') }}</option>
+          </select>
+          <select id="modelsCatalogType" class="page-search" style="max-width:140px" onchange="loadModelsCatalog()" title="{{ t('models.filterType') }}">
+            <option value="" data-i18n="models.filterAllTypes">{{ t('models.filterAllTypes') }}</option>
+            <option value="public" data-i18n="vendorType.public">{{ t('vendorType.public') }}</option>
+            <option value="relay" data-i18n="vendorType.relay">{{ t('vendorType.relay') }}</option>
+            <option value="key" data-i18n="vendorType.key">{{ t('vendorType.key') }}</option>
+          </select>
           <label class="checkbox-label models-hide-unavailable"><input type="checkbox" id="modelsHideUnavailable" onchange="onModelsHideUnavailableChange()"> <span data-i18n="models.hideUnavailable">{{ t('models.hideUnavailable') }}</span></label>
           <button class="btn" onclick="loadModelsCatalog()">
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
@@ -612,6 +627,7 @@
           <table id="modelsCatalogTable" class="models-catalog-table">
             <colgroup>
               <col class="col-model-name">
+              <col class="col-model-endpoint">
               <col class="col-model-keys">
               <col class="col-model-vendors">
               <col class="col-model-enabled">
@@ -620,6 +636,7 @@
             <thead>
               <tr>
                 <th data-i18n="models.colModel">{{ t('models.colModel') }}</th>
+                <th data-i18n="models.colEndpoint">{{ t('models.colEndpoint') }}</th>
                 <th data-i18n="models.colKeys">{{ t('models.colKeys') }}</th>
                 <th data-i18n="models.colVendors">{{ t('models.colVendors') }}</th>
                 <th data-i18n="models.colEnabled">{{ t('models.colEnabled') }}</th>
@@ -627,7 +644,7 @@
               </tr>
             </thead>
             <tbody id="modelsCatalogBody">
-              <tr><td colspan="5" class="todo-empty" data-i18n="common.loading">{{ t('common.loading') }}</td></tr>
+              <tr><td colspan="6" class="todo-empty" data-i18n="common.loading">{{ t('common.loading') }}</td></tr>
             </tbody>
           </table>
         </div>
@@ -725,9 +742,13 @@
           </div>
           <div class="form-group">
             <label data-i18n="routes.endpoints">{{ t('routes.endpoints') }}</label>
-            <div class="checkbox-row">
+            <div class="checkbox-row" style="flex-wrap:wrap;gap:8px 16px">
               <label class="checkbox-label"><input type="checkbox" id="dsEpOpenai" checked> OpenAI <code>/v1/chat/completions</code></label>
               <label class="checkbox-label"><input type="checkbox" id="dsEpAnthropic"> Anthropic <code>/v1/messages</code></label>
+              <label class="checkbox-label"><input type="checkbox" id="dsEpImage"> Image <code>/v1/images/*</code></label>
+              <label class="checkbox-label"><input type="checkbox" id="dsEpVideo"> Video <code>/v1/videos*</code></label>
+              <label class="checkbox-label"><input type="checkbox" id="dsEpAudio"> Audio <code>/v1/audio/*</code></label>
+              <label class="checkbox-label"><input type="checkbox" id="dsEpTranslation"> Translation <code>/v1/audio/translations</code></label>
             </div>
           </div>
           <label class="checkbox-label" style="margin:8px 0">
@@ -784,6 +805,12 @@
               <option value="yes" data-i18n="checkin.filterSupportYes">{{ t('checkin.filterSupportYes') }}</option>
               <option value="no" data-i18n="checkin.filterSupportNo">{{ t('checkin.filterSupportNo') }}</option>
             </select>
+            <select id="checkinTypeFilter" onchange="renderCheckinTable()">
+              <option value="" data-i18n="checkin.filterAllTypes">{{ t('checkin.filterAllTypes') }}</option>
+              <option value="public" data-i18n="vendorType.public">{{ t('vendorType.public') }}</option>
+              <option value="relay" data-i18n="vendorType.relay">{{ t('vendorType.relay') }}</option>
+              <option value="key" data-i18n="vendorType.key">{{ t('vendorType.key') }}</option>
+            </select>
           </div>
           <div class="key-toolbar-right">
             <span class="batch-count" id="checkinSummary">—</span>
@@ -803,6 +830,49 @@
           </table>
         </div>
         <p class="form-hint checkin-hint" data-i18n="checkin.hint">{{ t('checkin.hint') }}</p>
+      </div>
+      </div>
+    </div>
+
+    <!-- ═══ Archived (归档) ═══ -->
+    <div class="view" id="view-archived">
+      <div class="page-head">
+        <div class="page-head-main">
+          <h2 data-i18n="nav.archived">{{ t('nav.archived') }}</h2>
+          <p class="page-desc" data-i18n="archived.pageDesc">{{ t('archived.pageDesc') }}</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" onclick="loadArchivedPage()">
+            <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+            <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
+          </button>
+        </div>
+      </div>
+      <div class="page-body">
+      <div class="dash-section">
+        <div class="key-toolbar checkin-toolbar">
+          <div class="key-toolbar-left">
+            <input type="text" id="archivedSearch" oninput="renderArchivedTable()" data-i18n-placeholder="archived.searchPh" placeholder="{{ t('archived.searchPh') }}">
+          </div>
+          <div class="key-toolbar-right">
+            <span class="batch-count" id="archivedSummary">—</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="archivedTable">
+            <thead>
+              <tr>
+                <th data-i18n="archived.colName">{{ t('archived.colName') }}</th>
+                <th data-i18n="vendorModal.type">{{ t('vendorModal.type') }}</th>
+                <th data-i18n="archived.colKind">{{ t('archived.colKind') }}</th>
+                <th data-i18n="archived.colProvider">{{ t('archived.colProvider') }}</th>
+                <th data-i18n="archived.colUrl">{{ t('archived.colUrl') }}</th>
+                <th data-i18n="table.actions">{{ t('table.actions') }}</th>
+              </tr>
+            </thead>
+            <tbody id="archivedBody"></tbody>
+          </table>
+        </div>
       </div>
       </div>
     </div>
@@ -1013,6 +1083,11 @@
                 <span class="form-hint" style="margin:0;padding:8px" data-i18n="settings.seconds">{{ t('settings.seconds') }}</span>
               </div>
             </div>
+            <div class="form-group form-group-wide">
+              <label data-i18n="settings.archiveStreakDays">{{ t('settings.archiveStreakDays') }}</label>
+              <input type="number" id="setHealthArchiveStreakDays" min="0" max="365" step="1" value="10" onchange="onSettingsDirty()" oninput="onSettingsDirty()">
+              <p class="form-hint" data-i18n="settings.archiveStreakDaysHint">{{ t('settings.archiveStreakDaysHint') }}</p>
+            </div>
           </div>
         </div>
         <div class="settings-card">
@@ -1202,6 +1277,14 @@
         <input type="text" id="vendorName" data-i18n-placeholder="vendorModal.placeholderName" placeholder="{{ t('vendorModal.placeholderName') }}">
       </div>
       <div class="form-group">
+        <label for="vendorTypeSelect" data-i18n="vendorModal.type">{{ t('vendorModal.type') }}</label>
+        <select id="vendorTypeSelect">
+          <option value="public" data-i18n="vendorType.public">{{ t('vendorType.public') }}</option>
+          <option value="relay" data-i18n="vendorType.relay">{{ t('vendorType.relay') }}</option>
+          <option value="key" data-i18n="vendorType.key">{{ t('vendorType.key') }}</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label for="vendorProviderSelect" data-i18n="vendorModal.provider">{{ t('vendorModal.provider') }}</label>
         <select id="vendorProviderSelect" onchange="onProviderSelectChange()">
           <option value="" data-i18n="vendorModal.selectProvider">{{ t('vendorModal.selectProvider') }}</option>
@@ -1242,7 +1325,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeVendorModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
-      <button class="btn btn-primary" onclick="saveVendor()" data-i18n="modal.save">{{ t('modal.save') }}</button>
+      <button class="btn btn-primary" id="vendorSaveBtn" onclick="saveVendor()" data-i18n="modal.save">{{ t('modal.save') }}</button>
     </div>
   </div>
 </div>
@@ -1396,17 +1479,18 @@
 </div>
 
 <div class="modal-overlay" id="pushPreviewModal" onclick="if(event.target===this)closePushPreviewModal()">
-  <div class="modal modal-wide" onclick="event.stopPropagation()">
+  <div class="modal modal-wide push-preview-modal" onclick="event.stopPropagation()" style="width:min(960px,96vw);max-width:96vw">
     <div class="modal-header">
       <h3 data-i18n="sync.pushPreviewTitle">{{ t('sync.pushPreviewTitle') }}</h3>
       <button class="btn-close" onclick="closePushPreviewModal()">&times;</button>
     </div>
     <div class="modal-body">
       <p class="form-hint" data-i18n="sync.pushPreviewDesc">{{ t('sync.pushPreviewDesc') }}</p>
+      <p class="form-hint" id="pushPreviewKeysHint" style="display:none"></p>
       <div class="batch-toolbar" id="pushPreviewToolbar" style="display:none">
         <span class="batch-toolbar-hint" id="pushPreviewSummary"></span>
       </div>
-      <div class="batch-table-scroll" id="pushPreviewTableWrap">
+      <div class="batch-table-scroll" id="pushPreviewTableWrap" style="max-height:min(60vh,520px)">
         <p style="color:var(--text3);padding:16px" data-i18n="common.loading">{{ t('common.loading') }}</p>
       </div>
       <div id="pushPreviewError" class="error-message" style="display:none"></div>
@@ -1526,13 +1610,30 @@ function $(id) { return document.getElementById(id); }
 
 async function loadModelsCatalog() {
   var body = $('modelsCatalogBody');
-  if (body) body.innerHTML = '<tr><td colspan="5" class="todo-empty">' + esc(_('common.loading') || 'Loading...') + '</td></tr>';
-  var res = await api('/api/models/catalog');
+  if (body) body.innerHTML = '<tr><td colspan="6" class="todo-empty">' + esc(_('common.loading') || 'Loading...') + '</td></tr>';
+  var vtype = ($('modelsCatalogType') && $('modelsCatalogType').value) || '';
+  var qs = vtype ? ('?vtype=' + encodeURIComponent(vtype)) : '';
+  var res = await api('/api/models/catalog' + qs);
   if (res.error) {
-    if (body) body.innerHTML = '<tr><td colspan="5" class="todo-empty">' + esc(res.error) + '</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="6" class="todo-empty">' + esc(res.error) + '</td></tr>';
     return;
   }
   _modelsCatalogCache = res.models || [];
+  _modelsCatalogEndpointOptions = res.endpoint_options || [];
+  var sel = $('modelsCatalogEndpoint');
+  if (sel) {
+    var prev = sel.value || '';
+    var opts = ['<option value="">' + esc(_('models.filterAllEndpoints') || 'All endpoints') + '</option>'];
+    (_modelsCatalogEndpointOptions || []).forEach(function(o) {
+      opts.push('<option value="' + esc(o.id) + '">' + esc(o.label || o.id) + '</option>');
+    });
+    // modality shortcuts
+    ;['chat','image','video','audio','translation'].forEach(function(m) {
+      opts.push('<option value="mod:' + m + '">' + esc((_('models.modality.' + m) || m) + ' *') + '</option>');
+    });
+    sel.innerHTML = opts.join('');
+    if (prev) sel.value = prev;
+  }
   var hide = false;
   try { hide = localStorage.getItem('aiswitch_models_hide_unavailable') === '1'; } catch (e) {}
   if ($('modelsHideUnavailable')) $('modelsHideUnavailable').checked = hide;
@@ -1675,6 +1776,8 @@ function filterModelsCatalog() {
   if (!body) return;
   var q = '';
   try { q = (($('modelsCatalogSearch') && $('modelsCatalogSearch').value) || '').trim().toLowerCase(); } catch (e) {}
+  var epFilter = '';
+  try { epFilter = (($('modelsCatalogEndpoint') && $('modelsCatalogEndpoint').value) || '').trim(); } catch (e) {}
   var rows = _modelsCatalogCache || [];
   var hideUnavailable = !!($('modelsHideUnavailable') && $('modelsHideUnavailable').checked);
   if (hideUnavailable) {
@@ -1684,14 +1787,36 @@ function filterModelsCatalog() {
       return copy;
     }).filter(function(m) { return (m.locations || []).length > 0; });
   }
+  if (epFilter) {
+    var chatEps = { openai_chat: 1, openai_responses: 1, anthropic_messages: 1, gemini_generate: 1 };
+    if (epFilter.indexOf('mod:') === 0) {
+      var mod = epFilter.slice(4);
+      rows = rows.filter(function(m) {
+        var mods = m.modalities || [];
+        return m.modality === mod || mods.indexOf(mod) >= 0;
+      });
+    } else {
+      rows = rows.filter(function(m) {
+        var eps = (m.endpoints || []).concat(m.classified_endpoints || []);
+        if (eps.indexOf(epFilter) >= 0) return true;
+        if (chatEps[epFilter]) {
+          if (m.modality === 'chat') return true;
+          for (var i = 0; i < eps.length; i++) if (chatEps[eps[i]]) return true;
+        }
+        var map = { openai_chat: 'chat', openai_responses: 'chat', anthropic_messages: 'chat', gemini_generate: 'chat', openai_images: 'image', openai_videos: 'video', openai_audio: 'audio', openai_translations: 'translation' };
+        return m.modality === map[epFilter];
+      });
+    }
+  }
   if (q) {
     rows = rows.filter(function(m) {
       var loc = (m.locations || []).map(function(l){ return (l.vendor_name || '') + ' ' + (l.key_name || ''); }).join(' ');
-      return (String(m.model || '') + ' ' + loc).toLowerCase().indexOf(q) !== -1;
+      var eps = (m.endpoints || []).join(' ');
+      return (String(m.model || '') + ' ' + loc + ' ' + eps + ' ' + (m.modality || '')).toLowerCase().indexOf(q) !== -1;
     });
   }
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="5" class="todo-empty">' + esc(_('models.empty') || 'No models yet') + '</td></tr>';
+    body.innerHTML = '<tr><td colspan="6" class="todo-empty">' + esc(_('models.empty') || 'No models yet') + '</td></tr>';
     return;
   }
   body.innerHTML = '';
@@ -1706,8 +1831,17 @@ function filterModelsCatalog() {
       var nkeys = l.key_count > 1 ? (' <span class="models-loc-count">×' + l.key_count + '</span>') : '';
       return '<a href="#" class="models-loc-chip' + off + '" title="' + label + '" onclick="openModelLocation(\'' + esc(String(l.vendor_id)).replace(/'/g, "\\'") + '\',\'' + esc(String(l.key_id || '')).replace(/'/g, "\\'") + '\');return false"><span class="models-loc-name">' + label + '</span>' + official + syncState + nkeys + '</a>';
     }).join('');
+    var epSrc = (m.endpoints && m.endpoints.length) ? m.endpoints : (m.classified_endpoints || []);
+    var epLabels = [];
+    var seenEp = {};
+    epSrc.forEach(function(ep) {
+      var lab = _endpointLabel(ep);
+      if (!seenEp[lab]) { seenEp[lab] = 1; epLabels.push(lab); }
+    });
+    if (!epLabels.length && m.modality) epLabels = [(_('models.modality.' + m.modality) || m.modality)];
     tr.innerHTML =
       '<td class="models-name-cell"><code title="' + esc(m.model) + '">' + esc(m.model) + '</code></td>' +
+      '<td class="models-ep-cell"><span class="form-hint" title="' + esc((m.endpoints || []).join(', ')) + '">' + esc(epLabels.join(', ') || '—') + '</span></td>' +
       '<td class="num-cell">' + (m.key_count || 0) + '</td>' +
       '<td class="num-cell">' + (m.vendor_count || 0) + '</td>' +
       '<td class="num-cell">' + (m.enabled_count || 0) + '/' + (m.key_count || 0) + '</td>' +
@@ -2066,7 +2200,7 @@ function renderTaskCenter() {
 
 function switchView(name, opts) {
   opts = opts || {};
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, checkin: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, checkin: 1, archived: 1, diagnostics: 1, settings: 1 };
   if (!allowed[name]) name = 'dashboard';
 
   document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
@@ -2097,6 +2231,7 @@ function switchView(name, opts) {
   if (name === 'routes') loadRoutesPage();
   if (name === 'health') loadHealthMonitor();
   if (name === 'checkin') loadCheckinPage();
+  if (name === 'archived') loadArchivedPage();
   if (name === 'diagnostics') loadDiagnostics();
   if (name === 'settings') loadSettingsPage();
   applyReadOnlyUI();
@@ -2110,15 +2245,16 @@ function getInitialView() {
   var fromStore = '';
   try { fromStore = localStorage.getItem('aiswitch_view') || ''; } catch (e) {}
   var name = fromHash || fromStore || 'dashboard';
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, checkin: 1, archived: 1, diagnostics: 1, settings: 1 };
   return allowed[name] ? name : 'dashboard';
 }
 
 // ── Dashboard ────────────────────────────
 
 async function loadDashboard() {
-  const data = await api('/api/vendors');
-  const backends = await api('/api/backends');
+  const loaded = await Promise.all([api('/api/vendors'), api('/api/backends')]);
+  const data = loaded[0];
+  const backends = loaded[1];
   _allVendorsData = data.vendors || [];
   _allHealthData = data.health || {};
 
@@ -3093,6 +3229,7 @@ function onHideFailedVendorsChange() {
 var _activeTagFilter = '';
 var _readOnlyMode = false;
 var _modelsCatalogCache = [];
+var _modelsCatalogEndpointOptions = [];
 
 function onVendorSearch() {
   renderVendorList();
@@ -3282,19 +3419,30 @@ function classifyHealthErrorCode(err, codeHint) {
   if (codeHint) return String(codeHint);
   var s = (err || '').toLowerCase();
   if (!s) return 'other';
-  if (s.indexOf('auth') >= 0 || s.indexOf('401') >= 0 || s.indexOf('403') >= 0 || s.indexOf('invalid api') >= 0 || s.indexOf('unauthorized') >= 0 || s.indexOf('forbidden') >= 0)
+  // Generic matrix summaries — not model-id failures
+  if (s.indexOf('no compatible endpoint') >= 0 || s.indexOf('no selected endpoint') >= 0 || s === 'no usable model')
+    return 'endpoint';
+  if (s.indexOf('api key expired') >= 0 || s.indexOf('api_key_expired') >= 0 || s.indexOf('invalid api') >= 0 || s.indexOf('auth failed') >= 0 || s.indexOf('unauthorized') >= 0 || s.indexOf('401') >= 0)
     return 'auth';
-  if (s.indexOf('quota') >= 0 || s.indexOf('balance') >= 0 || s.indexOf('insufficient') >= 0 || s.indexOf('billing') >= 0 || s.indexOf('payment') >= 0)
+  if (s.indexOf('403') >= 0 || s.indexOf('forbidden') >= 0) {
+    if (s.indexOf('model') >= 0 || s.indexOf('channel') >= 0 || s.indexOf('group') >= 0 || s.indexOf('not allow') >= 0)
+      return 'model';
+    return 'auth';
+  }
+  if (s.indexOf('quota') >= 0 || s.indexOf('balance') >= 0 || s.indexOf('insufficient') >= 0 || s.indexOf('billing') >= 0 || s.indexOf('payment') >= 0 || s.indexOf('额度') >= 0)
     return 'quota';
-  if (s.indexOf('429') >= 0 || s.indexOf('rate limit') >= 0 || s.indexOf('too many requests') >= 0)
+  if (s.indexOf('429') >= 0 || s.indexOf('rate limit') >= 0 || s.indexOf('too many requests') >= 0 || s.indexOf('rpm exhausted') >= 0)
     return 'rate';
   if (s.indexOf('ssl') >= 0 || s.indexOf('tls') >= 0 || s.indexOf('certificate') >= 0 || s.indexOf('ssleof') >= 0 || s.indexOf('wrong version number') >= 0)
     return 'ssl';
   if (s.indexOf('timeout') >= 0 || s.indexOf('timed out') >= 0)
     return 'timeout';
-  if (s.indexOf('connect') >= 0 || s.indexOf('network') >= 0 || s.indexOf('dns') >= 0 || s.indexOf('refused') >= 0 || s.indexOf('max retries') >= 0 || s.indexOf('httpsconnectionpool') >= 0)
+  if (s.indexOf('connect') >= 0 || s.indexOf('network') >= 0 || s.indexOf('dns') >= 0 || s.indexOf('refused') >= 0 || s.indexOf('max retries') >= 0 || s.indexOf('httpsconnectionpool') >= 0 || s.indexOf('502') >= 0 || s.indexOf('503') >= 0 || s.indexOf('不可用') >= 0)
     return 'network';
-  if (s.indexOf('model') >= 0 || s.indexOf('not found') >= 0 || s.indexOf('compatible') >= 0 || s.indexOf('unsupported') >= 0)
+  if (s.indexOf('responses api not found') >= 0 || s.indexOf('endpoint may only support') >= 0 || s.indexOf('unknown endpoint') >= 0)
+    return 'endpoint';
+  // Real model/channel only — do not match bare "compatible"
+  if (s.indexOf('no compatible model') >= 0 || s.indexOf('model_not_found') >= 0 || s.indexOf('model is not found') >= 0 || s.indexOf('model_not_allowed') >= 0 || s.indexOf('no available channel') >= 0 || s.indexOf('no such model') >= 0 || s.indexOf('channel for model') >= 0 || ((s.indexOf('model') >= 0 || s.indexOf('channel') >= 0) && (s.indexOf('not found') >= 0 || s.indexOf('not allow') >= 0 || s.indexOf('unsupported') >= 0)))
     return 'model';
   return 'other';
 }
@@ -3308,6 +3456,7 @@ function healthErrorLabel(code) {
     network: _('health.reasonNetwork') || 'Network',
     rate: _('health.reasonRate') || 'Rate limited',
     ssl: _('health.reasonSsl') || 'SSL / TLS',
+    endpoint: _('health.reasonEndpoint') || 'Endpoint issue',
     other: _('health.reasonOther') || 'Other',
   };
   return map[code] || map.other;
@@ -3323,6 +3472,7 @@ function healthErrorSuggestion(code, serverSuggestion) {
     network: _('health.hintNetwork') || 'Check internet, DNS, firewall, and proxy.',
     rate: _('health.hintRate') || 'Slow down or switch to another key.',
     ssl: _('health.hintSsl') || 'Check proxy/MITM, system time, and HTTPS URL.',
+    endpoint: _('health.hintEndpoint') || 'See endpoint probe details for the real cause.',
     other: _('health.hintOther') || 'See error detail and re-check.',
   };
   return map[code] || map.other;
@@ -3405,7 +3555,9 @@ function sortVendorsByHealth(vendors) {
 function renderVendorList() {
   var list = $('vendorList');
   if (!list) return;
+  var prevHtml = list.innerHTML;
   list.innerHTML = '';
+  try {
 
   var hideFailed = getHideFailedVendors();
   var hideEl = $('hideFailedVendors');
@@ -3498,6 +3650,10 @@ function renderVendorList() {
 
   // Keep data order for other logic, but preferred selection uses sorted healthy-first list
   _sortedVendorsForSelect = visible;
+  } catch (e) {
+    list.innerHTML = prevHtml;
+    _sortedVendorsForSelect = [];
+  }
 }
 
 var _sortedVendorsForSelect = [];
@@ -3513,6 +3669,10 @@ async function loadVendors(opts) {
   refreshUndoImportBtn();
   const data = await api('/api/vendors');
   if (loadToken !== _loadVendorsToken) return;
+  if (data.error) {
+    showToast(data.error, 'error');
+    return;
+  }
   _allVendorsData = data.vendors || [];
   _allHealthData = data.health || {};
 
@@ -3602,11 +3762,13 @@ function updateMiniStatus(data) {
 
 function showEmptyState() {
   $('detailVendorName').textContent = '';
+  if ($('detailVendorType')) $('detailVendorType').style.display = 'none';
   $('detailVendorUrl').textContent = '';
   $('addKeyBtn').style.display = 'none';
   if ($('copyImportTextBtn')) $('copyImportTextBtn').style.display = 'none';
   $('editVendorBtn').style.display = 'none';
   if ($('copyImportTextBtn')) $('copyImportTextBtn').style.display = 'none';
+  if ($('archiveVendorBtn')) $('archiveVendorBtn').style.display = 'none';
   $('deleteVendorBtn').style.display = 'none';
   $('noVendorSelected').style.display = 'block';
   $('keyTableContainer').style.display = 'none';
@@ -3687,10 +3849,17 @@ async function selectVendor(id, opts) {
   _mergeVendorIntoCache(v);
 
   $('detailVendorName').textContent = v.name;
+  var vt = _vendorTypeLabel(v.vtype || '');
+  var typeBadge = $('detailVendorType');
+  if (typeBadge) {
+    typeBadge.textContent = vt;
+    typeBadge.style.display = (v.vtype && v.vtype !== '') ? '' : 'none';
+  }
   $('detailVendorUrl').textContent = v.api_url;
   $('addKeyBtn').style.display = 'inline-flex';
   $('editVendorBtn').style.display = 'inline-block';
   if ($('copyImportTextBtn')) $('copyImportTextBtn').style.display = 'inline-block';
+  if ($('archiveVendorBtn')) $('archiveVendorBtn').style.display = 'inline-block';
   $('deleteVendorBtn').style.display = 'inline-block';
   $('noVendorSelected').style.display = 'none';
   $('keyTableContainer').style.display = 'block';
@@ -3698,7 +3867,6 @@ async function selectVendor(id, opts) {
   $('keyFilter').value = 'all';
   $('selectAllCheck').checked = false;
   $('batchActions').style.display = 'none';
-  if (typeof renderVendorList === 'function') renderVendorList();
   filterKeys();
 }
 
@@ -3707,6 +3875,7 @@ function filterKeys() {
   const f = $('keyFilter').value;
   const tbody = $('keysBody');
   tbody.innerHTML = '';
+  const fragment = document.createDocumentFragment();
 
   for (var idx = _allKeysData.length - 1; idx >= 0; idx--) {
     const k = _allKeysData[idx];
@@ -3799,11 +3968,13 @@ function filterKeys() {
         '<button class="btn btn-sm" onclick="checkKeyHealth(\'' + _currentVendor.id + '\',\'' + k.id + '\')">' + _('action.check') + '</button>',
         '<button class="btn btn-sm" onclick="checkKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('modelsModal.checkModels')) + '">' + _('modelsModal.checkModels') + '</button>',
         '<button class="btn btn-sm" onclick="editKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')">' + _('action.edit') + '</button>',
+        '<button class="btn btn-sm" onclick="archiveKeyCurrent(\'' + _currentVendor.id + '\',\'' + k.id + '\',\'' + esc(k.name || k.id).replace(/'/g, "\\'") + '\')" title="' + esc(_('action.archiveKey') || 'Archive key') + '">' + esc(_('action.archiveKey') || 'Archive') + '</button>',
         '<button class="btn btn-sm btn-danger" onclick="deleteKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')">' + _('action.delete') + '</button>',
       '</td>',
     ].join('');
-    tbody.appendChild(tr);
+    fragment.appendChild(tr);
   }
+  tbody.appendChild(fragment);
 }
 
 function onCheckChange() {
@@ -3839,8 +4010,16 @@ async function batchAction(action) {
 // ── Vendor Modal ─────────────────────────
 
 async function loadProviderSelect() {
+  if (_knownProviders.length) {
+    renderProviderSelectOptions();
+    return;
+  }
   const data = await api('/api/providers');
   _knownProviders = data.providers || [];
+  renderProviderSelectOptions();
+}
+
+function renderProviderSelectOptions() {
   const sel = $('vendorProviderSelect');
   sel.innerHTML = '<option value="">' + _('vendorModal.selectProvider') + '</option>';
   for (const p of _knownProviders) {
@@ -3875,7 +4054,7 @@ function onProviderSelectChange() {
   }
 }
 
-function showAddVendorModal() {
+async function showAddVendorModal() {
   $('vendorModalTitle').textContent = _('vendorModal.addTitle');
   $('editVendorId').value = '';
   $('vendorName').value = '';
@@ -3890,11 +4069,12 @@ function showAddVendorModal() {
   $('proxyTargetGroup').style.display = 'none';
   if ($('vendorTags')) $('vendorTags').value = '';
   if ($('vendorCheckinUrl')) $('vendorCheckinUrl').value = '';
-  loadProviderSelect();
+  if ($('vendorTypeSelect')) $('vendorTypeSelect').value = 'public';
+  await loadProviderSelect();
   $('vendorModal').classList.add('open');
 }
 
-function editVendor() {
+async function editVendor() {
   if (!_currentVendor) return;
   const v = _currentVendor;
   $('vendorModalTitle').textContent = _('vendorModal.editTitle');
@@ -3908,7 +4088,8 @@ function editVendor() {
   $('proxyTargetGroup').style.display = v.proxy_target ? '' : 'none';
   if ($('vendorTags')) $('vendorTags').value = formatTags(v.tags || []);
   if ($('vendorCheckinUrl')) $('vendorCheckinUrl').value = v.checkin_url || '';
-  loadProviderSelect();
+  if ($('vendorTypeSelect')) $('vendorTypeSelect').value = v.vtype || 'public';
+  await loadProviderSelect();
   const match = _knownProviders.find(function(x) { return x.id === v.provider; });
   if (match) {
     $('vendorProviderSelect').value = v.provider;
@@ -3938,6 +4119,8 @@ async function deleteVendor() {
 }
 
 async function saveVendor() {
+  const btn = $('vendorSaveBtn');
+  if (btn && btn.disabled) return;
   const id = $('editVendorId').value;
   const sel = $('vendorProviderSelect');
   const customInput = $('vendorProvider');
@@ -3951,16 +4134,26 @@ async function saveVendor() {
     proxy_target: $('vendorProxyEnabled').checked ? $('vendorProxyTarget').value.trim() : '',
     tags: parseTagsInput(($('vendorTags') && $('vendorTags').value) || ''),
     checkin_url: ($('vendorCheckinUrl') && $('vendorCheckinUrl').value.trim()) || '',
+    type: $('vendorTypeSelect') ? $('vendorTypeSelect').value : '',
   };
   if (!data.name) { alert(_('validation.nameRequired') || 'Name is required'); return; }
-  if (id) {
-    await api('/api/vendors/' + id, { method: 'PUT', body: JSON.stringify(data) });
-  } else {
-    await api('/api/vendors', { method: 'POST', body: JSON.stringify(data) });
+  setButtonLoading(btn, true, _('common.saving') || 'Saving...');
+  try {
+    var res;
+    if (id) {
+      res = await api('/api/vendors/' + id, { method: 'PUT', body: JSON.stringify(data) });
+    } else {
+      res = await api('/api/vendors', { method: 'POST', body: JSON.stringify(data) });
+    }
+    if (res.error) { showToast(res.error, 'error'); return; }
+    closeVendorModal();
+    showToast(_('toast.saved') || 'Saved', 'success');
+    await loadVendors({ focusVendorId: id || res.id });
+  } catch (e) {
+    showToast(String(e && e.message || e), 'error');
+  } finally {
+    setButtonLoading(btn, false);
   }
-  closeVendorModal();
-  if (id) { await selectVendor(id); }
-  else { loadVendors(); }
 }
 
 function toggleProxyTarget() {
@@ -4145,13 +4338,18 @@ async function checkKeyHealth(vendorId, keyId) {
   }], {
     title: (_('action.checking') || 'Checking…') + ': ' + label,
     source: 'manual.one',
+    // Sync backends once after the probe, so the result takes effect
+    // immediately (same behavior as bulk check-all).
     push: true,
-    reload: true,
+    reload: false,
     toast: true,
     blocking: false,
     openTask: true,
+    renderList: false,
     concurrency: 1,
-    quick: true,
+    // Single-key interactive check always re-scans the model list first,
+    // then probes a subset. Only bulk check-all uses quick/scan_reuse.
+    quick: false,
   });
 }
 
@@ -4240,7 +4438,9 @@ async function checkHealthTargets(targets, opts) {
         .replace('{cur}', finished + 1)
         .replace('{total}', targets.length);
       try {
-        var qs = '?reconcile=0' + (useQuick ? '&quick=1' : '');
+        // scan_models=1 forces a fresh model-list fetch before the subset probe,
+        // matching single-key behavior. quick only shortens timeout/retries.
+        var qs = '?reconcile=0' + (opts.scanModels ? '&scan_models=1' : '') + (useQuick ? '&quick=1' : '');
         var h = await api('/api/vendors/' + t.vendor_id + '/keys/' + t.key_id + '/health' + qs);
         if (h && h.healthy) ok++; else fail++;
         if (h) {
@@ -4250,7 +4450,10 @@ async function checkHealthTargets(targets, opts) {
             key_id: t.key_id,
             healthy: h.healthy,
             latency_ms: h.latency_ms,
-            error: h.error,
+            error: h.raw_error || h.error,
+            error_code: h.error_code,
+            error_label: h.error_label,
+            suggestion: h.suggestion,
           });
         } else {
           _applyHealthToLocalKey(t.vendor_id, t.key_id, {
@@ -4292,7 +4495,7 @@ async function checkHealthTargets(targets, opts) {
           );
         }
         if (finished % 2 === 0 || finished === targets.length) {
-          if (typeof renderVendorList === 'function') renderVendorList();
+          if (opts.renderList !== false && typeof renderVendorList === 'function') renderVendorList();
           if (selectedVendorId && typeof filterKeys === 'function') filterKeys();
         }
       }
@@ -4330,7 +4533,14 @@ async function checkHealthTargets(targets, opts) {
           });
         }
         if (blocking) updateGlobalLoading(_('sync.pushing') || 'Syncing backends…');
-        var syncRes = await api('/api/sync/push', { method: 'POST' });
+        var vendorIds = [];
+        (targets || []).forEach(function(t) { if (t && t.vendor_id && vendorIds.indexOf(String(t.vendor_id)) < 0) vendorIds.push(String(t.vendor_id)); });
+        var pushBody = {};
+        // Scoped push for single-vendor checks (single key); keep all-vendors full push.
+        if ((opts.scopePush === 'vendor' || (targets.length <= 1 && vendorIds.length <= 1)) && vendorIds.length) {
+          pushBody.vendor_ids = vendorIds;
+        }
+        var syncRes = await api('/api/sync/push', { method: 'POST', body: JSON.stringify(pushBody) });
         if (syncRes.error) throw new Error(syncRes.error);
         if (syncTaskId) {
           var syncDetail = syncRes.message || (_('sync.pushDone') || 'Backends synced');
@@ -4367,6 +4577,9 @@ async function checkHealthTargets(targets, opts) {
 
     var doneDetail = (_('health.runDone') || 'Done: {ok} ok, {fail} failed')
       .replace('{ok}', ok).replace('{fail}', fail);
+    if (!ok && fail === 1 && runResults[0]) {
+      doneDetail = formatHealthFailToast(runResults[0]);
+    }
     if (taskId) {
       completeTask(taskId, {
         status: fail ? (ok ? 'partial' : 'error') : 'success',
@@ -4494,6 +4707,9 @@ async function checkAllHealth() {
     blocking: false,
     openTask: true,
     concurrency: 8,
+    // Re-scan model list per key, same as single-key checks (so newer/disabled
+    // models are picked up each run instead of reusing stale inventory).
+    scanModels: true,
     quick: true,
   });
   if (result && !result.busy) {
@@ -4527,6 +4743,13 @@ function _modelEndpointCandidates(k, mid) {
   var checks = state.checks || {};
   var found = Object.keys(checks);
   if (found.length) return found;
+  var lower = String(mid || '').toLowerCase();
+  if (/dall-e|dalle|gpt-image|imagen|flux|stable-diffusion|-image|image-/.test(lower)) return ['openai_images'];
+  if (/sora|runway|kling|veo|-video|video-/.test(lower)) return ['openai_videos'];
+  if (/tts|whisper|speech|-audio|audio-|-asr/.test(lower)) {
+    if (/translat/.test(lower)) return ['openai_translations', 'openai_audio'];
+    return ['openai_audio', 'openai_translations'];
+  }
   var v = (_currentVendor && _currentVendor.id === _modelsModalCtx.vendorId) ? _currentVendor : null;
   var ep = String((v && v.endpoint_type) || '').toLowerCase();
   var prov = String((v && v.provider) || '').toLowerCase();
@@ -4541,6 +4764,10 @@ function _endpointLabel(ep) {
     openai_responses: 'Responses',
     anthropic_messages: 'Messages',
     gemini_generate: 'Gemini',
+    openai_images: 'Image',
+    openai_videos: 'Video',
+    openai_audio: 'Audio',
+    openai_translations: 'Translation',
   })[ep] || ep;
 }
 
@@ -4888,12 +5115,13 @@ async function checkKeyQualityFromModal() {
 }
 
 async function checkSingleModel(vendorId, keyId, modelId) {
-  // Re-run full per-model check for accuracy (backend removes failed from engines)
+  // Per-model probe only: /endpoints/check probes this one model×endpoint matrix.
+  // (Do not call /check-models — that re-checks every model on the key.)
   showToast(_('action.checking') + ': ' + modelId, 'info');
   var taskId = createTask({ type: 'detect', title: (_('action.checking') || 'Checking') + ': ' + modelId, detail: 'Checking model and compatible endpoints', cur: 0, total: 1 });
   var res;
   try {
-    res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/check-models', { method: 'POST' });
+    res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/models/' + encodeURIComponent(modelId) + '/endpoints/check', { method: 'POST' });
   } catch (e) {
     var requestErr = String(e && e.message || e);
     completeTask(taskId, { error: requestErr, detail: requestErr, cur: 1, total: 1 });
@@ -4902,12 +5130,12 @@ async function checkSingleModel(vendorId, keyId, modelId) {
   }
   if (res.error) { completeTask(taskId, { error: res.error, detail: res.error, cur: 1, total: 1 }); showToast(res.error, 'error'); }
   else {
-    var hit = (res.results || []).find(function(r) { return r.model === modelId; });
-    if (hit && hit.healthy) { completeTask(taskId, { detail: modelId + ' OK', cur: 1, total: 1 }); showToast(_('toast.checkOk') + ': ' + modelId, 'success'); }
+    var ok = (res.detected || []).length > 0;
+    if (ok) { completeTask(taskId, { detail: modelId + ' OK', cur: 1, total: 1 }); showToast(_('toast.checkOk') + ': ' + modelId, 'success'); }
     else {
-      var failRes = hit || { error: 'failed', healthy: false };
-      completeTask(taskId, { error: failRes.error || 'failed', detail: (failRes.error || 'failed') + ': ' + modelId, cur: 1, total: 1 });
-      showToast(formatHealthFailToast(failRes) + ': ' + modelId, 'error', { duration: 8000 });
+      var err = summarizeSingleModelError(res);
+      completeTask(taskId, { error: err, detail: err + ': ' + modelId, cur: 1, total: 1 });
+      showToast(err + ': ' + modelId, 'error', { duration: 8000 });
     }
   }
   await selectVendor(vendorId);
@@ -4916,6 +5144,16 @@ async function checkSingleModel(vendorId, keyId, modelId) {
     var k = v && (v.keys || []).find(function(x) { return x.id === keyId; });
     if (k) renderModelsModalList(k);
   }
+}
+
+function summarizeSingleModelError(res) {
+  var checks = res && res.checks || {};
+  var errs = [];
+  Object.keys(checks).forEach(function(ep) {
+    var ck = checks[ep];
+    if (ck && !ck.healthy && ck.error) errs.push(String(ck.error).slice(0, 160));
+  });
+  return (res && res.hard_fail) || errs[0] || 'no working endpoint';
 }
 
 async function toggleModelSync(vendorId, keyId, modelId, enabled) {
@@ -5317,11 +5555,6 @@ async function applyBatchImport() {
       open: true,
     });
   }
-  // Short overlay only for the fast write itself
-  showGlobalLoading(
-    _('batchImport.importing') || 'Importing…',
-    (_('batchImport.importingHint') || 'Writing {n} entr(y/ies)…').replace('{n}', payload.length)
-  );
   var checkTargets = [];
   var focusId = '';
   var pending = 0;
@@ -5394,7 +5627,6 @@ async function applyBatchImport() {
     showToast(String(e && e.message || e), 'error');
   } finally {
     setButtonLoading(btn, false);
-    hideGlobalLoading(true);
   }
 
   // Background: check ONLY imported keys + sync — does NOT block the page
@@ -5479,12 +5711,22 @@ async function loadPushPreview() {
     return;
   }
   var items = res.items || [];
+  var keys = res.keys || {};
   if (bar) bar.style.display = '';
   if (sum) {
-    sum.textContent = (_('sync.pushPreviewSummary') || 'Write: {w} · Skip: {s} · Total: {t}')
+    sum.textContent = (_('sync.pushPreviewSummary') || 'Write {w} backends · Skip {s} · Total {t}')
       .replace('{w}', String(res.will_write || 0))
       .replace('{s}', String(res.skipped || 0))
       .replace('{t}', String(res.total || items.length));
+  }
+  var keysHint = $('pushPreviewKeysHint');
+  if (keysHint) {
+    keysHint.style.display = '';
+    keysHint.textContent = (_('sync.pushPreviewKeys') || 'Keys: {syncable} syncable / {healthy} healthy / {enabled} enabled / {total} total (rows below are backends, not keys)')
+      .replace('{syncable}', String(keys.syncable != null ? keys.syncable : '—'))
+      .replace('{healthy}', String(keys.healthy != null ? keys.healthy : '—'))
+      .replace('{enabled}', String(keys.enabled != null ? keys.enabled : '—'))
+      .replace('{total}', String(keys.total != null ? keys.total : '—'));
   }
   if (!items.length) {
     if (wrap) wrap.innerHTML = '<p class="vendor-list-empty">' + esc(_('sync.noPushTargets') || 'No backends') + '</p>';
@@ -5493,6 +5735,7 @@ async function loadPushPreview() {
   var html = '<table class="batch-edit-table sync-import-table"><thead><tr>'
     + '<th>' + esc(_('sync.colBackend') || 'Backend') + '</th>'
     + '<th>' + esc(_('table.status') || 'Status') + '</th>'
+    + '<th>' + esc(_('sync.colKeys') || 'Keys') + '</th>'
     + '<th>' + esc(_('sync.colFiles') || 'Files') + '</th>'
     + '</tr></thead><tbody>';
   items.forEach(function(it) {
@@ -5510,11 +5753,14 @@ async function loadPushPreview() {
       return (f.label || f.path || '');
     }).filter(Boolean);
     var filesHtml = files.length
-      ? files.map(function(p) { return '<div class="mono" style="font-size:11px">' + esc(p) + '</div>'; }).join('')
+      ? files.map(function(p) { return '<div class="mono" style="font-size:11px;word-break:break-all">' + esc(p) + '</div>'; }).join('')
       : '<span class="muted">—</span>';
+    var kc = (it.key_count != null) ? String(it.key_count) : '—';
+    var kcTip = will ? esc(_('sync.keysPoolHint') || 'Syncable key pool (backend may filter further)') : '';
     html += '<tr class="' + (will ? '' : 'batch-row-warn') + '">'
       + '<td><strong>' + esc(it.display_name || it.name || '') + '</strong><div class="muted" style="font-size:11px">' + esc(it.name || '') + '</div></td>'
       + '<td>' + st + '</td>'
+      + '<td class="num-cell" title="' + kcTip + '">' + esc(will ? kc : '—') + '</td>'
       + '<td>' + filesHtml + '</td>'
       + '</tr>';
   });
@@ -5526,8 +5772,13 @@ async function loadPushPreview() {
 async function confirmPushToBackends() {
   var btn = $('pushPreviewConfirmBtn');
   if (btn) btn.disabled = true;
-  showToast(_('action.checking') || 'Working...', 'info');
-  var taskId = createTask({ type: 'sync', title: _('sync.pushing') || 'Syncing backends…', detail: _('sync.pushing') || 'Syncing backends…', cur: 0, total: 1 });
+  showToast(_('sync.pushing') || 'Syncing backends…', 'info');
+  var taskId = createTask({ type: 'sync', title: _('sync.pushing') || 'Syncing backends…', detail: _('sync.pushStarted') || 'Started in background…', cur: 0, total: 1 });
+  var startedBefore = '';
+  try {
+    var prev = await api('/api/sync/last-push');
+    startedBefore = (prev && prev.at) || '';
+  } catch (e) {}
   var res = await api('/api/sync/push', { method: 'POST' });
   closePushPreviewModal();
   if (res.error) {
@@ -5535,9 +5786,49 @@ async function confirmPushToBackends() {
     showToast(res.error, 'error');
     return;
   }
-  var msg = res.message || (_('sync.pushDone') || 'Pushed to backends');
-  completeTask(taskId, { status: res.fail > 0 ? (res.ok > 0 ? 'partial' : 'error') : 'success', error: res.fail > 0 && !res.ok ? msg : '', detail: msg, cur: 1, total: 1 });
-  showToast(msg, (res.fail > 0) ? 'error' : 'success');
+  // Async push returns immediately — poll last-push until a new summary appears
+  if (res.async) {
+    updateTask(taskId, { detail: _('sync.pushing') || 'Syncing backends…', cur: 0, total: 1 });
+    var final = null;
+    for (var i = 0; i < 90; i++) {
+      await new Promise(function(r) { setTimeout(r, 2000); });
+      try {
+        var lp = await api('/api/sync/last-push');
+        if (lp && lp.at && lp.at !== startedBefore && lp.results) {
+          final = lp;
+          break;
+        }
+      } catch (e) {}
+      if (taskId) updateTask(taskId, { detail: (_('sync.pushingWait') || 'Syncing… {n}s').replace('{n}', String((i + 1) * 2)), cur: 0, total: 1 });
+    }
+    if (!final) {
+      var hang = _('sync.pushStillRunning') || 'Sync still running in background — refresh backends later';
+      completeTask(taskId, { status: 'partial', detail: hang, cur: 1, total: 1 });
+      showToast(hang, 'info');
+      return;
+    }
+    var ok = Number(final.ok || 0), fail = Number(final.fail || 0), skipped = Number(final.skipped || 0);
+    var msg = (_('sync.pushDoneDetail') || 'Pushed: {ok} ok, {fail} failed, {skipped} skipped')
+      .replace('{ok}', ok).replace('{fail}', fail).replace('{skipped}', skipped);
+    completeTask(taskId, {
+      status: fail ? (ok ? 'partial' : 'error') : 'success',
+      error: fail && !ok ? msg : '',
+      detail: msg,
+      cur: 1,
+      total: 1,
+    });
+    showToast(msg, fail ? (ok ? 'info' : 'error') : 'success');
+  } else {
+    var msg2 = res.message || (_('sync.pushDone') || 'Pushed to backends');
+    completeTask(taskId, {
+      status: res.fail > 0 ? (res.ok > 0 ? 'partial' : 'error') : 'success',
+      error: res.fail > 0 && !res.ok ? msg2 : '',
+      detail: msg2,
+      cur: 1,
+      total: 1,
+    });
+    showToast(msg2, (res.fail > 0) ? 'error' : 'success');
+  }
   if (typeof loadLastPushPanel === 'function') loadLastPushPanel();
   if (typeof loadBackends === 'function' && document.querySelector('#view-backends.active')) loadBackends();
   if (typeof loadDashboard === 'function' && document.querySelector('#view-dashboard.active')) loadDashboard();
@@ -5807,6 +6098,7 @@ async function onBackupFileSelected(ev) {
   if (typeof loadVendors === 'function') loadVendors();
   if (typeof loadDashboard === 'function') loadDashboard();
   if (typeof loadCheckinPage === 'function' && document.querySelector('#view-checkin.active')) loadCheckinPage();
+  if (typeof loadArchivedPage === 'function' && document.querySelector('#view-archived.active')) loadArchivedPage();
 }
 
 // ── Backends Page ────────────────────────
@@ -6879,6 +7171,7 @@ async function loadSettingsPage() {
     $('setHealthNetworkRetries').value = (nr >= 1 && nr <= 10) ? nr : 3;
   }
   if ($('setHealthFailStreak')) $('setHealthFailStreak').value = s.health_fail_streak || 3;
+  if ($('setHealthArchiveStreakDays')) $('setHealthArchiveStreakDays').value = s.health_archive_streak_days != null ? s.health_archive_streak_days : 10;
   if ($('setHealthOkStreak')) $('setHealthOkStreak').value = s.health_ok_streak || 3;
   if ($('setHealthFailInterval')) $('setHealthFailInterval').value = s.health_fail_interval_seconds || 7200;
   if ($('setHealthOkInterval')) $('setHealthOkInterval').value = s.health_ok_interval_seconds || 3600;
@@ -6957,6 +7250,7 @@ async function saveCurrentPolicy() {
     health_ok_streak: Math.max(1, parseInt(($('setHealthOkStreak') && $('setHealthOkStreak').value) || '3', 10) || 3),
     health_fail_interval_seconds: Math.max(60, parseInt(($('setHealthFailInterval') && $('setHealthFailInterval').value) || '7200', 10) || 7200),
     health_ok_interval_seconds: Math.max(60, parseInt(($('setHealthOkInterval') && $('setHealthOkInterval').value) || '3600', 10) || 3600),
+    health_archive_streak_days: Math.max(0, Math.min(365, parseInt(($('setHealthArchiveStreakDays') && $('setHealthArchiveStreakDays').value) || '10', 10) || 10)),
     budget_daily_cost: parseFloat(($('setBudgetDailyCost') && $('setBudgetDailyCost').value) || '0') || 0,
     budget_monthly_cost: parseFloat(($('setBudgetMonthlyCost') && $('setBudgetMonthlyCost').value) || '0') || 0,
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
@@ -7009,6 +7303,7 @@ async function saveSettingsPage() {
     health_ok_streak: Math.max(1, parseInt(($('setHealthOkStreak') && $('setHealthOkStreak').value) || '3', 10) || 3),
     health_fail_interval_seconds: Math.max(60, parseInt(($('setHealthFailInterval') && $('setHealthFailInterval').value) || '7200', 10) || 7200),
     health_ok_interval_seconds: Math.max(60, parseInt(($('setHealthOkInterval') && $('setHealthOkInterval').value) || '3600', 10) || 3600),
+    health_archive_streak_days: Math.max(0, Math.min(365, parseInt(($('setHealthArchiveStreakDays') && $('setHealthArchiveStreakDays').value) || '10', 10) || 10)),
     budget_daily_cost: parseFloat(($('setBudgetDailyCost') && $('setBudgetDailyCost').value) || '0') || 0,
     budget_monthly_cost: parseFloat(($('setBudgetMonthlyCost') && $('setBudgetMonthlyCost').value) || '0') || 0,
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
@@ -7126,6 +7421,10 @@ async function showCreateDownstream() {
   $('dsName').value = '';
   $('dsEpOpenai').checked = true;
   $('dsEpAnthropic').checked = false;
+  if ($('dsEpImage')) $('dsEpImage').checked = false;
+  if ($('dsEpVideo')) $('dsEpVideo').checked = false;
+  if ($('dsEpAudio')) $('dsEpAudio').checked = false;
+  if ($('dsEpTranslation')) $('dsEpTranslation').checked = false;
   $('dsAutoUpdate').checked = true;
   $('dsNotes').value = '';
   $('dsSecretBox').style.display = 'none';
@@ -7143,6 +7442,10 @@ async function editDownstream(id) {
   var eps = res.endpoint_types || [];
   $('dsEpOpenai').checked = eps.indexOf('openai') >= 0;
   $('dsEpAnthropic').checked = eps.indexOf('anthropic') >= 0;
+  if ($('dsEpImage')) $('dsEpImage').checked = eps.indexOf('image') >= 0;
+  if ($('dsEpVideo')) $('dsEpVideo').checked = eps.indexOf('video') >= 0;
+  if ($('dsEpAudio')) $('dsEpAudio').checked = eps.indexOf('audio') >= 0;
+  if ($('dsEpTranslation')) $('dsEpTranslation').checked = eps.indexOf('translation') >= 0;
   $('dsAutoUpdate').checked = res.auto_update !== false;
   $('dsNotes').value = res.notes || '';
   $('dsSecretBox').style.display = 'none';
@@ -7211,6 +7514,10 @@ async function saveDownstream() {
   var endpoint_types = [];
   if ($('dsEpOpenai') && $('dsEpOpenai').checked) endpoint_types.push('openai');
   if ($('dsEpAnthropic') && $('dsEpAnthropic').checked) endpoint_types.push('anthropic');
+  if ($('dsEpImage') && $('dsEpImage').checked) endpoint_types.push('image');
+  if ($('dsEpVideo') && $('dsEpVideo').checked) endpoint_types.push('video');
+  if ($('dsEpAudio') && $('dsEpAudio').checked) endpoint_types.push('audio');
+  if ($('dsEpTranslation') && $('dsEpTranslation').checked) endpoint_types.push('translation');
   if (!endpoint_types.length) { showToast(_('routes.endpointRequired') || 'Select at least one endpoint type', 'error'); return; }
   var selected_models = Object.keys(_dsSelectedModels);
   var body = {
@@ -7290,6 +7597,7 @@ async function loadHealthMonitor() {
   if (res.paused) hint.push(_('health.statePaused') || 'Paused');
   if (res.next_run_at) hint.push((_('health.nextRun') || 'Next') + ': ' + _fmtTs(res.next_run_at));
   if (res.last_finished_at) hint.push((_('health.lastRun') || 'Last') + ': ' + _fmtTs(res.last_finished_at));
+  if (res.running_now && res.current_total) hint.push((res.current_completed || 0) + '/' + res.current_total);
   if (res.last_error) hint.push((_('health.lastError') || 'Error') + ': ' + res.last_error);
   if ($('hmStateHint')) $('hmStateHint').textContent = hint.join(' · ') || '—';
   if ($('hmMeta')) {
@@ -7324,6 +7632,7 @@ async function loadHealthMonitor() {
 // ── Check-in page ────────────────────────
 
 var _checkinVendors = [];
+var _archivedVendors = [];
 
 async function loadCheckinPage() {
   try {
@@ -7352,10 +7661,12 @@ function renderCheckinTable() {
   if (!body) return;
   var vid = ($('checkinVendorFilter') && $('checkinVendorFilter').value) || '';
   var support = ($('checkinSupportFilter') && $('checkinSupportFilter').value) || 'all';
+  var vtype = ($('checkinTypeFilter') && $('checkinTypeFilter').value) || '';
   var rows = (_checkinVendors || []).filter(function(v) {
     if (vid && String(v.id) !== String(vid)) return false;
     if (support === 'yes' && !v.supports_checkin) return false;
     if (support === 'no' && v.supports_checkin) return false;
+    if (vtype && (v.vtype || '') !== vtype) return false;
     return true;
   });
   var yes = rows.filter(function(v) { return v.supports_checkin; }).length;
@@ -7394,6 +7705,139 @@ function renderCheckinTable() {
       '<td class="actions-cell">' + actions.join('') + '</td>' +
       '</tr>';
   }).join('');
+}
+
+// ── Archived (归档) ──────────────────────
+
+function _vendorTypeLabel(t) {
+  if (t === 'public') return _('vendorType.public') || '公益站';
+  if (t === 'relay') return _('vendorType.relay') || '中转站';
+  if (t === 'key') return _('vendorType.key') || '纯KEY';
+  return _('vendorType.unknown') || '—';
+}
+
+async function loadArchivedPage() {
+  try {
+    var res = await api('/api/vendors/archived');
+    _archivedVendors = (res && res.vendors) || [];
+  } catch (e) {
+    _archivedVendors = [];
+    showToast((e && e.message) || 'load failed', 'error');
+  }
+  renderArchivedTable();
+}
+
+function renderArchivedTable() {
+  var body = $('archivedBody');
+  if (!body) return;
+  var q = (($('archivedSearch') && $('archivedSearch').value) || '').toLowerCase();
+  var rows = (_archivedVendors || []).filter(function(v) {
+    if (!q) return true;
+    var hay = (v.name || '') + ' ' + (v.provider || '') + ' ' + (v.api_url || '');
+    return hay.toLowerCase().indexOf(q) >= 0;
+  });
+  var sum = $('archivedSummary');
+  if (sum) sum.textContent = (_('archived.summary') || '{n} archived').replace('{n}', String(rows.length));
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="todo-empty">' + esc(_('archived.none') || 'No archived items') + '</td></tr>';
+    return;
+  }
+  var lines = [];
+  rows.forEach(function(v) {
+    var vid = String(v.id || '');
+    var vidSafe = esc(vid).replace(/'/g, "\\'");
+    var vtype = _vendorTypeLabel(v.vtype || '');
+    // Vendor itself archived (all keys hidden)
+    if (v.archived) {
+      lines.push('<tr data-archived-vendor="' + esc(vid) + '">' +
+        '<td><strong>' + esc(v.name || '') + '</strong>' + (v.partially_archived ? '<div class="form-hint">' + esc(_('archived.partial') || 'Partially archived') + '</div>' : '') + '</td>' +
+        '<td>' + esc(vtype) + '</td>' +
+        '<td><span class="badge">' + esc(_('archived.kindVendor') || 'Vendor') + '</span></td>' +
+        '<td>' + esc(v.provider || '') + '</td>' +
+        '<td><span class="archived-url-cell" title="' + esc(v.api_url || '') + '">' + esc(v.api_url || '') + '</span></td>' +
+        '<td class="actions-cell">' +
+          '<button class="btn btn-sm" onclick="restoreVendor(\'' + vidSafe + '\')">' + esc(_('archived.restore') || 'Restore') + '</button>' +
+        '</td>' +
+        '</tr>');
+    }
+    // Partially archived: restore per-key
+    (v.keys || []).forEach(function(k) {
+      var kid = String(k.id || '');
+      var kidSafe = esc(kid).replace(/'/g, "\\'");
+      var name = (k.name || '') + ' (' + esc(_('archived.kindKey') || 'Key') + ')';
+      lines.push('<tr data-archived-key="' + esc(vid) + ':' + esc(kid) + '">' +
+        '<td><strong>' + esc(k.name || '') + '</strong><div class="form-hint">' + esc(v.name || '') + '</div></td>' +
+        '<td>' + esc(vtype) + '</td>' +
+        '<td><span class="badge">' + esc(_('archived.kindKey') || 'Key') + '</span></td>' +
+        '<td>' + esc(v.provider || '') + '</td>' +
+        '<td><span class="archived-url-cell" title="' + esc(v.api_url || '') + '">' + esc(v.api_url || '') + '</span></td>' +
+        '<td class="actions-cell">' +
+          '<button class="btn btn-sm" onclick="restoreKey(\'' + vidSafe + '\',\'' + kidSafe + '\')">' + esc(_('archived.restore') || 'Restore') + '</button>' +
+        '</td>' +
+        '</tr>');
+    });
+  });
+  body.innerHTML = lines.join('');
+}
+
+async function archiveVendorCurrent() {
+  if (!_currentVendor) return;
+  var msg = (_('archived.confirmArchiveVendor') || 'Archive vendor {name} and all its keys? It will be hidden from all views and health checks until restored.').replace('{name}', _currentVendor.name);
+  if (!confirm(msg)) return;
+  try {
+    await api('/api/vendors/' + encodeURIComponent(_currentVendor.id) + '/archive', {
+      method: 'POST',
+      body: JSON.stringify({ archived: true }),
+    });
+    showToast(_('archived.archived') || 'Archived', 'success');
+    selectedVendorId = null;
+    _currentVendor = null;
+    showEmptyState();
+    loadVendors();
+  } catch (e) {
+    showToast(String(e && e.message || e), 'error');
+  }
+}
+
+async function archiveKeyCurrent(vendorId, keyId, keyName) {
+  var msg = (_('archived.confirmArchiveKey') || 'Archive key {name}? It will be hidden from all views and health checks until restored.').replace('{name}', keyName || keyId);
+  if (!confirm(msg)) return;
+  try {
+    await api('/api/vendors/' + encodeURIComponent(vendorId) + '/keys/' + encodeURIComponent(keyId) + '/archive', {
+      method: 'POST',
+      body: JSON.stringify({ archived: true }),
+    });
+    showToast(_('archived.archived') || 'Archived', 'success');
+    await loadVendors({ focusVendorId: vendorId });
+  } catch (e) {
+    showToast(String(e && e.message || e), 'error');
+  }
+}
+
+async function restoreVendor(vendorId) {
+  try {
+    await api('/api/vendors/' + encodeURIComponent(vendorId) + '/archive', {
+      method: 'POST',
+      body: JSON.stringify({ archived: false }),
+    });
+    showToast(_('archived.restored') || 'Restored', 'success');
+    loadArchivedPage();
+  } catch (e) {
+    showToast(String(e && e.message || e), 'error');
+  }
+}
+
+async function restoreKey(vendorId, keyId) {
+  try {
+    await api('/api/vendors/' + encodeURIComponent(vendorId) + '/keys/' + encodeURIComponent(keyId) + '/archive', {
+      method: 'POST',
+      body: JSON.stringify({ archived: false }),
+    });
+    showToast(_('archived.restored') || 'Restored', 'success');
+    loadArchivedPage();
+  } catch (e) {
+    showToast(String(e && e.message || e), 'error');
+  }
 }
 
 async function saveCheckinUrl(vendorId, inputEl) {

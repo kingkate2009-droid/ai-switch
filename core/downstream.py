@@ -28,11 +28,17 @@ from core.data import (
     get_vendors,
     list_model_ids,
 )
+from core.endpoints import (
+    DOWNSTREAM_ENDPOINT_TYPES,
+    ENDPOINT_TO_DOWNSTREAM,
+    expand_endpoint_values,
+    model_modality,
+)
 
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
 
-ENDPOINT_TYPES = ("openai", "anthropic")
+ENDPOINT_TYPES = DOWNSTREAM_ENDPOINT_TYPES
 
 
 def _now() -> str:
@@ -71,13 +77,49 @@ def _norm_endpoint_types(raw) -> list[str]:
     out = []
     for t in raw:
         s = str(t or "").lower().strip()
-        if s in ("openai_chat", "openai-compatible"):
+        if s in ("openai_chat", "openai-compatible", "openai_responses", "responses", "gemini", "gemini_generate"):
             s = "openai"
-        if s in ("claude",):
+        if s in ("claude", "anthropic_messages", "messages"):
             s = "anthropic"
+        if s in ("openai_images", "images", "dalle", "image_gen"):
+            s = "image"
+        if s in ("openai_videos", "videos", "video_gen"):
+            s = "video"
+        if s in ("openai_audio", "tts", "stt", "speech", "whisper"):
+            s = "audio"
+        if s in ("openai_translations", "translations", "translate"):
+            s = "translation"
         if s in ENDPOINT_TYPES and s not in out:
             out.append(s)
     return out or ["openai"]
+
+
+def _coarse_endpoint_types_for_model(vendor: dict, key: dict, model_id: str) -> list[str]:
+    """Derive downstream buckets from verified matrix, else vendor/modality heuristics."""
+    try:
+        from core.endpoints import effective_model_endpoints, model_is_verified_usable
+        if model_is_verified_usable(key, model_id):
+            fine = effective_model_endpoints(vendor, key, model_id)
+            buckets = []
+            seen = set()
+            for ep in fine:
+                b = ENDPOINT_TO_DOWNSTREAM.get(ep) or ""
+                if b and b not in seen:
+                    seen.add(b)
+                    buckets.append(b)
+            if buckets:
+                return buckets
+    except Exception:
+        pass
+    mod = model_modality(model_id)
+    if mod in ("image", "video", "audio", "translation"):
+        return [mod]
+    ep = (vendor.get("endpoint_type") or "openai").lower().strip()
+    if ep in ("anthropic", "claude"):
+        return ["anthropic"]
+    if ep in ("google", "gemini"):
+        return ["openai"]
+    return ["openai"]
 
 
 def list_downstream_keys(*, include_secret: bool = False) -> list[dict]:
@@ -199,14 +241,19 @@ def delete_downstream_key(key_id: str) -> bool:
 
 
 def _upstream_candidates() -> list[dict]:
-    """List healthy/enabled upstream key+model inventory for routing."""
+    """List healthy/enabled upstream key+model inventory for routing.
+
+    Each candidate is scoped to one coarse endpoint_type bucket so media and
+    chat routes do not collide when the same key holds mixed models.
+    """
     try:
         from core.health_checker import get_all_health_status
         health = get_all_health_status() or {}
     except Exception:
         health = {}
 
-    out = []
+    # (vendor,key,endpoint_type) → candidate
+    grouped: dict[tuple, dict] = {}
     for v in get_vendors():
         vid = str(v.get("id") or "")
         for k in v.get("keys") or []:
@@ -228,35 +275,77 @@ def _upstream_candidates() -> list[dict]:
                 models = [m for m in models if m]
             if not models:
                 continue
-            ep = (v.get("endpoint_type") or "openai").lower().strip()
-            if ep in ("openai_chat",):
-                ep = "openai"
-            if ep in ("claude",):
-                ep = "anthropic"
-            out.append({
-                "vendor_id": vid,
-                "key_id": kid,
-                "vendor_name": v.get("name") or "",
-                "key_name": k.get("name") or "",
-                "provider": v.get("provider") or "",
-                "api_url": (v.get("proxy_target") or v.get("api_url") or "").rstrip("/"),
-                "endpoint_type": ep or "openai",
-                "models": models,
-                "healthy": h.get("healthy"),
-                "api_key": k.get("api_key"),
-            })
+            for mid in models:
+                buckets = _coarse_endpoint_types_for_model(v, k, mid)
+                for ep in buckets:
+                    gkey = (vid, kid, ep)
+                    rec = grouped.get(gkey)
+                    if not rec:
+                        rec = {
+                            "vendor_id": vid,
+                            "key_id": kid,
+                            "vendor_name": v.get("name") or "",
+                            "key_name": k.get("name") or "",
+                            "provider": v.get("provider") or "",
+                            "api_url": (v.get("proxy_target") or v.get("api_url") or "").rstrip("/"),
+                            "endpoint_type": ep,
+                            "models": [],
+                            "_model_set": set(),
+                            "healthy": h.get("healthy"),
+                            "api_key": k.get("api_key"),
+                        }
+                        grouped[gkey] = rec
+                    if mid not in rec["_model_set"]:
+                        rec["_model_set"].add(mid)
+                        rec["models"].append(mid)
+    out = []
+    for rec in grouped.values():
+        rec.pop("_model_set", None)
+        out.append(rec)
     return out
 
 
-def available_models_catalog() -> dict:
-    """Models available from healthy/enabled upstreams (for multi-select UI)."""
+def available_models_catalog(endpoint: str = None) -> dict:
+    """Models available from healthy/enabled upstreams (for multi-select UI).
+
+    Optional ``endpoint`` filters by coarse type (openai/anthropic/image/…)
+    or fine-grained id (openai_images, …).
+    """
+    want = set()
+    if endpoint:
+        for part in str(endpoint).replace(";", ",").split(","):
+            s = part.strip().lower()
+            if not s:
+                continue
+            # fine → coarse
+            expanded = expand_endpoint_values(s)
+            if expanded:
+                for ep in expanded:
+                    b = ENDPOINT_TO_DOWNSTREAM.get(ep)
+                    if b:
+                        want.add(b)
+            if s in ENDPOINT_TYPES:
+                want.add(s)
+            # alias leftovers
+            aliases = {
+                "openai_chat": "openai", "chat": "openai",
+                "images": "image", "videos": "video",
+                "tts": "audio", "translations": "translation",
+            }
+            if s in aliases:
+                want.add(aliases[s])
+
     by_model: dict[str, dict] = {}
     for c in _upstream_candidates():
+        ep = c.get("endpoint_type") or "openai"
+        if want and ep not in want:
+            continue
         for mid in c.get("models") or []:
             rec = by_model.setdefault(mid, {
                 "model": mid,
                 "sources": [],
                 "endpoint_types": set(),
+                "modality": model_modality(mid),
             })
             rec["sources"].append({
                 "vendor_id": c["vendor_id"],
@@ -265,8 +354,9 @@ def available_models_catalog() -> dict:
                 "key_name": c["key_name"],
                 "provider": c["provider"],
                 "healthy": c.get("healthy"),
+                "endpoint_type": ep,
             })
-            rec["endpoint_types"].add(c.get("endpoint_type") or "openai")
+            rec["endpoint_types"].add(ep)
     items = []
     for mid, rec in by_model.items():
         items.append({
@@ -274,9 +364,10 @@ def available_models_catalog() -> dict:
             "source_count": len(rec["sources"]),
             "sources": rec["sources"],
             "endpoint_types": sorted(rec["endpoint_types"]),
+            "modality": rec.get("modality") or model_modality(mid),
         })
     items.sort(key=lambda x: (-x["source_count"], str(x["model"]).lower()))
-    return {"count": len(items), "models": items}
+    return {"count": len(items), "models": items, "endpoint_types": list(ENDPOINT_TYPES)}
 
 
 def rebuild_downstream_routes(key_id: str) -> Optional[dict]:
@@ -354,6 +445,22 @@ def resolve_route(downstream: dict, model: str, *, endpoint_type: str = "openai"
     if not model:
         return None
     ep = (endpoint_type or "openai").lower().strip()
+    # Normalize fine-grained → coarse
+    if ep in ENDPOINT_TO_DOWNSTREAM:
+        ep = ENDPOINT_TO_DOWNSTREAM[ep]
+    aliases = {
+        "openai_chat": "openai", "chat": "openai", "responses": "openai",
+        "openai_images": "image", "images": "image",
+        "openai_videos": "video", "videos": "video",
+        "openai_audio": "audio", "tts": "audio", "speech": "audio",
+        "openai_translations": "translation", "translations": "translation",
+        "claude": "anthropic",
+    }
+    ep = aliases.get(ep, ep)
+    # Downstream key must allow this endpoint family
+    allowed = set(_norm_endpoint_types(downstream.get("endpoint_types")))
+    if ep not in allowed and ep in ENDPOINT_TYPES:
+        return None
     routes = list(downstream.get("routes") or [])
     # prefer routes whose endpoint_type matches request protocol when possible
     ordered = sorted(
@@ -361,6 +468,12 @@ def resolve_route(downstream: dict, model: str, *, endpoint_type: str = "openai"
         key=lambda r: (0 if (r.get("endpoint_type") or "openai") == ep else 1),
     )
     for r in ordered:
+        route_ep = (r.get("endpoint_type") or "openai").lower().strip()
+        # For media endpoints require exact bucket match; chat may fall back
+        if ep in ("image", "video", "audio", "translation") and route_ep != ep:
+            continue
+        if ep == "anthropic" and route_ep not in ("anthropic",):
+            continue
         models = r.get("models") or []
         if model not in models:
             # allow suffix match: provider/model vs model
@@ -376,7 +489,7 @@ def resolve_route(downstream: dict, model: str, *, endpoint_type: str = "openai"
             "key": k,
             "route": r,
             "api_url": (v.get("proxy_target") or v.get("api_url") or r.get("api_url") or "").rstrip("/"),
-            "endpoint_type": (v.get("endpoint_type") or r.get("endpoint_type") or "openai"),
+            "endpoint_type": route_ep or ep,
             "model": model,
         }
     return None

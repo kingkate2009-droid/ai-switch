@@ -110,10 +110,10 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 日常只关心三件事：
 
 1. **Key 集中管** — 供应商、标签、智能导入、MetaAPI 合并、去重  
-2. **知道谁还能用** — 模型级端点检测、质量检测、可读错误、自适应间隔
+2. **知道谁还能用** — 模型级端点检测、质量检测、可读错误、自适应间隔、失效 key 归档
 3. **同步别写错** — 仅同步已验证模型 · Preview · 主备故障转移 · 未安装零写入
 
-进阶能力（按需）：签到 URL、预算告警、加密 Profile、诊断包、下游路由、桌面安装包。
+进阶能力（按需）：**供应商类型（公益站/中转站/纯KEY）** 及目录与签到的分类筛选、**归档**（全隐藏 + 停止健康检测 + 一键还原）、签到 URL、预算告警、加密 Profile、诊断包、下游路由、桌面安装包。
 
 <details>
 <summary><strong>完整功能列表（展开）</strong></summary>
@@ -122,6 +122,8 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 - 26+ 内置供应商 + 自定义 OpenAI 兼容地址  
 - 每个模型独立检测 Chat、Responses、Messages、Gemini 端点，支持自动/手动选择
 - 按供应商折叠展示质量检测，支持供应商和单模型检测
+- **供应商类型（公益站/中转站/纯KEY），可在模型目录、签到、供应商列表筛选**
+- **归档视图：失效供应商/Key 全站隐藏、停止健康检测、可随时还原**
 - 定时健康监测，可选失败禁用 / 主备故障转移
 - 同步 OpenClaw、OpenCode、Claude Code、Codex、Cline、Aider、Continue 等  
 - 批量 / 备份 / MetaAPI 导入可撤销  
@@ -148,7 +150,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 - [#1 安装与启动](https://github.com/kingkate2009-droid/ai-switch/issues/1)
 - [#2 Codex 连不上](https://github.com/kingkate2009-droid/ai-switch/issues/2)
 - [#3 导入与合并](https://github.com/kingkate2009-droid/ai-switch/issues/3)
-- 最新版说明：[v2.2.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.2.0) · [变更要点](docs/release-notes-2.2.0.md)
+- 最新版说明：[v2.3.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.3.0) · [变更要点](docs/release-notes-2.3.0.md)
 
 ---
 
@@ -186,7 +188,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 
 ```bash
 bash scripts/build_package.sh   # 本地打包
-./release.sh v2.2.0             # CI 多平台发版
+./release.sh v2.3.0             # CI 多平台发版
 ```
 
 ---

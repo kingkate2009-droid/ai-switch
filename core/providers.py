@@ -812,6 +812,140 @@ def probe_single_model(check_type: str, url: str, api_key: str, model: str) -> t
     return _probe_chat_completions(url, headers, [model])
 
 
+def _openai_versioned_path(url: str, *parts: str) -> str:
+    """Join OpenAI-style path under a base that may already end with /vN."""
+    base = (url or "").rstrip("/")
+    suffix = "/".join(p.strip("/") for p in parts if p and str(p).strip("/"))
+    if not suffix:
+        return base
+    if base.endswith(("/v1", "/v2", "/v3", "/v4")):
+        return base + "/" + suffix
+    if re.search(r"/v\d+/", base + "/"):
+        return base + "/" + suffix
+    return base + "/v1/" + suffix
+
+
+def _probe_json_post(url: str, headers: dict, payload: dict, *, label: str) -> tuple:
+    """Shared POST probe for non-chat JSON endpoints."""
+    try:
+        r = _new_session().post(url, json=payload, headers=headers, timeout=get_probe_timeout())
+        body = ""
+        try:
+            body = (r.text or "")[:400]
+        except Exception:
+            body = ""
+        if r.status_code == 200:
+            return True, f"[{label}] ok"
+        if _is_html_response(r):
+            return False, _html_gateway_error(r, url.rsplit("/", 1)[-1])
+        if r.status_code == 401:
+            return False, f"Auth failed (HTTP 401) on {label}"
+        if r.status_code == 429:
+            if _is_quota_exhausted_body(body):
+                return False, f"Quota exhausted on {label}: {body}"
+            return True, f"Rate limited on {label}: {body}"
+        if r.status_code == 404:
+            return False, f"{label} not found (HTTP 404)"
+        if r.status_code == 403:
+            if _is_model_error(body):
+                return False, f"[{label}] model error: {body}"
+            bl = body.lower()
+            if "quota" in bl or "balance" in bl or "insufficient" in bl or "额度" in body:
+                return False, f"Quota/billing on {label}: {body}"
+            return False, f"Access denied on {label}: {body}"
+        if _is_model_error(body):
+            return False, f"[{label}] model error: {body}"
+        # Some gateways reject missing/invalid image params but still prove the route exists
+        if r.status_code in (400, 422) and any(
+            k in body.lower()
+            for k in ("prompt", "size", "quality", "n ", '"n"', "image", "input", "file", "audio", "model")
+        ):
+            return True, f"[{label}] endpoint reachable (HTTP {r.status_code})"
+        return False, f"HTTP {r.status_code} on {label}: {body}"
+    except requests.exceptions.Timeout:
+        return False, f"Timeout on {label}"
+    except requests.exceptions.ConnectionError:
+        return False, f"Connection refused on {label}"
+    except Exception as e:
+        return False, str(e)[:200]
+
+
+def probe_openai_images(url: str, api_key: str, model: str = "") -> tuple:
+    """Probe OpenAI Images generations API."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    endpoint_url = _openai_versioned_path(url, "images/generations")
+    payload = {
+        "prompt": "a red circle on white background",
+        "n": 1,
+        "size": "256x256",
+    }
+    if model:
+        payload["model"] = model
+    return _probe_json_post(endpoint_url, headers, payload, label=f"images:{model or 'default'}")
+
+
+def probe_openai_videos(url: str, api_key: str, model: str = "") -> tuple:
+    """Probe video generation-style endpoints (OpenAI / gateway variants)."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    # Try a few common paths used by OpenAI-compatible gateways
+    paths = ("videos", "videos/generations", "video/generations")
+    last = (False, "No video endpoint")
+    for path in paths:
+        endpoint_url = _openai_versioned_path(url, path)
+        payload = {"prompt": "a cat waving", "model": model} if model else {"prompt": "a cat waving"}
+        if model:
+            payload["model"] = model
+        ok, msg = _probe_json_post(endpoint_url, headers, payload, label=f"videos:{path}:{model or 'default'}")
+        if ok:
+            return ok, msg
+        last = (ok, msg)
+        # 404 → try next path; auth errors stop early
+        if "Auth failed" in (msg or "") or "Quota" in (msg or ""):
+            return ok, msg
+        if "not found" not in (msg or "").lower() and "404" not in (msg or ""):
+            # non-404 hard-ish error still useful as result
+            last = (ok, msg)
+    return last
+
+
+def probe_openai_audio(url: str, api_key: str, model: str = "") -> tuple:
+    """Probe TTS (speech) and optionally transcriptions route presence."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    speech_url = _openai_versioned_path(url, "audio/speech")
+    payload = {
+        "model": model or "tts-1",
+        "input": "hi",
+        "voice": "alloy",
+    }
+    ok, msg = _probe_json_post(speech_url, headers, payload, label=f"audio/speech:{model or 'tts-1'}")
+    if ok:
+        return ok, msg
+    # Fallback: transcriptions without file often 400 — still proves route
+    tr_url = _openai_versioned_path(url, "audio/transcriptions")
+    # multipart would be ideal; JSON 400/422 is enough for reachability
+    ok2, msg2 = _probe_json_post(
+        tr_url,
+        headers,
+        {"model": model or "whisper-1"},
+        label=f"audio/transcriptions:{model or 'whisper-1'}",
+    )
+    if ok2:
+        return ok2, msg2
+    return ok, msg
+
+
+def probe_openai_translations(url: str, api_key: str, model: str = "") -> tuple:
+    """Probe audio translations endpoint (Whisper-style)."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    endpoint_url = _openai_versioned_path(url, "audio/translations")
+    return _probe_json_post(
+        endpoint_url,
+        headers,
+        {"model": model or "whisper-1"},
+        label=f"audio/translations:{model or 'whisper-1'}",
+    )
+
+
 def probe_single_model_endpoint(endpoint: str, url: str, api_key: str, model: str) -> tuple:
     """Probe one concrete endpoint for one concrete model.
 
@@ -830,26 +964,41 @@ def probe_single_model_endpoint(endpoint: str, url: str, api_key: str, model: st
         return probe_anthropic(url, api_key, [model])
     if endpoint == "gemini_generate":
         return probe_gemini(url, api_key, [model])
+    if endpoint == "openai_images":
+        return probe_openai_images(url, api_key, model)
+    if endpoint == "openai_videos":
+        return probe_openai_videos(url, api_key, model)
+    if endpoint == "openai_audio":
+        return probe_openai_audio(url, api_key, model)
+    if endpoint == "openai_translations":
+        return probe_openai_translations(url, api_key, model)
     return False, f"Unknown endpoint: {endpoint}"
 
 
 # ── Model scanning ────────────────────────────────────────
 
-_MODEL_SKIP_PREFIXES = ("text-embedding", "embed-", "audio-", "tts-", "whisper",
-                        "davinci", "babbage", "curie", "ada", "code-",
-                        "moderations", "realtime", "video-", "image-")
+# Drop only inventory noise that is never useful as a routed model.
+_MODEL_SKIP_PREFIXES = (
+    "text-embedding", "embed-", "davinci", "babbage", "curie", "ada",
+    "code-", "moderations", "realtime",
+)
 
 
-def _is_chat_model(model_id: str) -> bool:
-    lower = model_id.lower()
+def _is_inventory_model(model_id: str) -> bool:
+    """Keep chat + media models; drop embeddings/moderation/legacy completions."""
+    lower = str(model_id or "").lower()
+    if not lower:
+        return False
     if any(lower.startswith(p) for p in _MODEL_SKIP_PREFIXES):
         return False
     if lower.endswith("-embedding") or lower.endswith("-embed") or lower.endswith("-moderation"):
         return False
-    # Skip video/image/audio/tts/asr models by keyword anywhere in ID
-    if any(kw in lower for kw in ("-video", "-image", "-audio", "-tts", "-asr")):
-        return False
     return True
+
+
+def _is_chat_model(model_id: str) -> bool:
+    """Backward-compatible alias: inventory models (chat + media)."""
+    return _is_inventory_model(model_id)
 
 
 def _scan_models_openai(url: str, headers: dict) -> list[str]:
@@ -866,7 +1015,7 @@ def _scan_models_openai(url: str, headers: dict) -> list[str]:
             raw = data.get("data", []) if isinstance(data, dict) else data
             ids = [m.get("id", "") for m in raw if isinstance(m, dict) and m.get("id")]
             if ids:
-                return [m for m in ids if _is_chat_model(m)]
+                return [m for m in ids if _is_inventory_model(m)]
     except Exception:
         pass
     return []
@@ -927,7 +1076,7 @@ def _scan_models_anthropic(url: str, api_key: str) -> list[str]:
                     continue
                 ids = [m.get("id", "") for m in raw if isinstance(m, dict) and m.get("id")]
                 if ids:
-                    return [m for m in ids if _is_chat_model(m)]
+                    return [m for m in ids if _is_inventory_model(m)]
             except Exception:
                 continue
     return []

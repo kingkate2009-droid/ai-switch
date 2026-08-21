@@ -53,6 +53,5 @@ if __name__ == "__main__":
         app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
     except OSError as e:
         print(f"Port {port} is already in use.")
-        print(f"Stop the other process or set a different port:")
-        print(f"  AI_SWITCH_PORT=8790 python3 run.py")
+        print(f"Stop the process using port {port}, then start AI Switch again.")
         sys.exit(1)

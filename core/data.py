@@ -369,14 +369,79 @@ def _next_id(items: list) -> str:
     return str(max((int(i.get("id", 0)) for i in items), default=0) + 1)
 
 
-def get_vendors() -> list[dict]:
-    return _load_data().get("vendors", [])
+def get_vendors(*, include_archived: bool = False) -> list[dict]:
+    """All vendors. By default excludes archived vendors (and their keys).
+
+    Pass ``include_archived=True`` for the archive list route.
+    """
+    vendors = _load_data().get("vendors", [])
+    if include_archived:
+        return vendors
+    out = []
+    for v in vendors:
+        if v.get("archived"):
+            continue
+        keys = [k for k in v.get("keys", []) if not k.get("archived")]
+        if keys != v.get("keys"):
+            v = dict(v)
+            v["keys"] = keys
+        out.append(v)
+    return out
+
+
+def get_archived_vendors() -> list[dict]:
+    """Vendors that are archived, or vendors with at least one archived key."""
+    results = []
+    for v in _load_data().get("vendors", []):
+        archived_keys = [k for k in v.get("keys", []) if k.get("archived")]
+        if v.get("archived") or archived_keys:
+            item = dict(v)
+            item["keys"] = archived_keys
+            item["partially_archived"] = bool(archived_keys) and not v.get("archived")
+            results.append(item)
+    return results
 
 
 def get_vendor(vendor_id: str) -> Optional[dict]:
-    for v in get_vendors():
+    for v in _load_data().get("vendors", []):
         if v["id"] == vendor_id:
             return v
+    return None
+
+
+def archive_key(vendor_id: str, key_id: str, archived: bool = True) -> Optional[dict]:
+    """Archive (or restore) one key. Returns updated key, or None if not found."""
+    data = _load_data()
+    for v in data["vendors"]:
+        if v["id"] != vendor_id:
+            continue
+        for k in v.get("keys", []):
+            if str(k["id"]) == str(key_id):
+                k["archived"] = bool(archived)
+                _save_data(data)
+                return k
+    return None
+
+
+def archive_vendor(vendor_id: str, archived: bool = True, *, archive_keys: bool = True) -> Optional[dict]:
+    """Archive (or restore) a vendor.
+
+    When archiving, marks the vendor and (by default) all its keys archived.
+    When restoring, clears the vendor + key archive flags.
+    """
+    data = _load_data()
+    for v in data["vendors"]:
+        if v["id"] != vendor_id:
+            continue
+        v["archived"] = bool(archived)
+        for k in v.get("keys", []):
+            if archived:
+                if archive_keys:
+                    k["archived"] = True
+            else:
+                k["archived"] = False
+        _save_data(data)
+        return v
     return None
 
 
@@ -404,9 +469,10 @@ def _normalize_tags(raw) -> list[str]:
 
 def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "openai",
                thinking_disabled: bool = False, proxy_target: str = "", tags=None,
-               checkin_url: str = "", *, force_new: bool = False) -> dict:
+               checkin_url: str = "", vtype: str = "", *, force_new: bool = False) -> dict:
     """Create vendor. Same normalized API URL auto-merges into existing (unless force_new)."""
     url = (api_url or "").rstrip("/")
+    vtype = _normalize_vendor_type(vtype)
     if not force_new and url:
         existing = find_vendor_by_url(url)
         if existing:
@@ -421,6 +487,8 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
                 merged_tags = _normalize_tags(list(existing.get("tags") or []) + list(tags or []))
                 if merged_tags != (existing.get("tags") or []):
                     patch["tags"] = merged_tags
+            if vtype and not (existing.get("vtype") or ""):
+                patch["vtype"] = vtype
             # Prefer /v1 OpenAI URL when existing lacks version path
             cur = (existing.get("api_url") or "").rstrip("/")
             if url.lower().endswith("/v1") and not cur.lower().endswith("/v1"):
@@ -445,6 +513,8 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
         "proxy_target": proxy_target,
         "checkin_url": (checkin_url or "").strip(),
         "tags": _normalize_tags(tags),
+        "vtype": _normalize_vendor_type(None),
+        "archived": False,
         "keys": [],
     }
     data["vendors"].append(vendor)
@@ -452,17 +522,32 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
     return vendor
 
 
+def _normalize_vendor_type(raw) -> str:
+    """Normalize vendor type: public|relay|key (公益站/中转站/纯KEY)."""
+    s = str(raw or "").strip().lower()
+    if s in ("public", "公益站", "gongyi", "public-welfare"):
+        return "public"
+    if s in ("relay", "中转站", "transfer"):
+        return "relay"
+    if s in ("key", "纯key", "纯KEY", "raw", "official"):
+        return "key"
+    return ""
+
+
 def update_vendor(vendor_id: str, **kwargs) -> Optional[dict]:
     data = _load_data()
     for v in data["vendors"]:
         if v["id"] == vendor_id:
-            for key in ("name", "provider", "api_url", "endpoint_type", "thinking_disabled", "proxy_target", "checkin_url"):
+            for key in ("name", "provider", "api_url", "endpoint_type", "thinking_disabled", "proxy_target", "checkin_url", "vtype", "archived"):
                 if key in kwargs:
-                    v[key] = kwargs[key]
-            if "api_url" in kwargs:
-                v["api_url"] = kwargs["api_url"].rstrip("/")
-            if "checkin_url" in kwargs:
-                v["checkin_url"] = (kwargs.get("checkin_url") or "").strip()
+                    if key == "vtype":
+                        v[key] = _normalize_vendor_type(kwargs[key])
+                    elif key == "archived":
+                        v[key] = bool(kwargs[key])
+                    elif key == "api_url":
+                        v[key] = str(kwargs[key] or "").rstrip("/")
+                    else:
+                        v[key] = kwargs[key]
             if "tags" in kwargs:
                 v["tags"] = _normalize_tags(kwargs["tags"])
             _save_data(data)
@@ -659,6 +744,7 @@ def batch_import_entries(entries: list) -> dict:
                 endpoint_type = "anthropic" if (
                     "/anthropic" in api_url.lower() or "api.anthropic.com" in api_url.lower()
                 ) else "openai"
+            entry_vtype = _normalize_vendor_type(entry.get("type") or entry.get("vtype"))
             vendor_name = (entry.get("vendor_name") or entry.get("vendor") or "").strip()
 
             if not api_key or not api_url:
@@ -705,6 +791,8 @@ def batch_import_entries(entries: list) -> dict:
                     "proxy_target": "",
                     "checkin_url": "",
                     "tags": [],
+                    "vtype": _normalize_vendor_type(entry_vtype or entry.get("type")),
+                    "archived": False,
                     "keys": [],
                 }
                 vendors.append(vendor)
@@ -771,6 +859,7 @@ _KEY_FIELDS = (
     "name", "api_key", "enabled", "models", "default_model",
     "check_model",  # primary model for health / scheduled checks; empty = auto
     "disabled_models", "model_health", "endpoint_capabilities", "quality_scores", "notes", "role",
+    "archived",
 )
 
 # role: "" | "primary" | "backup"
@@ -902,6 +991,24 @@ def _apply_key_fields(k: dict, kwargs: dict) -> None:
             val = str(val or "")[:500]
         elif key == "role":
             val = _normalize_role(val)
+        elif key in ("endpoint_capabilities", "model_health", "quality_scores") and isinstance(val, dict):
+            # Merge maps so bulk health can patch only probed models without
+            # wiping the rest of the inventory classification/history.
+            # Explicit empty dict still clears (used when key-level probe fails).
+            if not val:
+                k[key] = {}
+            else:
+                cur = k.get(key) if isinstance(k.get(key), dict) else {}
+                merged = dict(cur)
+                for mid, rec in val.items():
+                    if rec is None:
+                        merged.pop(str(mid), None)
+                    elif isinstance(rec, dict):
+                        merged[str(mid)] = dict(rec)
+                    else:
+                        merged[str(mid)] = rec
+                k[key] = merged
+            continue
         k[key] = val
 
 
@@ -990,6 +1097,30 @@ def update_key_data(vendor_id: str, key_id: str, **kwargs) -> Optional[dict]:
     return None
 
 
+def update_keys_data_bulk(items: list[dict]) -> int:
+    """Apply many key updates with one document read and one SQLite write."""
+    if not items:
+        return 0
+    pending = {
+        (str(item.get("vendor_id") or ""), str(item.get("key_id") or "")): item.get("updates") or {}
+        for item in items
+    }
+    changed = 0
+    with _DATA_LOCK:
+        data = _load_data()
+        for vendor in data.get("vendors") or []:
+            vendor_id = str(vendor.get("id") or "")
+            for key in vendor.get("keys") or []:
+                updates = pending.get((vendor_id, str(key.get("id") or "")))
+                if updates is None:
+                    continue
+                _apply_key_fields(key, updates)
+                changed += 1
+        if changed:
+            _save_data_core(data)
+    return changed
+
+
 def update_model_quality_score(vendor_id: str, key_id: str, model_id: str, record: dict) -> Optional[dict]:
     """Merge one quality result into the latest key snapshot atomically."""
     with _DATA_LOCK:
@@ -1063,6 +1194,7 @@ _SETTINGS_KEYS = (
     "onboarding_done",       # bool
     "read_only",             # bool, default False — block mutating APIs except settings/auth
     "health_auto_failover",  # bool, default False — promote backup when primary fails check
+    "health_archive_streak_days",  # int, default 10 — consecutive fail days before key auto-archive
     "pricing",              # dict model -> {input,output} USD/1M
     "budget_daily_cost",    # float USD, 0 = off
     "budget_monthly_cost",  # float USD, 0 = off
@@ -1425,18 +1557,43 @@ def list_all_tags() -> list[str]:
     return out
 
 
-def get_models_catalog() -> dict:
+def get_models_catalog(endpoint: str = None, modality: str = None, vtype: str = None) -> dict:
     """Aggregate models across all keys for a quick catalog view.
 
     locations are unique vendors (full vendor name), preferring enabled keys.
+
+    Optional filters:
+    - endpoint: fine-grained id (openai_chat, openai_images, …) or comma list
+    - modality: chat|image|video|audio|translation
+    - vtype: public|relay|key (公益站/中转站/纯KEY)
     """
-    from core.endpoints import model_is_verified_usable
+    from core.endpoints import (
+        ALL_ENDPOINTS,
+        CHAT_ENDPOINTS,
+        catalog_endpoint_options,
+        classify_model_endpoints,
+        effective_model_endpoints,
+        expand_endpoint_values,
+        model_is_verified_usable,
+        model_modality,
+        model_state,
+    )
     from core.health_checker import get_all_health_status
     from core.providers import official_vendor_info
+
+    want_endpoints = set(expand_endpoint_values(endpoint)) if endpoint else set()
+    want_modality = str(modality or "").strip().lower()
+    if want_modality and want_modality not in ("chat", "image", "video", "audio", "translation", "other"):
+        want_modality = ""
+    want_vtype = str(vtype or "").strip().lower()
+    if want_vtype not in ("public", "relay", "key"):
+        want_vtype = ""
 
     health = get_all_health_status()
     by_model: dict[str, dict] = {}
     for v in get_vendors():
+        if want_vtype and (v.get("vtype") or "") != want_vtype:
+            continue
         vid = v.get("id")
         vname = (v.get("name") or "").strip() or (v.get("provider") or "vendor")
         official = official_vendor_info(v)
@@ -1458,28 +1615,57 @@ def get_models_catalog() -> dict:
                     "vendor_count": 0,
                     "enabled_count": 0,
                     "locations": [],
+                    "endpoints": set(),
+                    "classified_endpoints": set(),
+                    "modalities": set(),
                     "_vendors": set(),
                     "_loc_by_vendor": {},
                 })
                 rec["key_count"] += 1
                 rec["_vendors"].add(vid)
-                model_on = enabled_key and mid not in disabled and model_is_verified_usable(k, mid)
+                verified = model_is_verified_usable(k, mid)
+                model_on = enabled_key and mid not in disabled and verified
                 if model_on:
                     rec["enabled_count"] += 1
+                # Probed / effective endpoints
+                eps = effective_model_endpoints(v, k, mid) if verified else []
+                if not eps:
+                    st = model_state(k, mid)
+                    eps = expand_endpoint_values(
+                        st.get("detected") or st.get("selected") or st.get("classified") or []
+                    )
+                # Always classify so catalog filters work before live probes
+                classified = classify_model_endpoints(v, mid)
+                st = model_state(k, mid)
+                stored_class = expand_endpoint_values(st.get("classified") or [])
+                if stored_class:
+                    classified = list(dict.fromkeys(list(stored_class) + list(classified)))
+                display_eps = list(eps) if eps else list(classified)
+                for ep in display_eps:
+                    if ep in ALL_ENDPOINTS:
+                        rec["endpoints"].add(ep)
+                for ep in classified:
+                    if ep in ALL_ENDPOINTS:
+                        rec["classified_endpoints"].add(ep)
+                mod = model_modality(mid)
+                rec["modalities"].add(mod)
                 # one location entry per vendor; prefer enabled key as jump target
                 prev = rec["_loc_by_vendor"].get(vid)
                 if not prev or (model_on and not prev.get("active")):
                     rec["_loc_by_vendor"][vid] = {
                         "vendor_id": vid,
                         "vendor_name": vname,
+                        "vtype": v.get("vtype") or "",
                         "key_id": kid,
                         "key_name": kname,
                         "key_enabled": enabled_key,
                         "model_enabled": bool(model_on),
                         "model_syncable": bool(model_on),
                         "vendor_healthy": vendor_healthy,
-                        "verified": model_is_verified_usable(k, mid),
+                        "verified": verified,
                         "active": vendor_healthy,
+                        "endpoints": list(display_eps),
+                        "classified_endpoints": list(classified),
                         **official,
                         "key_count": 1,
                     }
@@ -1489,7 +1675,18 @@ def get_models_catalog() -> dict:
                         prev["active"] = True
                         prev["key_enabled"] = True
                         prev["model_enabled"] = True
+                    merged = list(prev.get("endpoints") or [])
+                    for ep in display_eps:
+                        if ep not in merged:
+                            merged.append(ep)
+                    prev["endpoints"] = merged
+                    cmerged = list(prev.get("classified_endpoints") or [])
+                    for ep in classified:
+                        if ep not in cmerged:
+                            cmerged.append(ep)
+                    prev["classified_endpoints"] = cmerged
     items = []
+    chat_set = set(CHAT_ENDPOINTS)
     for mid, rec in by_model.items():
         loc_map = rec.pop("_loc_by_vendor", {}) or {}
         # active (normal/enabled) vendors first, then full name
@@ -1497,9 +1694,96 @@ def get_models_catalog() -> dict:
         locations.sort(key=lambda x: (0 if x.get("active") else 1, str(x.get("vendor_name") or "").lower()))
         rec["locations"] = locations
         rec["vendor_count"] = len(rec.pop("_vendors", set()))
+        endpoints = sorted(rec.pop("endpoints", set()) or [])
+        classified_endpoints = sorted(rec.pop("classified_endpoints", set()) or [])
+        modalities = sorted(rec.pop("modalities", set()) or [])
+        # Heuristic modality always present even before probe
+        if not modalities:
+            modalities = [model_modality(mid)]
+        # Guarantee display endpoints for filter/UI
+        if not endpoints:
+            endpoints = list(classified_endpoints) or classify_model_endpoints({}, mid)
+        rec["endpoints"] = endpoints
+        rec["classified_endpoints"] = classified_endpoints or list(endpoints)
+        rec["modalities"] = modalities
+        rec["modality"] = modalities[0] if len(modalities) == 1 else (model_modality(mid))
+        if want_endpoints:
+            have = set(endpoints) | set(classified_endpoints)
+            # Chat family: any chat protocol matches any chat filter tag
+            if want_endpoints & chat_set and (have & chat_set or rec.get("modality") == "chat"):
+                pass
+            elif not (have & want_endpoints):
+                continue
+        if want_modality and want_modality not in modalities and rec.get("modality") != want_modality:
+            continue
         items.append(rec)
     items.sort(key=lambda r: (-r["key_count"], str(r["model"]).lower()))
-    return {"count": len(items), "models": items}
+    return {
+        "count": len(items),
+        "models": items,
+        "endpoint_options": catalog_endpoint_options(),
+        "filters": {
+            "endpoint": list(want_endpoints) if want_endpoints else [],
+            "modality": want_modality or "",
+        },
+    }
+
+
+def classify_all_model_endpoints(*, persist: bool = True) -> dict:
+    """Classify every inventoried model into endpoint tags.
+
+    Writes ``classified`` on each model's endpoint_capabilities without
+    overwriting live ``detected`` / probe results.  Safe to re-run.
+    """
+    from core.endpoints import classify_model_endpoints, model_modality
+
+    data = _load_data()
+    total = 0
+    updated = 0
+    by_modality: dict[str, int] = {}
+    by_endpoint: dict[str, int] = {}
+    for vendor in data.get("vendors") or []:
+        for key in vendor.get("keys") or []:
+            caps = key.setdefault("endpoint_capabilities", {})
+            if not isinstance(caps, dict):
+                caps = {}
+                key["endpoint_capabilities"] = caps
+            for mid in list_model_ids(key):
+                if not mid:
+                    continue
+                total += 1
+                classified = classify_model_endpoints(vendor, mid)
+                mod = model_modality(mid)
+                by_modality[mod] = by_modality.get(mod, 0) + 1
+                for ep in classified:
+                    by_endpoint[ep] = by_endpoint.get(ep, 0) + 1
+                prev = caps.get(mid) if isinstance(caps.get(mid), dict) else {}
+                state = dict(prev) if prev else {
+                    "mode": "auto",
+                    "detected": [],
+                    "selected": [],
+                    "checks": {},
+                    "checked_at": "",
+                }
+                old = list(state.get("classified") or [])
+                if old != list(classified):
+                    updated += 1
+                state["classified"] = list(classified)
+                state["modality"] = mod
+                state.setdefault("mode", "auto")
+                state.setdefault("detected", [])
+                state.setdefault("selected", [])
+                state.setdefault("checks", {})
+                caps[mid] = state
+    if persist:
+        _save_data(data)
+    return {
+        "total": total,
+        "updated": updated,
+        "by_modality": by_modality,
+        "by_endpoint": by_endpoint,
+        "persisted": bool(persist),
+    }
 
 
 def update_settings(**kwargs) -> dict:
@@ -2989,14 +3273,19 @@ def list_checkin_vendors(
     *,
     vendor_id: str = "",
     support: str = "all",
+    vtype: str = "",
 ) -> list[dict]:
     """List vendors for check-in page with filters.
 
     support: all | yes | no
+    vtype: public|relay|key (公益站/中转站/纯KEY)
     """
+    want_vtype = _normalize_vendor_type(vtype)
     out = []
     for v in get_vendors():
         if vendor_id and str(v.get("id")) != str(vendor_id):
+            continue
+        if want_vtype and (v.get("vtype") or "") != want_vtype:
             continue
         url = (v.get("checkin_url") or "").strip()
         supports = bool(url)
@@ -3016,6 +3305,7 @@ def list_checkin_vendors(
             "key_count": len(keys),
             "enabled_key_count": len(enabled_keys),
             "tags": v.get("tags") or [],
+            "vtype": v.get("vtype") or "",
         })
     out.sort(key=lambda x: (0 if x["supports_checkin"] else 1, (x.get("name") or "").lower()))
     return out

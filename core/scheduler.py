@@ -25,6 +25,9 @@ _state: dict[str, Any] = {
     "next_run_at": None,
     "runs_count": 0,
     "thread_started_at": None,
+    "current_completed": 0,
+    "current_total": 0,
+    "current_updated_at": None,
 }
 
 
@@ -68,6 +71,9 @@ def run_health_check(
         _state["running_now"] = True
         _state["last_started_at"] = _now_iso()
         _state["last_error"] = None
+        _state["current_completed"] = 0
+        _state["current_total"] = 0
+        _state["current_updated_at"] = _state["last_started_at"]
         started = _epoch()
         from core.health_checker import check_all_keys
         from core.health_history import append_run, summarize_results
@@ -75,11 +81,26 @@ def run_health_check(
         # manual default = force full; scheduled = only_due
         if source == "manual" and not only_due:
             force = True
+        def _progress(completed: int, total: int, phase: str = "") -> None:
+            _state["current_completed"] = int(completed)
+            _state["current_total"] = int(total)
+            _state["current_updated_at"] = _now_iso()
+            if phase:
+                _state["current_phase"] = phase
+
+        _state["current_phase"] = "probing"
+        # Manual bulk also uses quick key-health (1–2 models, fail-fast). Full
+        # per-model matrices stay on "check models" / single-model endpoint probe.
         results = check_all_keys(
             include_disabled=include_disabled,
             only_due=only_due,
             force=force,
+            quick=True,
+            concurrency=16 if source == "scheduled" else 8,
+            max_round_seconds=1800 if source == "scheduled" else 0,
+            progress_callback=_progress,
         )
+        _state["current_phase"] = "done"
         summary = summarize_results(results)
         elapsed_ms = int((_epoch() - started) * 1000)
         # compact per-key for history (no secrets / large model lists)
@@ -153,6 +174,9 @@ def run_health_check(
 
 
 def _loop() -> None:
+    # Do not compete with first-page reads immediately after process startup.
+    # Explicit manual runs still start at once through run_health_check().
+    initial_wait = True
     while not _stop.is_set():
         try:
             from core.data import get_settings
@@ -170,6 +194,13 @@ def _loop() -> None:
             if _pause.is_set():
                 _set_next_run(None)
                 _stop.wait(2)
+                continue
+
+            if initial_wait:
+                initial_wait = False
+                _set_next_run(interval)
+                if _stop.wait(interval):
+                    return
                 continue
 
             log.info("Scheduled health check starting (base interval=%ss, due-only)", interval)
@@ -290,6 +321,9 @@ def get_status() -> dict:
         "last_run_id": _state.get("last_run_id"),
         "next_run_at": _state.get("next_run_at") if enabled and not paused else None,
         "runs_count_session": int(_state.get("runs_count") or 0),
+        "current_completed": int(_state.get("current_completed") or 0),
+        "current_total": int(_state.get("current_total") or 0),
+        "current_updated_at": _state.get("current_updated_at"),
         "thread_started_at": _state.get("thread_started_at"),
         "health_auto_disable": bool(settings.get("health_auto_disable")),
         "health_auto_failover": bool(settings.get("health_auto_failover")),

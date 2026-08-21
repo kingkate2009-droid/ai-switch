@@ -1913,6 +1913,7 @@ input[type="checkbox"] { accent-color: var(--primary); }
 }
 
 .modal-wide { width: 680px; }
+.modal-wide.push-preview-modal { width: min(960px, 96vw); max-width: 96vw; }
 
 /* Batch import: wider, flex layout, no accidental overlay close on inner scroll */
 .modal.modal-wide.modal-batch {

@@ -52,7 +52,7 @@ from core.model_quality import evaluate_key_quality, evaluate_model_quality, lis
 from core.data import update_model_endpoint_capabilities
 from core.i18n import SUPPORTED_LANGS, get_translations, resolve_lang, t as _t
 from core.audit import log_event, list_events
-from backends import init_backends, get as get_backend, get_all as get_all_backends, reconcile_all
+from backends import init_backends, get as get_backend, get_all as get_all_backends, reconcile_all, reconcile_all_async
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="[ai-switch] %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -576,14 +576,82 @@ def api_vendors_export_csv():
     return resp
 
 
+def _slim_key_for_list(key: dict) -> dict:
+    """Drop bulky nested maps from list payloads so the vendors page stays fast."""
+    if not isinstance(key, dict):
+        return key
+    out = dict(key)
+    # Keep counts / presence flags; full maps load on demand in key/model UI
+    caps = out.get("endpoint_capabilities")
+    if isinstance(caps, dict):
+        out["endpoint_capabilities_count"] = len(caps)
+        # Keep only a tiny preview for the currently relevant models if small
+        if len(caps) <= 8:
+            pass  # small enough to keep
+        else:
+            out.pop("endpoint_capabilities", None)
+    mh = out.get("model_health")
+    if isinstance(mh, dict) and len(mh) > 12:
+        out["model_health_count"] = len(mh)
+        # keep only healthy entries (usually few after key-health)
+        slim_mh = {
+            mid: rec for mid, rec in mh.items()
+            if isinstance(rec, dict) and rec.get("healthy") is True
+        }
+        if len(slim_mh) <= 12:
+            out["model_health"] = slim_mh
+        else:
+            out.pop("model_health", None)
+    qs = out.get("quality_scores")
+    if isinstance(qs, dict) and len(qs) > 20:
+        out["quality_scores_count"] = len(qs)
+        out.pop("quality_scores", None)
+    # Never send full secrets larger than needed — UI masks anyway
+    return out
+
+
+def _slim_vendor_for_list(vendor: dict) -> dict:
+    if not isinstance(vendor, dict):
+        return vendor
+    out = dict(vendor)
+    keys = out.get("keys")
+    if isinstance(keys, list):
+        out["keys"] = [_slim_key_for_list(k) for k in keys]
+    return out
+
+
 @app.route("/api/vendors", methods=["GET"])
 def api_list_vendors():
     vendors = get_vendors()
+    vtype = (request.args.get("vtype") or "").strip().lower()
+    if vtype in ("public", "relay", "key"):
+        vendors = [v for v in vendors if (v.get("vtype") or "") == vtype]
     from core.providers import official_vendor_info
+    slim = []
     for vendor in vendors:
-        vendor.update(official_vendor_info(vendor))
+        item = dict(vendor)
+        item.update(official_vendor_info(vendor))
+        slim.append(_slim_vendor_for_list(item))
     health = get_all_health_status()
-    return jsonify({"vendors": vendors, "health": health})
+    # Health cache can be large; keep list view fields only
+    health_slim = {}
+    for ck, row in (health or {}).items():
+        if not isinstance(row, dict):
+            health_slim[ck] = row
+            continue
+        health_slim[ck] = {
+            "vendor_id": row.get("vendor_id"),
+            "key_id": row.get("key_id"),
+            "healthy": row.get("healthy"),
+            "latency_ms": row.get("latency_ms"),
+            "error": (str(row.get("error") or "")[:200] or None),
+            "error_code": row.get("error_code"),
+            "error_label": row.get("error_label"),
+            "checked_at": row.get("checked_at"),
+            "message": row.get("message"),
+            "used_model": row.get("used_model"),
+        }
+    return jsonify({"vendors": slim, "health": health_slim})
 
 
 @app.route("/api/vendors", methods=["POST"])
@@ -600,6 +668,7 @@ def api_create_vendor():
         proxy_target=data.get("proxy_target", ""),
         tags=data.get("tags"),
         checkin_url=data.get("checkin_url", ""),
+        vtype=data.get("type") or data.get("vtype", ""),
     )
     log_event("vendor.add", vendor_id=v.get("id"), name=v.get("name"), provider=v.get("provider"))
     return jsonify(v), 201
@@ -612,11 +681,12 @@ def api_update_vendor(vendor_id):
     allowed = {k: data[k] for k in (
         "name", "provider", "api_url", "endpoint_type",
         "thinking_disabled", "proxy_target", "tags", "checkin_url",
+        "vtype", "archived",
     ) if k in data}
     v = update_vendor(vendor_id, **allowed)
     if not v:
         return jsonify({"error": "not found"}), 404
-    reconcile_all()
+    reconcile_all_async()
     return jsonify(v)
 
 
@@ -635,9 +705,12 @@ def api_checkin_vendors():
     """
     vendor_id = (request.args.get("vendor_id") or "").strip()
     support = (request.args.get("support") or "all").strip().lower()
+    vtype = (request.args.get("vtype") or "").strip().lower()
     if support not in ("all", "yes", "no"):
         support = "all"
-    items = list_checkin_vendors(vendor_id=vendor_id, support=support)
+    if vtype not in ("public", "relay", "key"):
+        vtype = ""
+    items = list_checkin_vendors(vendor_id=vendor_id, support=support, vtype=vtype)
     return jsonify({
         "vendors": items,
         "total": len(items),
@@ -648,7 +721,21 @@ def api_checkin_vendors():
 
 @app.route("/api/models/catalog", methods=["GET"])
 def api_models_catalog():
-    return jsonify(get_models_catalog())
+    endpoint = (request.args.get("endpoint") or request.args.get("endpoints") or "").strip()
+    modality = (request.args.get("modality") or "").strip()
+    vtype = (request.args.get("vtype") or "").strip().lower()
+    if vtype not in ("public", "relay", "key"):
+        vtype = ""
+    return jsonify(get_models_catalog(endpoint=endpoint or None, modality=modality or None, vtype=vtype or None))
+
+
+@app.route("/api/models/classify-endpoints", methods=["POST"])
+def api_models_classify_endpoints():
+    """Heuristic endpoint classification for all inventoried models (no network)."""
+    from core.data import classify_all_model_endpoints
+    result = classify_all_model_endpoints(persist=True)
+    log_event("models.classify_endpoints", total=result.get("total"), updated=result.get("updated"))
+    return jsonify(result)
 
 
 @app.route("/api/models/quality-targets", methods=["GET"])
@@ -674,6 +761,43 @@ def api_delete_vendor(vendor_id):
     reconcile_all()
     log_event("vendor.delete", vendor_id=vendor_id, name=(v or {}).get("name"))
     return jsonify({"success": True})
+
+
+@app.route("/api/vendors/archived", methods=["GET"])
+def api_archived_vendors():
+    """List archived vendors and archived keys (archive page)."""
+    from core.data import get_archived_vendors
+    vendors = get_archived_vendors()
+    return jsonify({"vendors": vendors, "count": len(vendors)})
+
+
+@app.route("/api/vendors/<vendor_id>/archive", methods=["POST"])
+def api_archive_vendor(vendor_id):
+    """Archive a vendor (and all its keys). Archived items only appear in archive list."""
+    from core.data import archive_vendor
+    body = request.get_json(silent=True) or {}
+    archived = bool(body.get("archived", True))
+    restore_keys = not archived
+    v = archive_vendor(vendor_id, archived=archived, archive_keys=not restore_keys)
+    if not v:
+        return jsonify({"error": "not found"}), 404
+    reconcile_all()
+    log_event("vendor.archive", vendor_id=vendor_id, archived=archived, name=v.get("name"))
+    return jsonify({"success": True, "vendor": v, "archived": archived})
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/archive", methods=["POST"])
+def api_archive_key_route(vendor_id, key_id):
+    """Archive / restore a single key."""
+    from core.data import archive_key
+    body = request.get_json(silent=True) or {}
+    archived = bool(body.get("archived", True))
+    k = archive_key(vendor_id, key_id, archived=archived)
+    if not k:
+        return jsonify({"error": "not found"}), 404
+    reconcile_all()
+    log_event("key.archive", vendor_id=vendor_id, key_id=key_id, archived=archived)
+    return jsonify({"success": True, "key": k, "archived": archived})
 
 
 
@@ -724,7 +848,9 @@ def api_list_keys(vendor_id):
     keys = get_keys(vendor_id)
     if keys is None:
         return jsonify({"error": "vendor not found"}), 404
-    return jsonify({"keys": keys})
+    if (request.args.get("archived") or "").lower() in ("1", "true", "yes"):
+        return jsonify({"keys": [k for k in keys if k.get("archived")]})
+    return jsonify({"keys": [k for k in keys if not k.get("archived")]})
 
 
 @app.route("/api/vendors/<vendor_id>/keys", methods=["POST"])
@@ -785,6 +911,7 @@ def api_update_key(vendor_id, key_id):
     allowed = {k: data[k] for k in (
         "name", "api_key", "enabled", "models", "default_model",
         "check_model", "disabled_models", "model_health", "endpoint_capabilities", "notes", "role",
+        "archived",
     ) if k in data}
     k = update_key(vendor_id, key_id, **allowed)
     if not k:
@@ -908,7 +1035,7 @@ def api_get_model_endpoints(vendor_id, key_id, model_id):
         "vendor_id": vendor_id,
         "key_id": key_id,
         "model": model_id,
-        "candidates": endpoint_candidates(v),
+        "candidates": endpoint_candidates(v, model_id),
         "capabilities": state,
         "effective": effective_model_endpoints(v, k, model_id),
     })
@@ -938,7 +1065,10 @@ def api_update_model_endpoints(vendor_id, key_id, model_id):
     k = get_key(vendor_id, key_id)
     if not v or not k:
         return jsonify({"error": "not found"}), 404
-    allowed = set(endpoint_candidates(v))
+    allowed = set(endpoint_candidates(v, model_id))
+    # Manual picks may include any known endpoint the key previously detected
+    from core.endpoints import ALL_ENDPOINTS
+    allowed.update(ALL_ENDPOINTS)
     if selected is not None and any(x not in allowed for x in selected):
         return jsonify({"error": "selected endpoint is not valid for this vendor"}), 400
     updated = update_model_endpoint_capabilities(
@@ -1087,7 +1217,7 @@ def api_health_check_all():
         return jsonify({"success": False, "busy": True, "error": out.get("error")}), 409
     results = out.get("results") or []
     if body.get("reconcile", True) and not out.get("error"):
-        reconcile_all()
+        reconcile_all_async()
     log_event(
         "health.check_all",
         ok=(out.get("summary") or {}).get("ok"),
@@ -1724,15 +1854,42 @@ def api_sync_push_preview():
 
 @app.route("/api/sync/push", methods=["POST"])
 def api_sync_push():
-    """Push system keys to all backend engines (reconcile). Manual trigger."""
+    """Push system keys to backend engines (reconcile).
+
+    Default is async so the UI (and health-check finish path) is not blocked by
+    slow backends such as OpenClaw full rewrites. Pass ``{"wait": true}`` for
+    a blocking push that returns per-backend results.
+
+    Optional body ``{"vendor_ids": [...]}`` limits the push to those vendors
+    (single-key / single-vendor checks reuse this to avoid a full rewrite).
+    """
     try:
-        results = reconcile_all()
-        log_event("sync.push", backends=len(results or {}))
+        body = request.get_json(silent=True) or {}
+        vendor_ids = body.get("vendor_ids")
+        if isinstance(vendor_ids, list):
+            vendor_ids = [str(v) for v in vendor_ids if str(v).strip()] or None
+        else:
+            vendor_ids = None
+        wait = bool(body.get("wait")) or request.args.get("wait") in ("1", "true", "yes")
+        if not wait:
+            reconcile_all_async(vendor_ids=vendor_ids)
+            log_event("sync.push", mode="async", vendors=len(vendor_ids) if vendor_ids else "all")
+            return jsonify({
+                "success": True,
+                "async": True,
+                "message": "Backend sync started in background",
+                "ok": 0,
+                "fail": 0,
+                "skipped": 0,
+            })
+        results = reconcile_all(vendor_ids=vendor_ids)
+        log_event("sync.push", backends=len(results or {}), mode="wait", vendors=len(vendor_ids) if vendor_ids else "all")
         ok = sum(1 for r in (results or {}).values() if r.get("ok"))
         fail = sum(1 for r in (results or {}).values() if not r.get("ok") and not r.get("skipped"))
         skipped = sum(1 for r in (results or {}).values() if r.get("skipped"))
         return jsonify({
             "success": fail == 0,
+            "async": False,
             "message": f"Pushed: {ok} ok, {fail} failed, {skipped} skipped",
             "results": results or {},
             "ok": ok,
@@ -2105,9 +2262,10 @@ def api_create_downstream():
 
 
 @app.route("/api/downstream/models", methods=["GET"])
-def api_downstream_available_models():
+def api_downstream_models():
     from core.downstream import available_models_catalog
-    return jsonify(available_models_catalog())
+    endpoint = (request.args.get("endpoint") or request.args.get("endpoints") or "").strip()
+    return jsonify(available_models_catalog(endpoint=endpoint or None))
 
 
 @app.route("/api/downstream/<key_id>", methods=["GET"])
@@ -2365,6 +2523,98 @@ def api_public_messages():
         return Response(r.content, status=r.status_code, content_type=r.headers.get("Content-Type", "application/json"))
     except Exception as e:
         return jsonify({"type": "error", "error": {"type": "api_error", "message": str(e)}}), 502
+
+
+def _public_media_proxy(*, bucket: str, path: str, default_model: str = ""):
+    """Shared handler for image/video/audio/translation OpenAI-compatible routes."""
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    d, err = _downstream_auth()
+    if err:
+        return err
+    if bucket not in (d.get("endpoint_types") or []):
+        return jsonify({
+            "error": {
+                "message": f"This key does not allow {bucket} endpoint",
+                "type": "invalid_request_error",
+            }
+        }), 400
+    body_json = request.get_json(silent=True) or {}
+    model = (body_json.get("model") or default_model or "").strip()
+    # multipart (audio file uploads) may not have JSON body
+    if not model and request.form:
+        model = (request.form.get("model") or default_model or "").strip()
+    if not model:
+        return jsonify({"error": {"message": "model is required", "type": "invalid_request_error"}}), 400
+    from core.downstream import resolve_route
+    hit = resolve_route(d, model, endpoint_type=bucket)
+    if not hit:
+        return jsonify({
+            "error": {
+                "message": f"No healthy upstream for model '{model}' ({bucket})",
+                "type": "model_not_found",
+            }
+        }), 404
+    raw = request.get_data()
+    t0 = datetime.now()
+    try:
+        r, url = _proxy_upstream(
+            hit["vendor"], hit["key"],
+            path=path,
+            body=raw,
+            headers=dict(request.headers),
+            stream=False,
+        )
+        elapsed_ms = int((datetime.now() - t0).total_seconds() * 1000)
+        ok = 200 <= r.status_code < 400
+        _record_proxy_usage(
+            hit["vendor"], hit["key"], r.content if r.headers.get("Content-Type", "").startswith("application/json") else b"{}",
+            elapsed_ms, model=model, status_code=r.status_code, success=ok,
+        )
+        return Response(
+            r.content,
+            status=r.status_code,
+            content_type=r.headers.get("Content-Type", "application/json"),
+        )
+    except Exception as e:
+        _record_proxy_usage(
+            hit["vendor"], hit["key"], json.dumps({"error": str(e)}).encode(),
+            0, model=model, status_code=502, success=False,
+        )
+        return jsonify({"error": {"message": str(e), "type": "api_error"}}), 502
+
+
+@app.route("/v1/images/generations", methods=["POST", "OPTIONS"])
+@app.route("/api/v1/images/generations", methods=["POST", "OPTIONS"])
+def api_public_images_generations():
+    return _public_media_proxy(bucket="image", path="images/generations")
+
+
+@app.route("/v1/videos", methods=["POST", "OPTIONS"])
+@app.route("/api/v1/videos", methods=["POST", "OPTIONS"])
+@app.route("/v1/videos/generations", methods=["POST", "OPTIONS"])
+@app.route("/api/v1/videos/generations", methods=["POST", "OPTIONS"])
+def api_public_videos():
+    path = "videos/generations" if "generations" in (request.path or "") else "videos"
+    return _public_media_proxy(bucket="video", path=path)
+
+
+@app.route("/v1/audio/speech", methods=["POST", "OPTIONS"])
+@app.route("/api/v1/audio/speech", methods=["POST", "OPTIONS"])
+def api_public_audio_speech():
+    return _public_media_proxy(bucket="audio", path="audio/speech", default_model="tts-1")
+
+
+@app.route("/v1/audio/transcriptions", methods=["POST", "OPTIONS"])
+@app.route("/api/v1/audio/transcriptions", methods=["POST", "OPTIONS"])
+def api_public_audio_transcriptions():
+    return _public_media_proxy(bucket="audio", path="audio/transcriptions", default_model="whisper-1")
+
+
+@app.route("/v1/audio/translations", methods=["POST", "OPTIONS"])
+@app.route("/api/v1/audio/translations", methods=["POST", "OPTIONS"])
+def api_public_audio_translations():
+    return _public_media_proxy(bucket="translation", path="audio/translations", default_model="whisper-1")
 
 
 # ── Proxy ──────────────────────────────────────────────────
@@ -2676,6 +2926,7 @@ def api_update_settings():
         ("health_ok_streak", 3, 1, 50),
         ("health_fail_interval_seconds", 7200, 60, 86400 * 7),
         ("health_ok_interval_seconds", 3600, 60, 86400 * 7),
+        ("health_archive_streak_days", 10, 0, 365),
     ):
         if sk in data:
             try:

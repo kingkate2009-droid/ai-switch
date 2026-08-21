@@ -19,13 +19,50 @@ OPENAI_CHAT = "openai_chat"
 OPENAI_RESPONSES = "openai_responses"
 ANTHROPIC_MESSAGES = "anthropic_messages"
 GEMINI_GENERATE = "gemini_generate"
+OPENAI_IMAGES = "openai_images"
+OPENAI_VIDEOS = "openai_videos"
+OPENAI_AUDIO = "openai_audio"
+OPENAI_TRANSLATIONS = "openai_translations"
 
-ALL_ENDPOINTS = (
+# Text / chat family (coding-tool backends only consume these)
+CHAT_ENDPOINTS = (
     OPENAI_CHAT,
     OPENAI_RESPONSES,
     ANTHROPIC_MESSAGES,
     GEMINI_GENERATE,
 )
+
+# Non-text generation / media family (downstream proxy + catalog)
+MEDIA_ENDPOINTS = (
+    OPENAI_IMAGES,
+    OPENAI_VIDEOS,
+    OPENAI_AUDIO,
+    OPENAI_TRANSLATIONS,
+)
+
+ALL_ENDPOINTS = CHAT_ENDPOINTS + MEDIA_ENDPOINTS
+
+# Coarse downstream protocol buckets (virtual key allow-list)
+DOWNSTREAM_ENDPOINT_TYPES = (
+    "openai",
+    "anthropic",
+    "image",
+    "video",
+    "audio",
+    "translation",
+)
+
+# Map fine-grained capability ids → downstream allow-list values
+ENDPOINT_TO_DOWNSTREAM = {
+    OPENAI_CHAT: "openai",
+    OPENAI_RESPONSES: "openai",
+    ANTHROPIC_MESSAGES: "anthropic",
+    GEMINI_GENERATE: "openai",
+    OPENAI_IMAGES: "image",
+    OPENAI_VIDEOS: "video",
+    OPENAI_AUDIO: "audio",
+    OPENAI_TRANSLATIONS: "translation",
+}
 
 # A successful probe is evidence, not a permanent capability declaration.
 # Backends fail closed once that evidence is old, until the next health run.
@@ -36,6 +73,21 @@ ENDPOINT_LABELS = {
     OPENAI_RESPONSES: "OpenAI Responses (/v1/responses)",
     ANTHROPIC_MESSAGES: "Anthropic Messages (/v1/messages)",
     GEMINI_GENERATE: "Gemini generateContent",
+    OPENAI_IMAGES: "OpenAI Images (/v1/images/generations)",
+    OPENAI_VIDEOS: "OpenAI Videos (/v1/videos)",
+    OPENAI_AUDIO: "OpenAI Audio (/v1/audio/*)",
+    OPENAI_TRANSLATIONS: "OpenAI Translations (/v1/audio/translations)",
+}
+
+ENDPOINT_SHORT_LABELS = {
+    OPENAI_CHAT: "Chat",
+    OPENAI_RESPONSES: "Responses",
+    ANTHROPIC_MESSAGES: "Messages",
+    GEMINI_GENERATE: "Gemini",
+    OPENAI_IMAGES: "Image",
+    OPENAI_VIDEOS: "Video",
+    OPENAI_AUDIO: "Audio",
+    OPENAI_TRANSLATIONS: "Translation",
 }
 
 _ALIASES = {
@@ -53,10 +105,27 @@ _ALIASES = {
     "google": (GEMINI_GENERATE,),
     "gemini": (GEMINI_GENERATE,),
     "gemini_generate": (GEMINI_GENERATE,),
+    "image": (OPENAI_IMAGES,),
+    "images": (OPENAI_IMAGES,),
+    "openai_images": (OPENAI_IMAGES,),
+    "dalle": (OPENAI_IMAGES,),
+    "video": (OPENAI_VIDEOS,),
+    "videos": (OPENAI_VIDEOS,),
+    "openai_videos": (OPENAI_VIDEOS,),
+    "audio": (OPENAI_AUDIO,),
+    "tts": (OPENAI_AUDIO,),
+    "stt": (OPENAI_AUDIO,),
+    "speech": (OPENAI_AUDIO,),
+    "openai_audio": (OPENAI_AUDIO,),
+    "translation": (OPENAI_TRANSLATIONS,),
+    "translations": (OPENAI_TRANSLATIONS,),
+    "openai_translations": (OPENAI_TRANSLATIONS,),
+    "whisper": (OPENAI_AUDIO, OPENAI_TRANSLATIONS),
 }
 
 # ``None`` means the backend can represent either OpenAI API style (the
 # adapter still chooses one per model).  A tuple is an explicit capability.
+# Coding backends stay chat-only so media models never sync into them.
 BACKEND_ENDPOINTS = {
     "codex-cli": (OPENAI_RESPONSES,),
     "claude-code": (ANTHROPIC_MESSAGES,),
@@ -85,6 +154,25 @@ BACKEND_PREFERENCES = {
     "trae-work": (OPENAI_CHAT, ANTHROPIC_MESSAGES),
 }
 
+# Model-id keywords → preferred non-chat endpoints (ordered).
+_IMAGE_HINTS = (
+    "dall-e", "dalle", "gpt-image", "imagen", "stable-diffusion", "sdxl",
+    "flux", "midjourney", "image-gen", "image_gen", "text-to-image", "t2i",
+    "imagine", "cogview", "kolors", "playground-v", "ideogram",
+)
+_VIDEO_HINTS = (
+    "sora", "runway", "kling", "luma", "pika", "veo", "minimax-video",
+    "text-to-video", "t2v", "video-gen", "video_gen", "hailuo", "vidu",
+    "wanx-video", "cogvideo",
+)
+_AUDIO_HINTS = (
+    "tts", "speech", "whisper", "asr", "transcri", "audio", "voice",
+    "sonic", "melody", "realtime", "fish-speech", "cosyvoice",
+)
+_TRANSLATION_HINTS = (
+    "translat", "whisper",
+)
+
 
 def normalize_endpoint(value: str) -> str:
     """Return a canonical endpoint id, or an empty string for unknown input."""
@@ -111,8 +199,84 @@ def expand_endpoint_values(values: Iterable[str] | str | None) -> list[str]:
     return out
 
 
-def endpoint_candidates(vendor: dict) -> list[str]:
-    """Return endpoint candidates for a vendor, ordered by safe preference."""
+def model_modality(model_id: str) -> str:
+    """Heuristic modality for a model id: chat|image|video|audio|translation|other."""
+    lower = str(model_id or "").strip().lower()
+    if not lower:
+        return "other"
+    # Chat-first overrides: audio-named chat models (stepaudio-*-chat) stay chat
+    if lower.endswith(("-chat", "-instruct", "-turbo")) and not any(
+        k in lower for k in ("tts", "whisper", "dall-e", "dalle", "sora", "image-gen", "t2i", "t2v")
+    ):
+        # still allow pure media prefixes below; only soft-names hit this
+        if "realtime" not in lower and "-asr" not in lower and "transcri" not in lower:
+            if any(h in lower for h in ("audio", "voice", "speech")):
+                return "chat"
+    # Explicit path-style prefixes first
+    if any(lower.startswith(p) for p in ("dall-e", "dalle", "gpt-image", "imagen")):
+        return "image"
+    if any(lower.startswith(p) for p in ("sora", "veo")):
+        return "video"
+    if any(lower.startswith(p) for p in ("tts-", "whisper")):
+        if "translat" in lower:
+            return "translation"
+        return "audio"
+    # Keyword anywhere (prefer more specific)
+    if any(h in lower for h in _VIDEO_HINTS) or "-video" in lower or lower.startswith("video-") or "-t2v" in lower:
+        return "video"
+    if any(h in lower for h in _IMAGE_HINTS) or "-image" in lower or lower.startswith("image-") or "-t2i" in lower:
+        return "image"
+    if any(h in lower for h in _TRANSLATION_HINTS) and "whisper" in lower and "translat" in lower:
+        return "translation"
+    if any(h in lower for h in _AUDIO_HINTS) or "-audio" in lower or "-tts" in lower or "-asr" in lower:
+        return "audio"
+    if "translat" in lower:
+        return "translation"
+    # Skip pure embedding/moderation from "chat" label
+    if any(lower.startswith(p) for p in ("text-embedding", "embed-", "moderations")):
+        return "other"
+    if lower.endswith(("-embedding", "-embed", "-moderation")):
+        return "other"
+    return "chat"
+
+
+def modality_endpoints(modality: str) -> list[str]:
+    """Default endpoint set for a modality (OpenAI-compatible gateways)."""
+    m = str(modality or "chat").lower()
+    if m == "image":
+        return [OPENAI_IMAGES]
+    if m == "video":
+        return [OPENAI_VIDEOS]
+    if m == "audio":
+        return [OPENAI_AUDIO, OPENAI_TRANSLATIONS]
+    if m == "translation":
+        return [OPENAI_TRANSLATIONS, OPENAI_AUDIO]
+    if m == "other":
+        return []
+    return []
+
+
+def classify_model_endpoints(vendor: dict | None, model_id: str) -> list[str]:
+    """Heuristic endpoint classes for a model (no network).
+
+    Used by the catalog filter so every inventory model has at least one
+    endpoint tag even before a live probe.  Media ids map to media APIs;
+    chat ids inherit the vendor's chat protocol family.
+    """
+    mid = str(model_id or "").strip()
+    if not mid:
+        return []
+    modality = model_modality(mid)
+    media = modality_endpoints(modality)
+    if media:
+        return list(media)
+    if modality == "other":
+        return []
+    vendor = vendor or {}
+    return list(_chat_candidates_for_vendor(vendor))
+
+
+def _chat_candidates_for_vendor(vendor: dict) -> list[str]:
     provider = str(vendor.get("provider") or "").strip().lower()
     url = str(vendor.get("proxy_target") or vendor.get("api_url") or "").lower()
     if (
@@ -140,6 +304,34 @@ def endpoint_candidates(vendor: dict) -> list[str]:
     if provider in known_openai:
         return [OPENAI_CHAT, OPENAI_RESPONSES]
     return [OPENAI_CHAT, OPENAI_RESPONSES, ANTHROPIC_MESSAGES]
+
+
+def endpoint_candidates(vendor: dict, model_id: str = "") -> list[str]:
+    """Return endpoint candidates for a vendor (and optional model), ordered by preference.
+
+    When ``model_id`` looks like a media model, only the matching media endpoints
+    are returned so health runs stay cheap.  Chat models keep the historical
+    chat/protocol matrix.  With no model id, return chat candidates plus all
+    media endpoints (used for coarse vendor-level UI lists).
+    """
+    chat = _chat_candidates_for_vendor(vendor)
+    mid = str(model_id or "").strip()
+    if not mid:
+        # Vendor-level: chat family + media (UI may list all known types)
+        out = list(chat)
+        for ep in MEDIA_ENDPOINTS:
+            if ep not in out:
+                out.append(ep)
+        return out
+
+    modality = model_modality(mid)
+    media = modality_endpoints(modality)
+    if media:
+        # Media models: only probe media APIs (plus chat if id is ambiguous)
+        return list(media)
+    if modality == "other":
+        return []
+    return list(chat)
 
 
 def model_state(key: dict, model_id: str) -> dict:
@@ -185,26 +377,64 @@ def model_is_verified_usable(key: dict, model_id: str) -> bool:
     )
 
 
+def _model_explicitly_failed(key: dict, model_id: str) -> bool:
+    """True when a recent probe recorded this model as unhealthy."""
+    mid = str(model_id or "").strip()
+    if not mid:
+        return True
+    if mid in set(key.get("disabled_models") or []):
+        return True
+    health = (key.get("model_health") or {}).get(mid) or {}
+    if health.get("healthy") is False and _fresh_checked_at(health.get("checked_at")):
+        return True
+    return False
+
+
 def effective_model_endpoints(vendor: dict, key: dict, model_id: str) -> list[str]:
     """Resolve the endpoints that may be used for one model.
 
-    Manual mode is authoritative, including an intentionally empty selection.
-    Auto mode uses only successfully detected endpoints.  For pre-capability
-    data, the old vendor hint is used as a compatibility bridge until the next
-    model check populates a real detection result.
+    Priority:
+    1. Manual selection (even if empty)
+    2. Fresh successful probe (detected)
+    3. Fallback for inventory models on an enabled key: classified tags or
+       vendor/model candidates — so backend sync is not limited to the 1–2
+       models key-health happened to probe.
+
+    Explicitly failed / disabled models still return no endpoints.
     """
-    if not model_is_verified_usable(key, model_id):
+    mid = str(model_id or "").strip()
+    if not mid or key.get("enabled") is False:
         return []
-    candidates = endpoint_candidates(vendor)
-    state = model_state(key, model_id)
+    if mid in set(key.get("disabled_models") or []):
+        return []
+
+    candidates = set(endpoint_candidates(vendor, mid))
+    state = model_state(key, mid)
     mode = str(state.get("mode") or "auto").lower()
+
     if mode == "manual":
         selected = expand_endpoint_values(state.get("selected"))
-        return [x for x in selected if x in candidates]
-    detected = expand_endpoint_values(state.get("detected"))
-    if detected:
-        return [x for x in detected if x in candidates]
-    return []
+        # Manual empty selection is intentional
+        return [x for x in selected if x in candidates or x in ALL_ENDPOINTS]
+
+    # Fresh probe wins
+    if model_is_verified_usable(key, mid):
+        detected = expand_endpoint_values(state.get("detected"))
+        if detected:
+            return [x for x in detected if x in candidates or x in ALL_ENDPOINTS]
+
+    # Recent explicit failure → do not invent endpoints
+    if _model_explicitly_failed(key, mid) and not model_is_verified_usable(key, mid):
+        return []
+
+    # Fallback: classified tags from inventory classification, then heuristics
+    classified = expand_endpoint_values(state.get("classified") or [])
+    if classified:
+        return [x for x in classified if x in candidates or x in ALL_ENDPOINTS]
+    guessed = classify_model_endpoints(vendor, mid)
+    if guessed:
+        return list(guessed)
+    return [x for x in endpoint_candidates(vendor, mid) if x in CHAT_ENDPOINTS or x in MEDIA_ENDPOINTS]
 
 
 def choose_backend_endpoint(backend_name: str, endpoints: Iterable[str]) -> str:
@@ -212,10 +442,10 @@ def choose_backend_endpoint(backend_name: str, endpoints: Iterable[str]) -> str:
     supported = BACKEND_ENDPOINTS.get(backend_name)
     if supported:
         available.intersection_update(supported)
-    for endpoint in BACKEND_PREFERENCES.get(backend_name, ALL_ENDPOINTS):
+    for endpoint in BACKEND_PREFERENCES.get(backend_name, CHAT_ENDPOINTS):
         if endpoint in available:
             return endpoint
-    for endpoint in ALL_ENDPOINTS:
+    for endpoint in CHAT_ENDPOINTS:
         if endpoint in available:
             return endpoint
     return ""
@@ -247,3 +477,21 @@ def capability_record(*, detected: list[str], checks: dict, mode: str = "auto", 
         "checks": dict(checks or {}),
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def catalog_endpoint_options() -> list[dict]:
+    """Stable list for UI filters: id + short/long labels."""
+    return [
+        {"id": ep, "label": ENDPOINT_SHORT_LABELS.get(ep, ep), "description": ENDPOINT_LABELS.get(ep, ep)}
+        for ep in ALL_ENDPOINTS
+    ]
+
+
+def downstream_types_for_endpoints(endpoints: Iterable[str]) -> list[str]:
+    out, seen = [], set()
+    for ep in expand_endpoint_values(endpoints):
+        bucket = ENDPOINT_TO_DOWNSTREAM.get(ep) or ""
+        if bucket and bucket not in seen:
+            seen.add(bucket)
+            out.append(bucket)
+    return out

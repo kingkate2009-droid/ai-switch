@@ -177,51 +177,232 @@ class OpenCodeAdapter(BackendAdapter):
         except Exception:
             pass
 
-    def _apply_running_server(self, auth: dict, config: dict) -> dict:
-        """Apply config to a known OpenCode HTTP server and verify it."""
-        configured = str(os.environ.get("OPENCODE_SERVER_URL") or "").strip().rstrip("/")
-        urls = [configured] if configured else ["http://127.0.0.1:4096"]
+    def _discover_server_urls(self) -> list[str]:
+        """Find local OpenCode HTTP servers (configured URL + opencode listen ports)."""
+        urls: list[str] = []
+        seen = set()
+
+        def _add(url: str) -> None:
+            u = str(url or "").strip().rstrip("/")
+            if not u or u in seen:
+                return
+            if not u.startswith("http://") and not u.startswith("https://"):
+                u = "http://" + u
+            seen.add(u)
+            urls.append(u)
+
+        configured = str(os.environ.get("OPENCODE_SERVER_URL") or "").strip()
+        if configured:
+            _add(configured)
+        # Prefer fixed ports users are told to use
+        for port in (4096, 4097, 4098, 4099):
+            _add(f"http://127.0.0.1:{port}")
+
+        # Only ports actually owned by an `opencode` process (avoid scanning unrelated listeners)
+        try:
+            out = subprocess.check_output(
+                ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+            for line in out.splitlines():
+                if not line.lower().startswith("opencode"):
+                    continue
+                m = re.search(r"TCP\s+(\d+\.\d+\.\d+\.\d+|\[::1\]|localhost|\*|\[::\]):(\d+)\s+\(LISTEN\)", line)
+                if not m:
+                    continue
+                host, port = m.group(1), m.group(2)
+                if host in ("*", "0.0.0.0", "[::]", "::"):
+                    host = "127.0.0.1"
+                host = host.strip("[]")
+                if host in ("::1",):
+                    host = "127.0.0.1"
+                _add(f"http://{host}:{port}")
+        except Exception:
+            pass
+        return urls
+
+    def _server_auth(self):
         username = str(os.environ.get("OPENCODE_SERVER_USERNAME") or "opencode")
         password = str(os.environ.get("OPENCODE_SERVER_PASSWORD") or "")
-        basic_auth = (username, password) if password else None
-        last_error = ""
+        return (username, password) if password else None
+
+    def _apply_to_one_server(self, base_url: str, auth: dict, config: dict, basic_auth) -> dict:
+        """Push auth+config to one server and force instance reload."""
+        health = requests.get(f"{base_url}/global/health", auth=basic_auth, timeout=1.2)
+        if health.status_code != 200:
+            raise RuntimeError(f"health HTTP {health.status_code}")
+        body = {}
+        try:
+            body = health.json() or {}
+        except Exception:
+            body = {}
+        if body.get("healthy") is False:
+            raise RuntimeError("server unhealthy")
+
+        # Auth credentials (best-effort per provider)
+        auth_ok = 0
+        for provider_id, credentials in (auth or {}).items():
+            try:
+                response = requests.put(
+                    f"{base_url}/auth/{quote(str(provider_id), safe='')}",
+                    json=credentials,
+                    auth=basic_auth,
+                    timeout=3,
+                )
+                if response.status_code < 400:
+                    auth_ok += 1
+            except Exception:
+                continue
+
+        # Full config patch
+        response = requests.patch(
+            f"{base_url}/config",
+            json=config,
+            auth=basic_auth,
+            timeout=8,
+        )
+        response.raise_for_status()
+
+        # Force in-process reload so model lists refresh without new session
+        disposed = False
+        try:
+            d = requests.post(f"{base_url}/instance/dispose", auth=basic_auth, timeout=3)
+            disposed = d.status_code < 400
+        except Exception:
+            disposed = False
+
+        # Give the server a beat to rebuild providers from the patched config
+        if disposed:
+            try:
+                import time as _time
+                _time.sleep(0.15)
+            except Exception:
+                pass
+
+        # Refresh provider catalog endpoint (forces re-read after dispose)
+        providers_n = 0
+        models_n = 0
+        try:
+            prov = requests.get(f"{base_url}/config/providers", auth=basic_auth, timeout=4)
+            if prov.status_code < 400:
+                body = prov.json() or {}
+                plist = body.get("providers") or []
+                providers_n = len(plist)
+                for p in plist:
+                    m = p.get("models") if isinstance(p, dict) else None
+                    if isinstance(m, dict):
+                        models_n += len(m)
+        except Exception:
+            pass
+
+        # Nudge TUI: toast + open model picker so the session UI rebuilds the list
+        for path, payload in (
+            ("/tui/show-toast", {
+                "title": "AI Switch",
+                "message": f"Models updated ({models_n} models) — picker refreshed",
+                "variant": "success",
+            }),
+            ("/tui/open-models", {}),
+        ):
+            try:
+                requests.post(f"{base_url}{path}", json=payload, auth=basic_auth, timeout=2)
+            except Exception:
+                pass
+
+        verify = requests.get(f"{base_url}/config", auth=basic_auth, timeout=3)
+        verify.raise_for_status()
+        actual = verify.json() or {}
+        expected_ids = set((config.get("provider") or {}).keys())
+        actual_ids = set((actual.get("provider") or {}).keys())
+        if expected_ids and not expected_ids.issubset(actual_ids):
+            missing = sorted(expected_ids - actual_ids)[:5]
+            log.debug("OpenCode runtime missing providers after patch: %s", missing)
+
+        return {
+            "url": base_url,
+            "auth_ok": auth_ok,
+            "disposed": disposed,
+            "providers": providers_n,
+            "models": models_n,
+        }
+
+    def _apply_running_server(self, auth: dict, config: dict) -> dict:
+        """Hot-apply config to running OpenCode HTTP server(s).
+
+        OpenCode TUI/server keeps providers in memory. Writing opencode.jsonc
+        alone only affects *new* processes.  When a server is reachable we:
+          1. PUT /auth/:id for each credential
+          2. PATCH /config with the full managed config
+          3. POST /instance/dispose to force reload without killing the TUI
+
+        Start OpenCode with a fixed port for best results, e.g.::
+            opencode --port 4096
+        or set OPENCODE_SERVER_URL=http://127.0.0.1:4096
+        """
+        urls = self._discover_server_urls()
+        basic_auth = self._server_auth()
+        applied = []
+        errors = []
         for base_url in urls:
             try:
-                health = requests.get(f"{base_url}/global/health", auth=basic_auth, timeout=1.5)
-                if health.status_code != 200 or not (health.json() or {}).get("healthy"):
-                    continue
-                for provider_id, credentials in auth.items():
-                    response = requests.put(
-                        f"{base_url}/auth/{quote(str(provider_id), safe='')}",
-                        json=credentials,
-                        auth=basic_auth,
-                        timeout=3,
-                    )
-                    response.raise_for_status()
-                response = requests.patch(
-                    f"{base_url}/config",
-                    json=config,
-                    auth=basic_auth,
-                    timeout=5,
-                )
-                response.raise_for_status()
-                verify = requests.get(f"{base_url}/config", auth=basic_auth, timeout=3)
-                verify.raise_for_status()
-                actual = verify.json() or {}
-                expected_ids = set((config.get("provider") or {}).keys())
-                actual_ids = set((actual.get("provider") or {}).keys())
-                if not expected_ids.issubset(actual_ids):
-                    raise RuntimeError("OpenCode runtime config verification failed")
-                return {
-                    "runtime_applied": True,
-                    "runtime_message": f"Applied to running OpenCode server at {base_url}",
-                }
+                info = self._apply_to_one_server(base_url, auth, config, basic_auth)
+                applied.append(info)
             except Exception as exc:
-                last_error = str(exc)[:200]
-        message = "New OpenCode sessions will use the updated config"
-        if configured and last_error:
-            message += f"; runtime apply failed: {last_error}"
+                err = str(exc)[:120]
+                # Only keep errors for explicitly configured / healthy-looking URLs
+                if base_url.rstrip("/") == str(os.environ.get("OPENCODE_SERVER_URL") or "").strip().rstrip("/") \
+                        or ":4096" in base_url:
+                    errors.append(f"{base_url}: {err}")
+                continue
+
+        if applied:
+            urls_ok = ", ".join(a["url"] for a in applied)
+            disposed_n = sum(1 for a in applied if a.get("disposed"))
+            models_n = max((int(a.get("models") or 0) for a in applied), default=0)
+            msg = f"Hot-reloaded OpenCode at {urls_ok}"
+            if models_n:
+                msg += f" · {models_n} models live"
+            if disposed_n:
+                msg += f" · instance reloaded ×{disposed_n}"
+            msg += " · model picker opened (or press your model-switch key once)"
+            return {"runtime_applied": True, "runtime_message": msg, "runtime_targets": applied}
+
+        tui_running = False
+        try:
+            subprocess.check_output(["pgrep", "-x", "opencode"], stderr=subprocess.DEVNULL, timeout=1)
+            tui_running = True
+        except Exception:
+            try:
+                out = subprocess.check_output(["pgrep", "-fl", "opencode"], text=True, stderr=subprocess.DEVNULL, timeout=1)
+                tui_running = bool(out.strip())
+            except Exception:
+                tui_running = False
+
+        if tui_running:
+            message = (
+                "OpenCode is running but no HTTP server port was found. "
+                "Config is on disk; in the TUI try opening the model picker again, "
+                "or start with a fixed port: opencode --port 4096 "
+                "(or set OPENCODE_SERVER_URL)."
+            )
+        else:
+            message = "Config saved — start OpenCode to use the new models"
+        if errors:
+            message += f" ({errors[0]})"
         return {"runtime_applied": False, "runtime_message": message}
+
+    def restart(self) -> dict:
+        """Best-effort hot reload of running OpenCode servers (no process kill)."""
+        auth = self._load_auth()
+        cfg = self._load_config()
+        result = self._apply_running_server(auth, cfg)
+        self._last_runtime_apply = result
+        return {
+            "success": bool(result.get("runtime_applied")),
+            "message": result.get("runtime_message") or "",
+        }
 
     @staticmethod
     def _provider_id(vendor: dict) -> str:
