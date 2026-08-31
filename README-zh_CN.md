@@ -150,7 +150,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 - [#1 安装与启动](https://github.com/kingkate2009-droid/ai-switch/issues/1)
 - [#2 Codex 连不上](https://github.com/kingkate2009-droid/ai-switch/issues/2)
 - [#3 导入与合并](https://github.com/kingkate2009-droid/ai-switch/issues/3)
-- 最新版说明：[v2.3.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.3.0) · [变更要点](docs/release-notes-2.3.0.md)
+- 最新版说明：[v2.4.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.4.0) · [变更要点](docs/release-notes-2.4.0.md)
 
 ---
 
@@ -188,7 +188,7 @@ Codex 连不上：[docs/troubleshoot-codex.md](docs/troubleshoot-codex.md)
 
 ```bash
 bash scripts/build_package.sh   # 本地打包
-./release.sh v2.3.0             # CI 多平台发版
+./release.sh v2.4.0             # CI 多平台发版
 ```
 
 ---

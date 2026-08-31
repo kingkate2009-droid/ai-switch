@@ -1312,6 +1312,69 @@ tr:hover .actions-cell { background: var(--bg2); }
   font-size: 11px;
 }
 
+.actions-cell .btn-icon {
+  padding: 4px;
+  width: 26px;
+  height: 26px;
+}
+
+.actions-cell .btn-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.actions-more {
+  position: relative;
+  display: inline-flex;
+}
+
+.actions-more-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 100;
+  min-width: 160px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  padding: 4px 0;
+  margin-top: 2px;
+}
+
+.actions-more.open .actions-more-menu {
+  display: block;
+}
+
+.actions-more-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.actions-more-menu button:hover {
+  background: var(--bg2);
+  color: var(--primary);
+}
+
+.actions-more-menu button.danger {
+  color: var(--danger);
+}
+
+.actions-more-menu button.danger:hover {
+  background: var(--danger-dim);
+}
+
 th:last-child {
   width: 1%;
   white-space: nowrap;

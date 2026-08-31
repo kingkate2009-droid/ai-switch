@@ -717,6 +717,10 @@ def check_model_endpoints(
                 "error": None if key_healthy else "No usable model",
             }
             _save_cache(cache)
+
+    if persist and key_healthy and not updated_key.get("enabled"):
+        update_key_data(vendor_id, key_id, enabled=True)
+
     out = {
         "vendor_id": vendor_id,
         "key_id": key_id,

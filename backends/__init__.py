@@ -39,7 +39,7 @@ def reconcile_all_async(vendor_ids=None) -> None:
 
     ``vendor_ids``: when given, only those vendors are written (scoped push).
     """
-    global _reconcile_requested, _reconcile_worker
+    global _reconcile_requested, _reconcile_worker, _pending_vendor_ids
     with _reconcile_request_lock:
         ids = [str(v) for v in (vendor_ids or []) if v]
         _reconcile_requested = True
@@ -48,7 +48,7 @@ def reconcile_all_async(vendor_ids=None) -> None:
             return
 
         def _worker() -> None:
-            global _reconcile_requested, _reconcile_worker
+            global _reconcile_requested, _reconcile_worker, _pending_vendor_ids
             while True:
                 with _reconcile_request_lock:
                     if not _reconcile_requested:
@@ -56,10 +56,10 @@ def reconcile_all_async(vendor_ids=None) -> None:
                         return
                     _reconcile_requested = False
                     batch = list(_pending_vendor_ids)
-                    del _pending_vendor_ids[:]
+                    _pending_vendor_ids.clear()
                 reconcile_all(vendor_ids=batch or None)
 
-        _pending_vendor_ids = []
+        _pending_vendor_ids = ids
         _reconcile_worker = threading.Thread(
             target=_worker,
             name="ai-switch-backend-reconcile",

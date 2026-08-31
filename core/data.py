@@ -513,7 +513,7 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
         "proxy_target": proxy_target,
         "checkin_url": (checkin_url or "").strip(),
         "tags": _normalize_tags(tags),
-        "vtype": _normalize_vendor_type(None),
+        "vtype": vtype,
         "archived": False,
         "keys": [],
     }

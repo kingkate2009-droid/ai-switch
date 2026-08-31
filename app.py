@@ -677,12 +677,14 @@ def api_create_vendor():
 @app.route("/api/vendors/<vendor_id>", methods=["PUT"])
 def api_update_vendor(vendor_id):
     data = request.get_json() or {}
-    # only pass known fields
+    # only pass known fields ("type" is accepted as an alias for "vtype")
     allowed = {k: data[k] for k in (
         "name", "provider", "api_url", "endpoint_type",
         "thinking_disabled", "proxy_target", "tags", "checkin_url",
         "vtype", "archived",
     ) if k in data}
+    if "vtype" not in allowed and "type" in data:
+        allowed["vtype"] = data["type"]
     v = update_vendor(vendor_id, **allowed)
     if not v:
         return jsonify({"error": "not found"}), 404
@@ -917,8 +919,9 @@ def api_update_key(vendor_id, key_id):
     if not k:
         return jsonify({"error": "not found"}), 404
     # Reconcile from current persisted state so single-slot adapters apply the
-    # same primary → backup → first-healthy selection as full push.
-    reconcile_all()
+    # same primary → backup → first-healthy selection as full push. Fire in the
+    # background so key edits return immediately instead of blocking the UI.
+    reconcile_all_async()
     return jsonify(k)
 
 
@@ -930,7 +933,7 @@ def api_delete_key(vendor_id, key_id):
         return jsonify({"error": "not found"}), 404
     # Delete first, then rebuild from the new source of truth. This prevents a
     # removal callback from selecting the key that is about to disappear.
-    reconcile_all()
+    reconcile_all_async()
     log_event("key.delete", vendor_id=vendor_id, key_id=key_id, name=(k or {}).get("name"))
     return jsonify({"success": True})
 
@@ -984,6 +987,113 @@ def api_check_key_health(vendor_id, key_id):
         except Exception:
             pass
     return jsonify(health)
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/opencode-config", methods=["GET"])
+def api_key_opencode_config(vendor_id, key_id):
+    """Generate OpenCode config snippet for a single vendor/key pair.
+
+    Returns the JSON snippet the user can paste into opencode.jsonc (or auth.json
+    for built-in providers). One key = one independent provider for OpenCode.
+    """
+    import re as _re
+    from core.data import get_enabled_models
+
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+
+    pid = _re.sub(r"[^a-zA-Z0-9._-]+", "-", (v.get("provider") or v.get("name") or "custom")).strip("-").lower() or "custom"
+    api_key = k.get("api_key", "")
+    api_url = v.get("proxy_target") or v.get("api_url") or ""
+    ep = (v.get("endpoint_type") or "openai").lower()
+
+    if (not ep or ep == "openai") and ("/anthropic" in (api_url or "").lower() or "api.anthropic.com" in (api_url or "").lower()):
+        ep = "anthropic"
+    if ep not in ("anthropic", "google", "gemini"):
+        ep = "openai"
+
+    npm = "@ai-sdk/openai-compatible"
+    if ep == "anthropic":
+        npm = "@ai-sdk/anthropic"
+    elif ep in ("google", "gemini"):
+        npm = "@ai-sdk/google"
+
+    base_url = api_url.rstrip("/")
+    if base_url and not _re.search(r"/v\d+$", base_url):
+        base_url += "/v1"
+    if not base_url:
+        base_url = "https://api.openai.com/v1"
+
+    _BUILTIN = {"openai", "anthropic", "google", "gemini", "deepseek", "openrouter", "groq", "xai", "mistral", "cohere", "together", "fireworks", "perplexity", "azure", "bedrock", "amazon-bedrock", "ollama", "deepinfra", "cerebras", "moonshot", "minimax", "nvidia", "huggingface", "vercel", "opencode", "github-copilot", "gitlab", "baseten", "helicone", "nebius", "venice", "zenmux", "zai", "zhipu"}
+    is_builtin = pid in _BUILTIN
+    is_zen = pid in ("opencode", "opencode-zen", "zen") or "opencode" in pid
+    _DEFAULT_HOSTS = {"openai": "api.openai.com", "anthropic": "api.anthropic.com", "deepseek": "api.deepseek.com", "openrouter": "openrouter.ai", "groq": "api.groq.com", "xai": "api.x.ai", "google": "generativelanguage.googleapis.com", "gemini": "generativelanguage.googleapis.com", "opencode": "opencode.ai", "zai": "api.z.ai", "zhipu": "open.bigmodel.cn"}
+    default_host = _DEFAULT_HOSTS.get(pid, "")
+    is_default_url = bool(default_host) and default_host in api_url and not v.get("proxy_target")
+    is_custom = not (is_builtin and is_default_url)
+
+    models_dict = {}
+    if is_zen:
+        pass
+    else:
+        enabled = set(get_enabled_models(k))
+        key_models = k.get("models") or []
+        if key_models or enabled:
+            for m in key_models:
+                mid = m["id"] if isinstance(m, dict) else str(m)
+                if not mid:
+                    continue
+                if enabled and mid not in enabled:
+                    continue
+                models_dict[mid] = {"name": mid}
+            if not models_dict:
+                for mid in enabled:
+                    models_dict[str(mid)] = {"name": str(mid)}
+            if not models_dict and k.get("default_model"):
+                dm = str(k["default_model"])
+                if not enabled or dm in enabled:
+                    models_dict[dm] = {"name": dm}
+
+    auth_entry = {pid: {"type": "api", "key": api_key}}
+
+    if not is_custom:
+        config_text = json.dumps(auth_entry, indent=2)
+        if not models_dict:
+            config_text = json.dumps(auth_entry, indent=2) + "\n\n// No models configured. Add models manually or run health check."
+        return jsonify({
+            "vendor_id": vendor_id,
+            "key_id": key_id,
+            "provider_id": pid,
+            "is_custom": False,
+            "config_text": config_text,
+            "auth_entry": auth_entry,
+            "provider_block": None,
+        })
+
+    provider_block = {
+        "npm": npm,
+        "name": v.get("name") or pid,
+        "options": {
+            "baseURL": base_url,
+            "apiKey": api_key,
+            "_managed": "ai-switch",
+        },
+        "models": models_dict,
+    }
+    full_config = {"$schema": "https://opencode.ai/config.json", "provider": {pid: provider_block}}
+    config_text = json.dumps(full_config, indent=2)
+
+    return jsonify({
+        "vendor_id": vendor_id,
+        "key_id": key_id,
+        "provider_id": pid,
+        "is_custom": True,
+        "config_text": config_text,
+        "auth_entry": auth_entry,
+        "provider_block": provider_block,
+    })
 
 
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>/check-models", methods=["POST"])
@@ -1100,7 +1210,7 @@ def api_toggle_key_model(vendor_id, key_id, model_id):
     updated = set_model_enabled(vendor_id, key_id, model_id, bool(data["enabled"]))
     if not updated:
         return jsonify({"error": "not found"}), 404
-    reconcile_all()
+    reconcile_all_async()
     return jsonify({
         "key": updated,
         "model": model_id,
@@ -1117,7 +1227,7 @@ def api_enable_key(vendor_id, key_id):
     if not v or not k:
         return jsonify({"error": "not found"}), 404
     k = update_key(vendor_id, key_id, enabled=True)
-    reconcile_all()
+    reconcile_all_async()
     return jsonify(k)
 
 
@@ -1135,7 +1245,7 @@ def api_promote_key(vendor_id, key_id):
     v = get_vendor(vendor_id) or v
     # Re-sync from the post-promotion state. Backup keys remain available to
     # multi-slot backends, while single-slot backends prefer the new primary.
-    reconcile_all()
+    reconcile_all_async()
     log_event("key.promote", vendor_id=vendor_id, key_id=key_id, name=k.get("name"))
     return jsonify({"key": k, "vendor": v})
 
@@ -1147,7 +1257,7 @@ def api_disable_key(vendor_id, key_id):
     if not v or not k:
         return jsonify({"error": "not found"}), 404
     k = update_key(vendor_id, key_id, enabled=False)
-    reconcile_all()
+    reconcile_all_async()
     return jsonify(k)
 
 
@@ -1176,7 +1286,7 @@ def api_batch_keys(vendor_id):
         elif action == "delete":
             delete_key(vendor_id, kid)
             results.append({"key_id": kid, "success": True, "action": "deleted"})
-    reconcile_all()
+    reconcile_all_async()
     return jsonify({"results": results, "count": len(results)})
 
 
@@ -3526,7 +3636,8 @@ def api_add_stat_record():
 @app.route("/api/vendors/simple", methods=["GET"])
 def api_list_vendors_simple():
     vendors = get_vendors()
-    return jsonify([{"id": v["id"], "name": v["name"], "provider": v["provider"]}
+    return jsonify([{"id": v["id"], "name": v["name"], "provider": v["provider"],
+                     "vtype": v.get("vtype") or ""}
                     for v in vendors])
 
 

@@ -12,6 +12,7 @@ nohup.out
 ~/.ai-switch/
 data.json
 health_cache.json
+config.json
 
 # OS files
 .DS_Store

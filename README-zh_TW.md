@@ -90,7 +90,7 @@ OpenClaw · OpenCode · Claude Code · Codex CLI · Cline · Aider · Continue.d
 
 主資料儲存在 `~/.ai-switch/ai-switch.db`，舊 `data.json` 會在首次啟動時匯入並保留 `.legacy` 備份。**不要提交 `~/.ai-switch/`。** 埠 `8787` 被占用時程式會報錯退出。
 
-最新版：[v2.3.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.3.0) · [版本說明](docs/release-notes-2.3.0.md)
+最新版：[v2.4.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.4.0) · [版本說明](docs/release-notes-2.4.0.md)
 
 ## 連結
 

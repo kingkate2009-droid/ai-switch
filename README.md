@@ -165,7 +165,7 @@ Also included when you need them: **vendor types (Public/Relay/Raw key)** with f
 - [#1 Install & start](https://github.com/kingkate2009-droid/ai-switch/issues/1)
 - [#2 Codex connectivity](https://github.com/kingkate2009-droid/ai-switch/issues/2)
 - [#3 Import & merge](https://github.com/kingkate2009-droid/ai-switch/issues/3)
-- Latest: [v2.3.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.3.0) · [notes](docs/release-notes-2.3.0.md)
+- Latest: [v2.4.0 Release](https://github.com/kingkate2009-droid/ai-switch/releases/tag/v2.4.0) · [notes](docs/release-notes-2.4.0.md)
 
 ---
 
@@ -208,7 +208,7 @@ Endpoint support is detected per model. Automatic mode uses verified endpoints; 
 # Local package
 bash scripts/build_package.sh
 # Multi-platform release via CI
-./release.sh v2.3.0
+./release.sh v2.4.0
 ```
 
 ---
