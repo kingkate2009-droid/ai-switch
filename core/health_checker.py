@@ -874,7 +874,7 @@ def _build_probe_order(
     dm = (default_model or "").strip()
     ordered = []
     seen = set()
-    if primary:
+    if primary and primary in pool:
         ordered.append(primary)
         seen.add(primary)
     rest = [m for m in pool if m and m not in seen]
@@ -1025,6 +1025,9 @@ def _check_key_health_inner(
     models = _merge_model_ids(scanned, existing, siblings)
     # drop disabled from probe pool but keep full inventory for storage
     probe_pool = [m for m in models if m not in disabled] or list(models)
+    # Ensure primary check model is always in the probe pool (user explicitly chose it)
+    if check_model and check_model not in probe_pool and check_model in models:
+        probe_pool.insert(0, check_model)
 
     if not default_model and models:
         default_model = pick_default_model(models)
@@ -1052,12 +1055,16 @@ def _check_key_health_inner(
     cache_key = f"{vendor_id}:{key_id}"
     ordered_models = _build_probe_order(
         check_model=check_model,
-        inventory=[m for m in probe_pool if m not in disabled] or probe_pool,
+        inventory=probe_pool,
         default_model=default_model,
         prefer_gptish=False,
     )
     # Key-level health always caps models; full inventory matrix is check_key_models().
-    cap = _MAX_FALLBACK_MODELS_QUICK if quick else _MAX_FALLBACK_MODELS
+    # When check_model is available in the pool, probe only that model (no fallbacks).
+    if check_model and check_model in probe_pool:
+        cap = 1
+    else:
+        cap = _MAX_FALLBACK_MODELS_QUICK if quick else _MAX_FALLBACK_MODELS
     ordered_models = ordered_models[:cap]
     for mid in ordered_models:
         matrix = check_model_endpoints(vendor_id, key_id, mid, persist=False, fail_fast=True)
