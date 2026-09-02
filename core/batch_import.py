@@ -313,14 +313,15 @@ def _guess_provider_from_url(url: str) -> str:
     return name or "provider"
 
 
-def _vendor_name_from_url(url: str) -> str:
-    """Generate vendor name from URL: check existing vendors first, then domain/IP."""
+def _vendor_name_from_url(url: str) -> tuple[str, bool]:
+    """Generate vendor name from URL. Returns (name, matched_existing)."""
     if url:
         try:
             from core.data import find_vendor_by_url
             existing = find_vendor_by_url(url)
             if existing:
-                return (existing.get("name") or "").strip() or (existing.get("provider") or "").strip()
+                name = (existing.get("name") or "").strip() or (existing.get("provider") or "").strip()
+                return name, True
         except Exception:
             pass
     try:
@@ -329,10 +330,10 @@ def _vendor_name_from_url(url: str) -> str:
     except Exception:
         host = re.sub(r"^https?://", "", url).split("/")[0]
     if not host:
-        return "provider"
+        return "provider", False
     port = p.port if hasattr(p, 'port') else None
     if re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
-        return f"{host}:{port}" if port else host
+        return (f"{host}:{port}" if port else host), False
     parts = host.split(".")
     if len(parts) > 1 and parts[0] in ("api", "v1", "v2", "www", "apihub"):
         parts = parts[1:]
@@ -340,7 +341,7 @@ def _vendor_name_from_url(url: str) -> str:
     name = re.sub(r"[^a-zA-Z0-9_-]", "", name) or host
     if port:
         name = f"{name}:{port}"
-    return name
+    return name, False
 
 
 def _is_provider_name(line: str) -> bool:
@@ -421,13 +422,15 @@ def _try_parse_json(text: str) -> Optional[list[dict]]:
             # if "name" looks like key name and vendor empty, don't use as vendor
             if vendor_name and key and vendor_name == key:
                 vendor_name = ""
+            vname_from_url, matched = _vendor_name_from_url(url) if url else ("", False)
             entries.append({
                 "provider": str(provider),
-                "vendor_name": vendor_name or _vendor_name_from_url(url),
+                "vendor_name": vendor_name or vname_from_url,
                 "name": _make_key_name(key) if key else "(need key)",
                 "api_url": url.rstrip("/") if url else "",
                 "api_key": key,
                 "endpoint_type": ep,
+                "_matched_existing": matched,
             })
     return entries if entries else None
 
@@ -503,26 +506,30 @@ def parse_batch_text(text: str) -> list[dict]:
             if ep == "openai" and ("/anthropic" in url.lower() or "api.anthropic.com" in url.lower()):
                 ep = "anthropic"
             for k in keys:
+                vname, matched = _vendor_name_from_url(url)
                 entries.append({
                     "provider": prov,
-                    "vendor_name": _vendor_name_from_url(url),
+                    "vendor_name": vname,
                     "name": _make_key_name(k),
                     "api_url": url,
                     "api_key": k,
                     "endpoint_type": ep,
+                    "_matched_existing": matched,
                 })
     elif urls_with_names:
         for url, prov, ep_type in urls_with_names:
             ep = ep_type
             if ep == "openai" and ("/anthropic" in url.lower() or "api.anthropic.com" in url.lower()):
                 ep = "anthropic"
+            vname, matched = _vendor_name_from_url(url)
             entries.append({
                 "provider": prov,
-                "vendor_name": _vendor_name_from_url(url),
+                "vendor_name": vname,
                 "name": "(need key)",
                 "api_url": url,
                 "api_key": "",
                 "endpoint_type": ep,
+                "_matched_existing": matched,
             })
     elif keys:
         for k in keys:

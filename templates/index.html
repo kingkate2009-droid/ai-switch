@@ -5258,7 +5258,9 @@ function _normalizeBatchEntry(e, usedNames) {
     vendorName = provider.replace(/-/g, ' ');
     vendorName = vendorName.charAt(0).toUpperCase() + vendorName.slice(1);
   }
-  vendorName = _uniqueVendorName(vendorName, usedNames);
+  if (!e._matched_existing) {
+    vendorName = _uniqueVendorName(vendorName, usedNames);
+  }
   var apiKey = (e.api_key || '').trim();
   var keyName = (e.name || e.key_name || '').trim();
   if (!keyName || keyName === '(need key)') {
@@ -5278,6 +5280,7 @@ function _normalizeBatchEntry(e, usedNames) {
     name: keyName,
     endpoint_type: ep,
     selected: e.selected !== false,
+    _matched_existing: e._matched_existing === true,
   };
 }
 
