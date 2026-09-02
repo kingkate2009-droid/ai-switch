@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import threading
@@ -774,7 +775,28 @@ def batch_import_entries(entries: list) -> dict:
             uk = vendor_url_merge_key(api_url)
             vendor = url_index.get(uk) if uk else None
             if not vendor:
-                base_name = vendor_name or provider.replace("-", " ").title() or "Provider"
+                base_name = vendor_name
+                if not base_name:
+                    try:
+                        from urllib.parse import urlparse as _up
+                        p = _up(api_url)
+                        host = p.hostname or ""
+                        if host:
+                            if re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
+                                base_name = f"{host}:{p.port}" if p.port else host
+                            else:
+                                parts = host.split(".")
+                                if parts[0] in ("api", "v1", "v2", "www", "apihub"):
+                                    parts = parts[1:]
+                                base_name = re.sub(r"[^a-zA-Z0-9_-]", "", parts[0] if parts else host)
+                                if not base_name:
+                                    base_name = host
+                                if p.port:
+                                    base_name = f"{base_name}:{p.port}"
+                        else:
+                            base_name = provider.replace("-", " ").title() or "Provider"
+                    except Exception:
+                        base_name = provider.replace("-", " ").title() or "Provider"
                 final_name = base_name
                 n = 2
                 while final_name.lower() in used_names:

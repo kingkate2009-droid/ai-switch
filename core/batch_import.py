@@ -2,6 +2,7 @@ import json
 import re
 import base64
 from typing import Optional
+from urllib.parse import urlparse
 
 from core.providers import get_provider, recognize_provider
 
@@ -312,6 +313,36 @@ def _guess_provider_from_url(url: str) -> str:
     return name or "provider"
 
 
+def _vendor_name_from_url(url: str) -> str:
+    """Generate vendor name from URL: check existing vendors first, then domain/IP."""
+    if url:
+        try:
+            from core.data import find_vendor_by_url
+            existing = find_vendor_by_url(url)
+            if existing:
+                return (existing.get("name") or "").strip() or (existing.get("provider") or "").strip()
+        except Exception:
+            pass
+    try:
+        p = urlparse(url)
+        host = p.hostname or ""
+    except Exception:
+        host = re.sub(r"^https?://", "", url).split("/")[0]
+    if not host:
+        return "provider"
+    port = p.port if hasattr(p, 'port') else None
+    if re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
+        return f"{host}:{port}" if port else host
+    parts = host.split(".")
+    if len(parts) > 1 and parts[0] in ("api", "v1", "v2", "www", "apihub"):
+        parts = parts[1:]
+    name = parts[0] if parts else host
+    name = re.sub(r"[^a-zA-Z0-9_-]", "", name) or host
+    if port:
+        name = f"{name}:{port}"
+    return name
+
+
 def _is_provider_name(line: str) -> bool:
     stripped = line.strip()
     if not stripped or len(stripped) > 40:
@@ -392,7 +423,7 @@ def _try_parse_json(text: str) -> Optional[list[dict]]:
                 vendor_name = ""
             entries.append({
                 "provider": str(provider),
-                "vendor_name": vendor_name or str(provider).replace("-", " ").title(),
+                "vendor_name": vendor_name or _vendor_name_from_url(url),
                 "name": _make_key_name(key) if key else "(need key)",
                 "api_url": url.rstrip("/") if url else "",
                 "api_key": key,
@@ -474,7 +505,7 @@ def parse_batch_text(text: str) -> list[dict]:
             for k in keys:
                 entries.append({
                     "provider": prov,
-                    "vendor_name": str(prov).replace("-", " ").title(),
+                    "vendor_name": _vendor_name_from_url(url),
                     "name": _make_key_name(k),
                     "api_url": url,
                     "api_key": k,
@@ -487,7 +518,7 @@ def parse_batch_text(text: str) -> list[dict]:
                 ep = "anthropic"
             entries.append({
                 "provider": prov,
-                "vendor_name": str(prov).replace("-", " ").title(),
+                "vendor_name": _vendor_name_from_url(url),
                 "name": "(need key)",
                 "api_url": url,
                 "api_key": "",

@@ -1866,8 +1866,28 @@ def _sync_import_apply(selected):
         api_url = v.get("api_url") or ""
         vendor = find_vendor_for_import(provider, api_url, v.get("name") or v.get("vendor_name") or "")
         if not vendor:
+            # Generate vendor name from URL domain or IP
+            try:
+                from urllib.parse import urlparse as _up
+                p = _up(api_url)
+                host = p.hostname or ""
+                if host:
+                    import re as _re
+                    if _re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
+                        _name = f"{host}:{p.port}" if p.port else host
+                    else:
+                        parts = host.split(".")
+                        if parts[0] in ("api", "v1", "v2", "www", "apihub"):
+                            parts = parts[1:]
+                        _name = _re.sub(r"[^a-zA-Z0-9_-]", "", parts[0] if parts else host) or host
+                        if p.port:
+                            _name = f"{_name}:{p.port}"
+                else:
+                    _name = provider.replace("-", " ").title()
+            except Exception:
+                _name = provider.replace("-", " ").title()
             vendor = add_vendor(
-                v.get("name") or v.get("vendor_name") or provider.replace("-", " ").title(),
+                v.get("name") or v.get("vendor_name") or _name,
                 provider,
                 api_url,
                 v.get("endpoint_type") or "openai",
