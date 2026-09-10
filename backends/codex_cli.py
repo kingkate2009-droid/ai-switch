@@ -245,13 +245,13 @@ def _is_gpt_related_model(model_id: str) -> bool:
 
 def _vendor_all_models(vendor: dict) -> list[str]:
     """All known model ids from enabled keys (default model first)."""
-    from core.data import get_enabled_models, list_model_ids
+    from core.data import get_enabled_models
 
     out, seen = [], set()
     for k in vendor.get("keys") or []:
         if k.get("enabled") is False or not k.get("api_key"):
             continue
-        ids = list(get_enabled_models(k) or list_model_ids(k) or [])
+        ids = list(get_enabled_models(k))
         dm = (k.get("default_model") or "").strip()
         if dm:
             ids = [dm] + [x for x in ids if x != dm]

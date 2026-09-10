@@ -58,9 +58,9 @@ def _normalize_base_url(vendor: dict) -> str:
 
 
 def _list_enabled_models(key: dict) -> list[str]:
-    from core.data import get_enabled_models, list_model_ids
+    from core.data import get_enabled_models
     try:
-        enabled = get_enabled_models(key) or list_model_ids(key) or []
+        enabled = get_enabled_models(key)
     except Exception:
         enabled = []
     return [str(m).strip() for m in enabled if str(m).strip()]

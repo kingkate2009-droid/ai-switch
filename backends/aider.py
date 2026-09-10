@@ -91,7 +91,7 @@ class AiderAdapter(BackendAdapter):
                     continue
                 from core.data import get_enabled_models
                 models = self.filter_model_ids(v, k, get_enabled_models(k))
-                if k.get("models") and not models:
+                if (k.get("models") or isinstance(k.get("sync_models"), list)) and not models:
                     continue
                 entry = f"{aider_prov}={k['api_key']}"
                 if entry not in seen:

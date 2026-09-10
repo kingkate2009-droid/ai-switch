@@ -446,7 +446,7 @@ class OpenCodeAdapter(BackendAdapter):
             if not mid:
                 continue
             mid = str(mid)
-            if enabled and mid not in enabled:
+            if mid not in enabled:
                 continue
             name = m.get("name", mid) if isinstance(m, dict) else mid
             out[mid] = {"name": str(name)}
@@ -455,7 +455,7 @@ class OpenCodeAdapter(BackendAdapter):
                 out[str(mid)] = {"name": str(mid)}
         if not out and key.get("default_model"):
             dm = str(key["default_model"])
-            if not enabled or dm in enabled:
+            if dm in enabled:
                 out[dm] = {"name": dm}
         return out
 
@@ -940,6 +940,7 @@ class OpenCodeAdapter(BackendAdapter):
     def reconcile(self) -> None:
         """Rebuild managed providers from the best active key per provider."""
         from core.data import get_backend_config, get_enabled_models, get_vendors
+        from backends import _scope_key_ids, _scope_vendor_ids
 
         if get_backend_config(self.name).get("disabled"):
             return
@@ -947,6 +948,23 @@ class OpenCodeAdapter(BackendAdapter):
         auth = self._load_auth()
         cfg = self._load_config()
         cfg.setdefault("provider", {})
+
+        vendor_scope = _scope_vendor_ids()
+        key_scope = _scope_key_ids()
+        scoped = vendor_scope is not None or key_scope is not None
+        scoped_pids = set()
+        if scoped:
+            for scoped_vendor in get_vendors():
+                vid = str(scoped_vendor.get("id") or "")
+                if vendor_scope is not None and vid not in vendor_scope:
+                    continue
+                if key_scope is not None and not any(
+                    f"{vid}:{str(k.get('id') or '')}" in key_scope
+                    for k in scoped_vendor.get("keys") or []
+                ):
+                    continue
+                pid = self._provider_id(scoped_vendor)
+                scoped_pids.add("opencode" if self._is_opencode_zen(scoped_vendor) else pid)
 
         # Group vendors by provider id, pick best key
         desired: dict[str, tuple[dict, dict]] = {}
@@ -978,8 +996,16 @@ class OpenCodeAdapter(BackendAdapter):
             ):
                 auth_only_pids.add(pid)
 
-        new_auth = {k: v for k, v in auth.items()
-                    if isinstance(v, dict) and v.get("type") in ("oauth", "token")}
+        if scoped:
+            # A scoped push must not remove credentials belonging to providers
+            # outside the requested vendor/key set.
+            new_auth = dict(auth)
+            for auth_pid in list(new_auth):
+                if any(auth_pid == pid or auth_pid.startswith(pid + "-") for pid in scoped_pids):
+                    del new_auth[auth_pid]
+        else:
+            new_auth = {k: v for k, v in auth.items()
+                        if isinstance(v, dict) and v.get("type") in ("oauth", "token")}
 
         desired_config_pids: set[str] = set()
         for pid, (v, k) in desired.items():
@@ -1005,6 +1031,10 @@ class OpenCodeAdapter(BackendAdapter):
 
         # Drop managed providers no longer desired
         for pid, entry in list(cfg.get("provider", {}).items()):
+            if scoped and pid not in scoped_pids and not any(
+                pid.startswith(target + "-") for target in scoped_pids
+            ):
+                continue
             if (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG and \
                     pid not in desired and pid not in desired_config_pids:
                 del cfg["provider"][pid]

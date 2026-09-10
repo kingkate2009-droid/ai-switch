@@ -115,7 +115,8 @@ class GrokCliAdapter(BackendAdapter):
             api_url = vendor.get("proxy_target", "") or vendor.get("api_url", "")
             if api_url:
                 env["CUSTOM_BASE_URL"] = api_url.rstrip("/")
-            models = key.get("models") or []
+            from core.data import get_enabled_models
+            models = get_enabled_models(key)
             if models:
                 mid = models[0]["id"] if isinstance(models[0], dict) else models[0]
                 if mid:
@@ -127,9 +128,11 @@ class GrokCliAdapter(BackendAdapter):
             dm = key.get("default_model", "")
             if dm:
                 env["XAI_MODEL"] = dm
-            elif key.get("models"):
-                m0 = key["models"][0]
-                env["XAI_MODEL"] = m0["id"] if isinstance(m0, dict) else m0
+            else:
+                from core.data import get_enabled_models
+                models = get_enabled_models(key)
+                if models:
+                    env["XAI_MODEL"] = models[0]
         elif alias == "azure":
             api_url = vendor.get("api_url", "")
             if api_url:

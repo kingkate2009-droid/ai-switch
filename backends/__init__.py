@@ -12,14 +12,21 @@ _reconcile_request_lock = threading.Lock()
 _reconcile_requested = False
 _reconcile_worker: Optional[threading.Thread] = None
 _pending_vendor_ids: list = []
+_pending_key_ids: list = []
 
 # Thread-local reconcile scope: when set (list of vendor ids), only those
 # vendors are written to backends. None = all vendors (default).
+# key_ids: when set (list of "vendor_id:key_id"), only those specific keys
+# are written. None = all keys for the scoped vendors.
 _tls = threading.local()
 
 
 def _scope_vendor_ids() -> Optional[set]:
     return getattr(_tls, "vendor_ids", None)
+
+
+def _scope_key_ids() -> Optional[set]:
+    return getattr(_tls, "key_ids", None)
 
 
 def register(adapter: BackendAdapter) -> None:
@@ -34,32 +41,51 @@ def get_all() -> dict[str, BackendAdapter]:
     return dict(_adapters)
 
 
-def reconcile_all_async(vendor_ids=None) -> None:
+def reconcile_all_async(vendor_ids=None, key_ids=None) -> None:
     """Coalesce background reconcile requests so API writes can return quickly.
 
     ``vendor_ids``: when given, only those vendors are written (scoped push).
+    ``key_ids``: when given (list of "vid:kid"), only those keys are written.
     """
-    global _reconcile_requested, _reconcile_worker, _pending_vendor_ids
+    global _reconcile_requested, _reconcile_worker, _pending_vendor_ids, _pending_key_ids
     with _reconcile_request_lock:
         ids = [str(v) for v in (vendor_ids or []) if v]
+        kid_list = [str(k) for k in (key_ids or []) if k]
         _reconcile_requested = True
         if _reconcile_worker and _reconcile_worker.is_alive():
-            _pending_vendor_ids.extend(ids)
+            # An unscoped follow-up supersedes an earlier narrow request.
+            if not ids:
+                _pending_vendor_ids = None
+            elif _pending_vendor_ids is not None:
+                _pending_vendor_ids.extend(ids)
+            # An unscoped follow-up supersedes an earlier narrow request.
+            if not kid_list:
+                _pending_key_ids = None
+            elif _pending_key_ids is not None:
+                _pending_key_ids.extend(kid_list)
             return
 
         def _worker() -> None:
-            global _reconcile_requested, _reconcile_worker, _pending_vendor_ids
+            global _reconcile_requested, _reconcile_worker, _pending_vendor_ids, _pending_key_ids
             while True:
                 with _reconcile_request_lock:
                     if not _reconcile_requested:
                         _reconcile_worker = None
                         return
                     _reconcile_requested = False
-                    batch = list(_pending_vendor_ids)
-                    _pending_vendor_ids.clear()
-                reconcile_all(vendor_ids=batch or None)
+                    batch = None if _pending_vendor_ids is None else list(_pending_vendor_ids)
+                    _pending_vendor_ids = []
+                    key_batch = None if _pending_key_ids is None else list(_pending_key_ids)
+                    _pending_key_ids = []
+                # A later request may be broader than the first one. In that
+                # case do not retain the first request's key restriction.
+                reconcile_all(
+                    vendor_ids=None if batch is None else (batch or None),
+                    key_ids=None if key_batch is None else (key_batch or kid_list or None),
+                )
 
         _pending_vendor_ids = ids
+        _pending_key_ids = kid_list
         _reconcile_worker = threading.Thread(
             target=_worker,
             name="ai-switch-backend-reconcile",
@@ -326,7 +352,7 @@ def _run_adapter_reconcile(adapter: BackendAdapter, *, timeout_seconds: float = 
     return box["runtime"]
 
 
-def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None) -> dict:
+def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_ids=None) -> dict:
     """Push system keys to backends. Returns per-backend result summary.
 
     Each installed backend is bounded by ``timeout_per_backend`` so one slow
@@ -335,6 +361,8 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None) -> dic
 
     ``vendor_ids``: when given (list of vendor ids), only those vendors are
     written. None/empty = all vendors.
+    ``key_ids``: when given (list of "vendor_id:key_id"), only those specific
+    keys are written. None/empty = all keys (subject to vendor_ids scope).
     """
     from datetime import datetime, timezone
     from core.data import get_backend_config, _load_data, _save_data
@@ -346,9 +374,12 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None) -> dic
     # leave a backend with a mixture of two system snapshots.
     with _reconcile_lock:
         # Scoped pushes must not leak their scope into a concurrent full push.
-        prev_scope = getattr(_tls, "vendor_ids", None)
+        prev_vendor_scope = getattr(_tls, "vendor_ids", None)
+        prev_key_scope = getattr(_tls, "key_ids", None)
         ids = [str(v) for v in (vendor_ids or []) if v]
+        kid_list = [str(k) for k in (key_ids or []) if k]
         _tls.vendor_ids = set(ids) if ids else None
+        _tls.key_ids = set(kid_list) if kid_list else None
         try:
             # Fresh health snapshot shared by all adapters this round
             invalidate_health_cache_snapshot()
@@ -428,8 +459,13 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None) -> dic
                 log.warning("Failed to save last_push: %s", e)
             return results
         finally:
-            if prev_scope is None:
+            if prev_vendor_scope is None:
                 if hasattr(_tls, "vendor_ids"):
                     delattr(_tls, "vendor_ids")
             else:
-                _tls.vendor_ids = prev_scope
+                _tls.vendor_ids = prev_vendor_scope
+            if prev_key_scope is None:
+                if hasattr(_tls, "key_ids"):
+                    delattr(_tls, "key_ids")
+            else:
+                _tls.key_ids = prev_key_scope

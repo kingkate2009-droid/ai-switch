@@ -74,7 +74,8 @@ class ClaudeCodeAdapter(BackendAdapter):
         from core.endpoints import ANTHROPIC_MESSAGES, effective_model_endpoints
         prov = (vendor.get("provider") or "").lower()
         for key in vendor.get("keys") or []:
-            mids = key.get("models") or [key.get("default_model") or ""]
+            from core.data import get_enabled_models
+            mids = get_enabled_models(key) or [key.get("default_model") or ""]
             for item in mids:
                 mid = item.get("id") if isinstance(item, dict) else str(item or "")
                 if mid and ANTHROPIC_MESSAGES in effective_model_endpoints(vendor, key, mid):
@@ -114,8 +115,8 @@ class ClaudeCodeAdapter(BackendAdapter):
             pid = f"aiswitch-{v.get('id')}"
             url = (v.get("proxy_target") or v.get("api_url") or "").rstrip("/")
             models = []
-            for m in (k.get("models") or []):
-                mid = m.get("id") if isinstance(m, dict) else str(m or "")
+            from core.data import get_enabled_models
+            for mid in get_enabled_models(k):
                 if mid:
                     models.append(mid)
             is_active = bool(active_key) and (

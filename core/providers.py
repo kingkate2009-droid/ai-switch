@@ -51,6 +51,15 @@ def _new_session() -> requests.Session:
     return s
 
 
+def _set_scan_status(success: bool, error: str = "") -> None:
+    _tls.scan_ok = bool(success)
+    _tls.scan_error = str(error or "")[:2000]
+
+
+def _get_scan_status() -> tuple[bool, str]:
+    return bool(getattr(_tls, "scan_ok", False)), str(getattr(_tls, "scan_error", "") or "")
+
+
 def _is_html_response(response) -> bool:
     content_type = str((response.headers or {}).get("Content-Type") or "").lower()
     body = str(response.text or "").lstrip().lower()
@@ -1002,6 +1011,7 @@ def _is_chat_model(model_id: str) -> bool:
 
 
 def _scan_models_openai(url: str, headers: dict) -> list[str]:
+    _set_scan_status(False)
     root = url.rstrip("/")
     # If URL already ends with a version path (e.g., /v3), use it directly
     if root.endswith(("/v1", "/v2", "/v3", "/v4")):
@@ -1013,11 +1023,15 @@ def _scan_models_openai(url: str, headers: dict) -> list[str]:
         if r.status_code == 200:
             data = r.json()
             raw = data.get("data", []) if isinstance(data, dict) else data
-            ids = [m.get("id", "") for m in raw if isinstance(m, dict) and m.get("id")]
-            if ids:
+            if isinstance(raw, list):
+                ids = [m.get("id", "") for m in raw if isinstance(m, dict) and m.get("id")]
+                _set_scan_status(True)
                 return [m for m in ids if _is_inventory_model(m)]
-    except Exception:
-        pass
+            _set_scan_status(False, "HTTP 200 model inventory has invalid response shape")
+        else:
+            _set_scan_status(False, f"HTTP {r.status_code} on {models_url}: {(r.text or '')[:1000]}")
+    except Exception as exc:
+        _set_scan_status(False, f"{type(exc).__name__}: {exc}")
     return []
 
 
@@ -1060,6 +1074,8 @@ def _scan_models_anthropic(url: str, api_key: str) -> list[str]:
         candidates.append(product_root + "/v1/models")
         candidates.append(product_root + "/models")
 
+    _set_scan_status(False)
+    last_error = ""
     seen_urls = set()
     for models_url in candidates:
         if models_url in seen_urls:
@@ -1069,16 +1085,20 @@ def _scan_models_anthropic(url: str, api_key: str) -> list[str]:
             try:
                 r = _new_session().get(models_url, headers=headers, timeout=get_probe_timeout())
                 if r.status_code != 200:
+                    last_error = f"HTTP {r.status_code} on {models_url}: {(r.text or '')[:1000]}"
                     continue
                 data = r.json()
                 raw = data.get("data", []) if isinstance(data, dict) else data
                 if not isinstance(raw, list):
+                    last_error = f"HTTP 200 model inventory has invalid response shape on {models_url}"
                     continue
                 ids = [m.get("id", "") for m in raw if isinstance(m, dict) and m.get("id")]
-                if ids:
-                    return [m for m in ids if _is_inventory_model(m)]
-            except Exception:
+                _set_scan_status(True)
+                return [m for m in ids if _is_inventory_model(m)]
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
                 continue
+    _set_scan_status(False, last_error or "Model inventory request returned no models")
     return []
 
 
@@ -1093,18 +1113,34 @@ def scan_models(check_type: str, url: str, api_key: str) -> list[str]:
     if check_type == "anthropic":
         return _scan_models_anthropic(url, api_key)
     if check_type == "gemini":
+        _set_scan_status(False)
         models_url = url.rstrip("/") + f"/models?key={api_key}"
         try:
             r = _new_session().get(models_url, timeout=get_probe_timeout())
             if r.status_code == 200:
                 data = r.json()
                 raw = data.get("models", []) if isinstance(data, dict) else data
-                return [m.get("name", "").replace("models/", "") for m in raw
-                        if isinstance(m, dict) and m.get("name")]
-        except Exception:
-            pass
+                if isinstance(raw, list):
+                    _set_scan_status(True)
+                    return [m.get("name", "").replace("models/", "") for m in raw
+                            if isinstance(m, dict) and m.get("name")]
+                _set_scan_status(False, "HTTP 200 model inventory has invalid response shape")
+            else:
+                _set_scan_status(False, f"HTTP {r.status_code} on {models_url}: {(r.text or '')[:1000]}")
+        except Exception as exc:
+            _set_scan_status(False, f"{type(exc).__name__}: {exc}")
         return []
+    _set_scan_status(False, f"Unsupported model scan type: {check_type}")
     return []
+
+
+def scan_models_with_status(check_type: str, url: str, api_key: str) -> tuple[list[str], str, bool]:
+    """Return ``(models, raw_error, scan_ok)`` so callers can distinguish empty inventory
+    from a failed model-list request and preserve the original network detail.
+    """
+    models = scan_models(check_type, url, api_key)
+    ok, error = _get_scan_status()
+    return models, error, ok
 
 
 def pick_default_model(models: list[str]) -> str:

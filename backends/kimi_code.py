@@ -217,17 +217,17 @@ def _context_size(model: str, vendor: dict) -> int:
 
 
 def _list_models(key: dict, vendor: dict) -> list[str]:
-    from core.data import get_enabled_models, list_model_ids
+    from core.data import get_enabled_models
     ids = []
     try:
-        ids = get_enabled_models(key) or list_model_ids(key) or []
+        ids = get_enabled_models(key)
     except Exception:
         ids = []
     ids = [str(m).strip() for m in ids if str(m).strip()]
     ids = [m for m in ids if _selected_kimi_endpoint(vendor, key, m)]
     if ids:
         return ids
-    if _is_kimi_like(vendor):
+    if _is_kimi_like(vendor) and not isinstance(key.get("sync_models"), list):
         return [m for m in (x[0] for x in _DEFAULT_KIMI_MODELS)
                 if _selected_kimi_endpoint(vendor, key, m)]
     # generic fallback

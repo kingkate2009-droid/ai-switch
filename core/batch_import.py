@@ -305,17 +305,14 @@ def _guess_provider_from_url(url: str) -> str:
     matched = recognize_provider(url)
     if matched:
         return matched["id"]
-    host = re.sub(r"^https?://", "", url).split("/")[0]
-    parts = host.split(".")
-    if parts[0] in ("api", "v1", "v2", "www", "apihub"):
-        parts = parts[1:]
-    name = re.sub(r"[^a-zA-Z0-9_-]", "", parts[0] if parts else host)
+    host = re.sub(r"^https?://", "", url).split("/")[0].split(":", 1)[0]
+    name = re.sub(r"[^a-zA-Z0-9]+", "-", host).strip("-")
     return name or "provider"
 
 
-def _vendor_name_from_url(url: str) -> tuple[str, bool]:
+def _vendor_name_from_url(url: str, *, match_existing: bool = True) -> tuple[str, bool]:
     """Generate vendor name from URL. Returns (name, matched_existing)."""
-    if url:
+    if url and match_existing:
         try:
             from core.data import find_vendor_by_url
             existing = find_vendor_by_url(url)
@@ -326,22 +323,26 @@ def _vendor_name_from_url(url: str) -> tuple[str, bool]:
             pass
     try:
         p = urlparse(url)
-        host = p.hostname or ""
+        host = (p.hostname or "").rstrip(".").lower()
     except Exception:
-        host = re.sub(r"^https?://", "", url).split("/")[0]
+        p = None
+        host = re.sub(r"^https?://", "", url).split("/")[0].split(":", 1)[0].lower()
     if not host:
         return "provider", False
-    port = p.port if hasattr(p, 'port') else None
+    port = p.port if p is not None else None
     if re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
         return (f"{host}:{port}" if port else host), False
-    parts = host.split(".")
-    if len(parts) > 1 and parts[0] in ("api", "v1", "v2", "www", "apihub"):
-        parts = parts[1:]
-    name = parts[0] if parts else host
-    name = re.sub(r"[^a-zA-Z0-9_-]", "", name) or host
+    # Use the complete hostname so similarly named gateways remain distinct:
+    # https://aaa.xxx.com/v1 -> aaa-xxx-com.
+    name = re.sub(r"[^a-zA-Z0-9]+", "-", host).strip("-") or "provider"
     if port:
-        name = f"{name}:{port}"
+        name = f"{name}-{port}"
     return name, False
+
+
+def smart_vendor_name_from_url(url: str) -> str:
+    """Return the canonical URL-derived name used by smart import."""
+    return _vendor_name_from_url(url, match_existing=False)[0]
 
 
 def _is_provider_name(line: str) -> bool:
@@ -435,12 +436,85 @@ def _try_parse_json(text: str) -> Optional[list[dict]]:
     return entries if entries else None
 
 
+def _parse_labeled_records(text: str) -> Optional[list[dict]]:
+    """Parse repeated protocol/url/api_key records without cross-product pairing."""
+    lines = _normalize_text(text or "").splitlines()
+    records = []
+    current = {}
+
+    def flush() -> None:
+        if current.get("url") or current.get("key"):
+            records.append(dict(current))
+        current.clear()
+
+    for line in lines:
+        raw = line.strip()
+        if not raw:
+            continue
+        low = raw.lower()
+        if low.startswith("protocol") and current:
+            flush()
+        if low.startswith("protocol"):
+            current["protocol"] = raw.split("=", 1)[1].strip() if "=" in raw else raw.split(":", 1)[-1].strip()
+            continue
+        if low.startswith(("url=", "url:", "base_url=", "baseurl=" , "api_url=")):
+            current["url"] = raw.split("=", 1)[1].strip() if "=" in raw else raw.split(":", 1)[1].strip()
+            continue
+        if low.startswith(("api_key=", "api-key=", "key=", "token=")):
+            current["key"] = raw.split("=", 1)[1].strip() if "=" in raw else raw.split(":", 1)[1].strip()
+            continue
+    flush()
+    if not records or not any(r.get("url") and r.get("key") for r in records):
+        return None
+
+    entries = []
+    for record in records:
+        url = _find_urls(record.get("url") or "")
+        key = _find_api_keys(record.get("key") or "")
+        if not url:
+            candidate = str(record.get("url") or "").strip()
+            if candidate:
+                url = [candidate]
+        if not key:
+            candidate = str(record.get("key") or "").strip()
+            if _looks_like_api_key(candidate):
+                key = [candidate]
+        for api_url in url[:1]:
+            for api_key in key[:1]:
+                vendor_name, matched = _vendor_name_from_url(api_url)
+                # Respect protocol field (OpenAI/Anthropic/Gemini...) — some providers
+                # serve chat models at a non-default endpoint type even when the URL
+                # itself doesn't contain the protocol hint.
+                raw_proto = (record.get("protocol") or "").strip()
+                if raw_proto.lower().startswith("anthropic"):
+                    ep = "anthropic"
+                elif raw_proto.lower().startswith("openai"):
+                    ep = "openai"
+                else:
+                    ep = "anthropic" if "/anthropic" in api_url.lower() or "api.anthropic.com" in api_url.lower() else "openai"
+                vendor_name, matched = _vendor_name_from_url(api_url)
+                entries.append({
+                    "provider": _guess_provider_from_url(api_url),
+                    "vendor_name": vendor_name,
+                    "name": _make_key_name(api_key),
+                    "api_url": api_url.rstrip("/"),
+                    "api_key": api_key,
+                    "endpoint_type": ep,
+                    "_matched_existing": matched,
+                })
+    return entries or None
+
+
 def parse_batch_text(text: str) -> list[dict]:
     text = _normalize_text(text or "")
     # Expand whole-input / embedded base64 before any parsing
     expanded = _expand_base64_in_text(text)
     if expanded != text:
         text = expanded
+
+    labeled_entries = _parse_labeled_records(text)
+    if labeled_entries is not None:
+        return _dedupe_entries(labeled_entries)
 
     # Try JSON parsing first
     json_entries = _try_parse_json(text)

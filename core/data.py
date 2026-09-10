@@ -778,23 +778,8 @@ def batch_import_entries(entries: list) -> dict:
                 base_name = vendor_name
                 if not base_name:
                     try:
-                        from urllib.parse import urlparse as _up
-                        p = _up(api_url)
-                        host = p.hostname or ""
-                        if host:
-                            if re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
-                                base_name = f"{host}:{p.port}" if p.port else host
-                            else:
-                                parts = host.split(".")
-                                if parts[0] in ("api", "v1", "v2", "www", "apihub"):
-                                    parts = parts[1:]
-                                base_name = re.sub(r"[^a-zA-Z0-9_-]", "", parts[0] if parts else host)
-                                if not base_name:
-                                    base_name = host
-                                if p.port:
-                                    base_name = f"{base_name}:{p.port}"
-                        else:
-                            base_name = provider.replace("-", " ").title() or "Provider"
+                        from core.batch_import import smart_vendor_name_from_url
+                        base_name = smart_vendor_name_from_url(api_url) or provider.replace("-", " ").title() or "Provider"
                     except Exception:
                         base_name = provider.replace("-", " ").title() or "Provider"
                 final_name = base_name
@@ -880,7 +865,7 @@ def batch_import_entries(entries: list) -> dict:
 _KEY_FIELDS = (
     "name", "api_key", "enabled", "models", "default_model",
     "check_model",  # primary model for health / scheduled checks; empty = auto
-    "disabled_models", "model_health", "endpoint_capabilities", "quality_scores", "notes", "role",
+    "disabled_models", "sync_models", "model_health", "endpoint_capabilities", "quality_scores", "notes", "role",
     "archived",
 )
 
@@ -914,12 +899,25 @@ def list_model_ids(key: dict) -> list[str]:
 
 
 def get_enabled_models(key: dict) -> list[str]:
-    """Models that should be synced to backends (system keeps full models list)."""
+    """Models that should be synced; explicit sync_models wins over disabled flags."""
     ids = list_model_ids(key)
     if not ids:
         return []
+    selected = key.get("sync_models")
     disabled = set(key.get("disabled_models") or [])
+    if isinstance(selected, list):
+        wanted = {model_id_of(m) for m in selected}
+        return [m for m in ids if m in wanted and m not in disabled]
     return [m for m in ids if m not in disabled]
+
+
+def get_sync_models(key: dict) -> list[str]:
+    """Return the explicit sync selection, or all enabled inventory models."""
+    return get_enabled_models(key)
+
+
+def has_explicit_sync_models(key: dict) -> bool:
+    return isinstance(key.get("sync_models"), list)
 
 
 def get_model_endpoint_capabilities(key: dict, model: str = "") -> dict:
@@ -994,30 +992,55 @@ def set_model_enabled(vendor_id: str, key_id: str, model: str, enabled: bool) ->
             if k["id"] != key_id:
                 continue
             disabled = list(k.get("disabled_models") or [])
+            all_models = list_model_ids(k)
+            selected = k.get("sync_models")
             if enabled:
                 disabled = [m for m in disabled if m != model]
+                if isinstance(selected, list):
+                    if model not in selected:
+                        selected.append(model)
+                    if set(selected) == set(all_models) and not disabled:
+                        selected = None
+            elif isinstance(selected, list):
+                selected = [mid for mid in selected if mid != model]
             elif model not in disabled:
                 disabled.append(model)
+            if not enabled and not isinstance(selected, list):
+                # First deselection switches the key to explicit-selection
+                # mode; subsequent toggles edit that selection directly.
+                selected = [mid for mid in all_models if mid != model]
             k["disabled_models"] = disabled
+            if isinstance(selected, list):
+                k["sync_models"] = [mid for mid in all_models if mid in set(selected)]
+            elif selected is None:
+                k.pop("sync_models", None)
             _save_data(data)
             return k
     return None
 
 
 def _apply_key_fields(k: dict, kwargs: dict) -> None:
+    replace_model_maps = bool(kwargs.get("_replace_model_state"))
     for key in _KEY_FIELDS:
         if key not in kwargs:
             continue
         val = kwargs[key]
         if key == "notes":
             val = str(val or "")[:500]
+        elif key == "sync_models":
+            if val is not None and not isinstance(val, list):
+                val = []
+            if isinstance(val, list):
+                val = list(dict.fromkeys(model_id_of(m) for m in val if model_id_of(m)))
         elif key == "role":
             val = _normalize_role(val)
         elif key in ("endpoint_capabilities", "model_health", "quality_scores") and isinstance(val, dict):
             # Merge maps so bulk health can patch only probed models without
             # wiping the rest of the inventory classification/history.
             # Explicit empty dict still clears (used when key-level probe fails).
-            if not val:
+            if replace_model_maps:
+                k[key] = dict(val)
+            elif not val:
                 k[key] = {}
             else:
                 cur = k.get(key) if isinstance(k.get(key), dict) else {}
@@ -3057,6 +3080,78 @@ def merge_duplicate_vendors_by_url(*, dry_run: bool = True) -> dict:
         "keys_deduped": total_skip_dup_keys,
         "refs_remapped": refs,
         "items": preview,
+    }
+
+
+def normalize_legacy_vendor_names(*, dry_run: bool = True) -> dict:
+    """Rename legacy ``newapi-*`` vendors using smart-import URL naming.
+
+    This intentionally does not merge vendors. Vendors with different URLs
+    remain separate; only their display names are normalized. Name collisions
+    receive the same ``-2``, ``-3`` suffix convention as batch import.
+    """
+    import re
+
+    data = _load_data()
+    vendors = data.get("vendors") or []
+    legacy = [
+        v for v in vendors
+        if re.match(r"^newapi(?:[-_ ]+.*)?$", str(v.get("name") or "").strip(), re.I)
+        and str(v.get("api_url") or "").strip()
+    ]
+    used = {
+        str(v.get("name") or "").strip().lower()
+        for v in vendors
+        if v not in legacy and str(v.get("name") or "").strip()
+    }
+    try:
+        from core.batch_import import smart_vendor_name_from_url
+    except Exception:
+        smart_vendor_name_from_url = None
+
+    items = []
+    changed = 0
+    # Process in a stable order so rerunning the migration keeps names stable.
+    legacy.sort(key=lambda v: (vendor_url_merge_key(v.get("api_url") or ""), str(v.get("id") or "")))
+    planned_names = {}
+    base_counts = {}
+    for vendor in legacy:
+        base_name = smart_vendor_name_from_url(vendor.get("api_url") or "").strip() if smart_vendor_name_from_url else ""
+        if not base_name:
+            continue
+        base_key = base_name.lower()
+        index = base_counts.get(base_key, 0) + 1
+        candidate = base_name if index == 1 else f"{base_name}-{index}"
+        while candidate.lower() in used:
+            index += 1
+            candidate = f"{base_name}-{index}"
+        base_counts[base_key] = index
+        used.add(candidate.lower())
+        planned_names[str(vendor.get("id") or "")] = candidate
+
+    for vendor in legacy:
+        old_name = str(vendor.get("name") or "").strip()
+        new_name = planned_names.get(str(vendor.get("id") or ""))
+        if not new_name or new_name.lower() == old_name.lower():
+            continue
+        item = {
+            "id": vendor.get("id"),
+            "old_name": old_name,
+            "new_name": new_name,
+            "api_url": vendor.get("api_url") or "",
+            "key_count": len(vendor.get("keys") or []),
+        }
+        items.append(item)
+        if not dry_run:
+            vendor["name"] = new_name
+        changed += 1
+
+    if not dry_run and changed:
+        _save_data(data)
+    return {
+        "dry_run": dry_run,
+        "count": changed,
+        "items": items,
     }
 
 

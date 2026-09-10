@@ -544,10 +544,16 @@ class BackendAdapter:
         # Scoped reconcile (single-key / single-vendor push): skip any vendor
         # that is not in the active push scope.
         try:
-            from backends import _scope_vendor_ids
+            from backends import _scope_vendor_ids, _scope_key_ids
             scope = _scope_vendor_ids()
             if scope is not None and str(vendor.get("id") or "") not in scope:
                 return False
+            key_scope = _scope_key_ids()
+            if key_scope is not None:
+                vid = str(vendor.get("id") or "")
+                kid = str(key.get("id") or "")
+                if f"{vid}:{kid}" not in key_scope:
+                    return False
         except Exception:
             pass
 
@@ -599,7 +605,18 @@ class BackendAdapter:
         cache = get_health_cache_snapshot()
         for v in get_vendors():
             vid = str(v.get("id") or "")
+            try:
+                from backends import _scope_vendor_ids, _scope_key_ids
+                vendor_scope = _scope_vendor_ids()
+                key_scope = _scope_key_ids()
+            except Exception:
+                vendor_scope = key_scope = None
+            if vendor_scope is not None and vid not in vendor_scope:
+                continue
             for k in v.get("keys") or []:
+                kid = str(k.get("id") or "")
+                if key_scope is not None and f"{vid}:{kid}" not in key_scope:
+                    continue
                 if not k.get("api_key") or k.get("enabled") is False:
                     continue
                 if not is_key_backend_syncable(vid, k, cache=cache):
@@ -646,7 +663,8 @@ class BackendAdapter:
                 if not provider_hit and match_endpoint:
                     from core.endpoints import effective_model_endpoints
                     endpoint_names = set()
-                    for mid in (k.get("models") or []) or [k.get("default_model") or ""]:
+                    from core.data import get_enabled_models
+                    for mid in get_enabled_models(k) or [k.get("default_model") or ""]:
                         model = mid.get("id") if isinstance(mid, dict) else str(mid or "")
                         endpoint_names.update(effective_model_endpoints(v, k, model))
                     provider_hit = (

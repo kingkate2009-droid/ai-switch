@@ -313,10 +313,11 @@ class OpenClawAdapter(BackendAdapter):
     @staticmethod
     def _normalize_models(models, default_model: str = "",
                           disabled_models: Optional[list] = None,
-                          provider_id: str = "") -> list[dict]:
+                          provider_id: str = "", sync_models: Optional[list] = None) -> list[dict]:
         """Normalize model list to [{id, name}, ...]. Only enabled + OpenClaw-supported models.
         Empty result means: either no inventory yet, or all models disabled/blocked."""
         disabled = set(disabled_models or [])
+        selected = set(sync_models) if isinstance(sync_models, list) else None
         out = []
         seen = set()
         has_inventory = False
@@ -325,13 +326,15 @@ class OpenClawAdapter(BackendAdapter):
             if not mid:
                 continue
             has_inventory = True
-            if mid in seen or mid in disabled:
+            if mid in seen or mid in disabled or (selected is not None and mid not in selected):
                 continue
             if _is_blocked_openclaw_model(str(mid), provider_id):
                 continue
             seen.add(mid)
             out.append({"id": mid, "name": mid})
-        if not out and default_model and default_model not in disabled:
+        if not out and default_model and default_model not in disabled and (
+            selected is None or default_model in selected
+        ):
             if not _is_blocked_openclaw_model(str(default_model), provider_id):
                 out = [{"id": default_model, "name": default_model}]
         # If inventory exists but everything is disabled/blocked, stay empty (do not invent "default")
@@ -356,6 +359,7 @@ class OpenClawAdapter(BackendAdapter):
         raw_models = models_override if models_override is not None else key.get("models", [])
         models = self._normalize_models(
             raw_models, key.get("default_model", ""), key.get("disabled_models") or [],
+            sync_models=key.get("sync_models"),
             provider_id=provider_id,
         )
         # Endpoint capability is model-scoped.  OpenClaw provider entries use
@@ -379,7 +383,7 @@ class OpenClawAdapter(BackendAdapter):
             existing = cfg.get("models", {}).get("providers", {}).get(ocp_key, {})
             models = self._normalize_models(
                 existing.get("models", []), key.get("default_model", ""),
-                provider_id=provider_id,
+                provider_id=provider_id, sync_models=key.get("sync_models"),
             )
             models = [m for m in models if self.selected_model_endpoint(vendor, key, m.get("id", ""))]
             # The fallback list may have come from an older config, so its
@@ -624,6 +628,7 @@ class OpenClawAdapter(BackendAdapter):
                     continue
                 models_list = self._normalize_models(
                     k.get("models", []), k.get("default_model", ""), k.get("disabled_models") or [],
+                    sync_models=k.get("sync_models"),
                     provider_id=pname,
                 )
                 models_list = [m for m in models_list if self.selected_model_endpoint(v, k, m.get("id", ""))]
@@ -732,6 +737,7 @@ class OpenClawAdapter(BackendAdapter):
                     continue
                 models = self._normalize_models(
                     k.get("models", []), k.get("default_model", ""), k.get("disabled_models") or [],
+                    sync_models=k.get("sync_models"),
                     provider_id=pname,
                 )
                 models = [m for m in models if self.selected_model_endpoint(v, k, m.get("id", ""))]

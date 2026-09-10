@@ -194,9 +194,11 @@ class DevinAdapter(BackendAdapter):
 
     def _apply_model(self, key: dict) -> None:
         model = key.get("default_model") or ""
-        if not model and key.get("models"):
-            m0 = key["models"][0]
-            model = m0["id"] if isinstance(m0, dict) else m0
+        if not model:
+            from core.data import get_enabled_models
+            models = get_enabled_models(key)
+            if models:
+                model = models[0]
         if not model:
             return
         cfg = self._load_config()

@@ -593,10 +593,11 @@ def _slim_key_for_list(key: dict) -> dict:
     mh = out.get("model_health")
     if isinstance(mh, dict) and len(mh) > 12:
         out["model_health_count"] = len(mh)
-        # keep only healthy entries (usually few after key-health)
+        # Keep failed entries too: their raw SSL/HTTP/model errors are needed
+        # for diagnosis after the list page reloads.
         slim_mh = {
             mid: rec for mid, rec in mh.items()
-            if isinstance(rec, dict) and rec.get("healthy") is True
+            if isinstance(rec, dict)
         }
         if len(slim_mh) <= 12:
             out["model_health"] = slim_mh
@@ -645,6 +646,8 @@ def api_list_vendors():
             "healthy": row.get("healthy"),
             "latency_ms": row.get("latency_ms"),
             "error": (str(row.get("error") or "")[:200] or None),
+            "raw_error": row.get("raw_error") or row.get("error"),
+            "raw_results": row.get("raw_results") or row.get("check_layers", {}).get("model_endpoints", {}).get("results", []),
             "error_code": row.get("error_code"),
             "error_label": row.get("error_label"),
             "checked_at": row.get("checked_at"),
@@ -843,6 +846,22 @@ def api_vendors_merge_urls_apply():
     return jsonify(result)
 
 
+@app.route("/api/vendors/normalize-names", methods=["GET"])
+def api_vendors_normalize_names_preview():
+    from core.data import normalize_legacy_vendor_names
+    return jsonify(normalize_legacy_vendor_names(dry_run=True))
+
+
+@app.route("/api/vendors/normalize-names", methods=["POST"])
+def api_vendors_normalize_names_apply():
+    from core.data import normalize_legacy_vendor_names
+    result = normalize_legacy_vendor_names(dry_run=False)
+    if result.get("count"):
+        reconcile_all_async()
+        log_event("vendors.normalize_names", count=result.get("count", 0))
+    return jsonify(result)
+
+
 # ── Keys ───────────────────────────────────────────────────
 
 @app.route("/api/vendors/<vendor_id>/keys", methods=["GET"])
@@ -912,7 +931,7 @@ def api_update_key(vendor_id, key_id):
     data = request.get_json() or {}
     allowed = {k: data[k] for k in (
         "name", "api_key", "enabled", "models", "default_model",
-        "check_model", "disabled_models", "model_health", "endpoint_capabilities", "notes", "role",
+        "check_model", "sync_models", "disabled_models", "model_health", "endpoint_capabilities", "notes", "role",
         "archived",
     ) if k in data}
     k = update_key(vendor_id, key_id, **allowed)
@@ -1147,6 +1166,11 @@ def api_get_model_endpoints(vendor_id, key_id, model_id):
         "model": model_id,
         "candidates": endpoint_candidates(v, model_id),
         "capabilities": state,
+        "raw_errors": {
+            endpoint: rec.get("raw_error") or rec.get("error")
+            for endpoint, rec in (state.get("checks") or {}).items()
+            if isinstance(rec, dict) and (rec.get("raw_error") or rec.get("error"))
+        },
         "effective": effective_model_endpoints(v, k, model_id),
     })
 
@@ -1868,22 +1892,8 @@ def _sync_import_apply(selected):
         if not vendor:
             # Generate vendor name from URL domain or IP
             try:
-                from urllib.parse import urlparse as _up
-                p = _up(api_url)
-                host = p.hostname or ""
-                if host:
-                    import re as _re
-                    if _re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
-                        _name = f"{host}:{p.port}" if p.port else host
-                    else:
-                        parts = host.split(".")
-                        if parts[0] in ("api", "v1", "v2", "www", "apihub"):
-                            parts = parts[1:]
-                        _name = _re.sub(r"[^a-zA-Z0-9_-]", "", parts[0] if parts else host) or host
-                        if p.port:
-                            _name = f"{_name}:{p.port}"
-                else:
-                    _name = provider.replace("-", " ").title()
+                from core.batch_import import smart_vendor_name_from_url
+                _name = smart_vendor_name_from_url(api_url) or provider.replace("-", " ").title()
             except Exception:
                 _name = provider.replace("-", " ").title()
             vendor = add_vendor(
@@ -1990,8 +2000,10 @@ def api_sync_push():
     slow backends such as OpenClaw full rewrites. Pass ``{"wait": true}`` for
     a blocking push that returns per-backend results.
 
-    Optional body ``{"vendor_ids": [...]}`` limits the push to those vendors
-    (single-key / single-vendor checks reuse this to avoid a full rewrite).
+    Optional body:
+      - ``{"vendor_ids": [...]}`` limits the push to those vendors
+      - ``{"key_ids": ["vid:kid", ...]}`` pushes only specific vendor:key pairs
+        (single-key sync always uses wait mode to guarantee config is written).
     """
     try:
         body = request.get_json(silent=True) or {}
@@ -2000,9 +2012,19 @@ def api_sync_push():
             vendor_ids = [str(v) for v in vendor_ids if str(v).strip()] or None
         else:
             vendor_ids = None
+        key_ids = body.get("key_ids")
+        if isinstance(key_ids, list):
+            key_ids = [str(k) for k in key_ids if str(k).strip()] or None
+        else:
+            key_ids = None
         wait = bool(body.get("wait")) or request.args.get("wait") in ("1", "true", "yes")
+        # Single-key pushes use wait mode to
+        # guarantee the backend config file is written before the frontend
+        # marks the sync task as complete.
+        if not wait and key_ids:
+            wait = True
         if not wait:
-            reconcile_all_async(vendor_ids=vendor_ids)
+            reconcile_all_async(vendor_ids=vendor_ids, key_ids=key_ids)
             log_event("sync.push", mode="async", vendors=len(vendor_ids) if vendor_ids else "all")
             return jsonify({
                 "success": True,
@@ -2012,7 +2034,7 @@ def api_sync_push():
                 "fail": 0,
                 "skipped": 0,
             })
-        results = reconcile_all(vendor_ids=vendor_ids)
+        results = reconcile_all(vendor_ids=vendor_ids, key_ids=key_ids)
         log_event("sync.push", backends=len(results or {}), mode="wait", vendors=len(vendor_ids) if vendor_ids else "all")
         ok = sum(1 for r in (results or {}).values() if r.get("ok"))
         fail = sum(1 for r in (results or {}).values() if not r.get("ok") and not r.get("skipped"))

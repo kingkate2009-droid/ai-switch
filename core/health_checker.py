@@ -21,7 +21,7 @@ from core.providers import (
     probe_provider,
     probe_single_model_endpoint,
     probe_single_model,
-    scan_models,
+    scan_models_with_status,
 )
 from core.endpoints import (
     capability_record,
@@ -43,8 +43,9 @@ _lock = threading.RLock()
 # Default network retries (total attempts = 1 + retries, but we treat as max attempts)
 _DEFAULT_NETWORK_RETRIES = 3
 _RETRY_BACKOFF_BASE = 0.6  # seconds; attempt 1 wait 0.6, then 1.2, ...
-# Quick bulk checks: 1 attempt only (no multi-second backoff chain)
-_QUICK_NETWORK_RETRIES = 1
+# Quick bulk checks still retry transient network failures, but keep the same
+# hard limit requested by the UI: at most three total attempts.
+_QUICK_NETWORK_RETRIES = 3
 
 # Thread-local quick mode (set by check_key_health(quick=True) / bulk)
 _tls = threading.local()
@@ -59,13 +60,13 @@ def _max_fallback_models() -> int:
 
 
 def _network_retry_attempts() -> int:
-    """Max attempts for network-ish probe failures. Default 3, clamped 1..10."""
+    """Max attempts for network-ish probe failures. Default 3, clamped 1..3."""
     # Thread override from providers.probe_profile / quick health
     try:
         from core.providers import _tls as _prov_tls
         ov = getattr(_prov_tls, "probe_retries", None)
         if ov is not None:
-            return max(1, min(10, int(ov)))
+            return max(1, min(3, int(ov)))
     except Exception:
         pass
     if _in_quick_mode():
@@ -74,7 +75,7 @@ def _network_retry_attempts() -> int:
         n = int((get_settings() or {}).get("health_network_retries", _DEFAULT_NETWORK_RETRIES))
     except Exception:
         n = _DEFAULT_NETWORK_RETRIES
-    return max(1, min(10, n))
+    return max(1, min(3, n))
 
 
 from contextlib import contextmanager
@@ -91,7 +92,7 @@ def health_check_profile(mode: str = "full"):
     try:
         if mode == "quick":
             _tls.quick = True
-            with probe_profile(timeout=PROBE_TIMEOUT_QUICK, retries=1):
+            with probe_profile(timeout=PROBE_TIMEOUT_QUICK, retries=3):
                 yield
         else:
             _tls.quick = False
@@ -511,12 +512,13 @@ def _is_hard_key_failure(msg: str) -> bool:
 def _compact_check_rec(ck: dict) -> dict:
     if not isinstance(ck, dict):
         return {}
-    err = str(ck.get("error") or "")[:160]
-    msg = str(ck.get("message") or "")[:120]
+    err = str(ck.get("error") or "")[:2000]
+    msg = str(ck.get("message") or "")[:500]
     return {
         "healthy": bool(ck.get("healthy")),
         "latency_ms": int(ck.get("latency_ms") or 0),
         "error": err or None,
+        "raw_error": str(ck.get("raw_error") or ck.get("error") or "") or None,
         "message": msg or None,
         "checked_at": ck.get("checked_at"),
     }
@@ -549,8 +551,9 @@ def _compact_model_health_rec(rec: dict) -> dict:
     return {
         "healthy": bool(rec.get("healthy")),
         "latency_ms": int(rec.get("latency_ms") or 0),
-        "error": (str(rec.get("error") or "")[:200] or None),
-        "message": (str(rec.get("message") or "")[:160] or None),
+        "error": (str(rec.get("error") or "")[:2000] or None),
+        "raw_error": str(rec.get("raw_error") or rec.get("error") or "") or None,
+        "message": (str(rec.get("message") or "")[:500] or None),
         "checked_at": rec.get("checked_at"),
         "endpoints": list(rec.get("endpoints") or []),
         "detected_endpoints": list(rec.get("detected_endpoints") or []),
@@ -568,9 +571,11 @@ def _slim_key_updates_for_bulk(updates: dict) -> dict:
     if not isinstance(updates, dict):
         return {}
     out = {}
-    for k in ("enabled", "models", "default_model", "disabled_models", "check_model"):
+    for k in ("enabled", "models", "default_model", "disabled_models", "sync_models", "check_model"):
         if k in updates:
             out[k] = updates[k]
+    if updates.get("_replace_model_state"):
+        out["_replace_model_state"] = True
     if "endpoint_capabilities" in updates:
         caps = updates.get("endpoint_capabilities") or {}
         if not caps:
@@ -639,6 +644,7 @@ def check_model_endpoints(
             "latency_ms": int((time.time() - t0) * 1000),
             "message": message if healthy else None,
             "error": None if healthy else message,
+            "raw_error": None if healthy else message,
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
         checks[endpoint] = rec
@@ -670,6 +676,7 @@ def check_model_endpoints(
             "healthy": healthy,
             "latency_ms": int((time.time() - started) * 1000),
             "error": fail_msg,
+            "raw_error": fail_msg,
             "message": "; ".join(
                 str(checks[endpoint].get("message"))
                 for endpoint in usable
@@ -1009,20 +1016,39 @@ def _check_key_health_inner(
     # 1) Model inventory: skip network scan in quick mode when we already have models
     scan_type = "openai_chat" if check_type == "openai_responses" else check_type
     scanned = []
+    inventory_error = None
+    inventory_refreshed = False
     existing_ids = list_model_ids(key_entry)
     # Quick checks may skip inventory refresh only when the key already has a
     # model list. New imports must scan first, otherwise the endpoint phase has
     # no model to probe and incorrectly returns "No usable model".
     do_scan = bool(scan_models_flag) or (quick and not existing_ids)
     if do_scan:
-        try:
-            scanned = scan_models(scan_type, api_url, api_key) or []
-        except Exception:
-            scanned = []
+        # Model inventory is also a network operation. Retry an empty result
+        # so a transient SSL/443 failure does not preserve a stale inventory.
+        for attempt in range(_network_retry_attempts()):
+            try:
+                scanned, inventory_error, inventory_refreshed = scan_models_with_status(
+                    scan_type, api_url, api_key
+                )
+            except Exception as exc:
+                scanned = []
+                inventory_error = f"Model inventory scan exception: {exc}"
+                inventory_refreshed = False
+            if inventory_refreshed or attempt + 1 >= _network_retry_attempts():
+                break
+            time.sleep(_RETRY_BACKOFF_BASE * (attempt + 1))
 
     existing = existing_ids
     siblings = _sibling_model_ids(vendor, key_id)
-    models = _merge_model_ids(scanned, existing, siblings)
+    # A successful fresh inventory is authoritative. Models removed from the
+    # provider must disappear from the key and from its syncable model set.
+    if inventory_refreshed:
+        # A successful inventory scan is authoritative. Do not retain models
+        # borrowed from sibling keys once the provider says they are gone.
+        models = _merge_model_ids(scanned)
+    else:
+        models = _merge_model_ids(existing, siblings)
     # drop disabled from probe pool but keep full inventory for storage
     probe_pool = [m for m in models if m not in disabled] or list(models)
     # Ensure primary check model is always in the probe pool (user explicitly chose it)
@@ -1032,25 +1058,31 @@ def _check_key_health_inner(
     if not default_model and models:
         default_model = pick_default_model(models)
 
-    # Persist inventory every check when we learned anything new
-    if models and (scanned or models != existing):
-        try:
-            updates = {"models": models}
-            if default_model:
-                updates["default_model"] = default_model
-            if persist:
-                update_key_data(vendor_id, key_id, **updates)
-                key_entry = get_key_entry_fresh(vendor_id, key_id) or key_entry
-            else:
-                key_entry = {**key_entry, **updates}
-        except Exception:
-            pass
+    if inventory_refreshed:
+        key_entry = {
+            **key_entry,
+            "models": models,
+            "default_model": default_model,
+            "check_model": check_model,
+        }
 
     # 2) Model-level endpoint matrix.  This is now the authoritative key
     # health path; the legacy check_type probe below remains only as dead-code
     # compatibility for older callers that may still inspect its layer shape.
     endpoint_caps = dict(key_entry.get("endpoint_capabilities") or {})
     model_health = dict(key_entry.get("model_health") or {})
+    if inventory_refreshed:
+        model_set = set(models)
+        endpoint_caps = {mid: value for mid, value in endpoint_caps.items() if mid in model_set}
+        model_health = {mid: value for mid, value in model_health.items() if mid in model_set}
+        disabled.intersection_update(model_set)
+        if default_model and default_model not in model_set:
+            default_model = ""
+        if check_model and check_model not in model_set:
+            check_model = ""
+        selected_sync = key_entry.get("sync_models")
+        if isinstance(selected_sync, list):
+            selected_sync = [model_id_of(m) for m in selected_sync if model_id_of(m) in model_set]
     endpoint_results = []
     cache_key = f"{vendor_id}:{key_id}"
     ordered_models = _build_probe_order(
@@ -1087,6 +1119,7 @@ def _check_key_health_inner(
             "healthy": bool(usable),
             "latency_ms": matrix.get("latency_ms") or 0,
             "error": fail_msg,
+            "raw_error": fail_msg,
             "message": None,
             "checked_at": state.get("checked_at"),
             "endpoints": usable,
@@ -1125,7 +1158,16 @@ def _check_key_health_inner(
         "endpoint_capabilities": endpoint_caps,
         "model_health": model_health,
         "disabled_models": sorted(disabled),
+        "_replace_model_state": inventory_refreshed,
     }
+    if inventory_refreshed:
+        updates.update({
+            "models": models,
+            "default_model": default_model,
+            "check_model": check_model,
+        })
+        if isinstance(selected_sync, list):
+            updates["sync_models"] = selected_sync
     if key_healthy:
         updates["enabled"] = True
         if not key_entry.get("default_model"):
@@ -1148,12 +1190,16 @@ def _check_key_health_inner(
                 best_rank = rank
                 best = msg
         first_error = best
+    if do_scan and not inventory_refreshed and not inventory_error:
+        inventory_error = "Model inventory returned no models after network retries"
     result = {
         "key_id": key_id,
         "vendor_id": vendor_id,
         "healthy": key_healthy,
         "latency_ms": latency_ms,
         "error": None if key_healthy else first_error,
+        "raw_error": inventory_error or (None if key_healthy else first_error),
+        "raw_results": endpoint_results,
         "message": f"[{used}] endpoint ok" if key_healthy and used else None,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "models": models,
@@ -1163,7 +1209,8 @@ def _check_key_health_inner(
         "tried_models": [r["model"] for r in endpoint_results],
         "used_check_model": bool(check_model and used == check_model),
         "primary_check_failed": bool(check_model and used and used != check_model),
-        "models_refreshed": bool(scanned) if scan_models_flag else False,
+        "models_refreshed": inventory_refreshed if scan_models_flag else False,
+        "inventory_error": inventory_error,
         "check_layer": "model-endpoints",
         "check_layers": {"model_endpoints": {"healthy": key_healthy, "results": endpoint_results}},
         "endpoint_capabilities": endpoint_caps,
@@ -1221,7 +1268,16 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
     # If inventory empty, try scanning once (system retains scan results)
     if not models:
         scan_type = _resolve_check_type(vendor)
-        scanned = scan_models(scan_type, api_url, api_key)
+        scanned = []
+        for attempt in range(_network_retry_attempts()):
+            try:
+                scanned, _, scan_ok = scan_models_with_status(scan_type, api_url, api_key)
+            except Exception:
+                scanned = []
+                scan_ok = False
+            if scan_ok or attempt + 1 >= _network_retry_attempts():
+                break
+            time.sleep(_RETRY_BACKOFF_BASE * (attempt + 1))
         if scanned:
             default_model = pick_default_model(scanned)
             update_key_data(vendor_id, key_id, models=scanned, default_model=default_model)
@@ -1265,6 +1321,7 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
             "latency_ms": latency_ms,
             "message": msg if healthy else None,
             "error": None if healthy else fail_msg,
+            "raw_error": None if healthy else fail_msg,
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "check_layer": "model",
             "endpoints": usable,
@@ -1279,6 +1336,7 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
             "healthy": healthy,
             "latency_ms": latency_ms,
             "error": None if healthy else fail_msg,
+            "raw_error": None if healthy else fail_msg,
             "message": msg if healthy else None,
             "checked_at": entry["checked_at"],
             "endpoints": usable,
@@ -1642,6 +1700,8 @@ def check_all_keys(
             if row.get("skipped"):
                 continue
             updates = dict(row.pop("_key_updates", {}) or {})
+            if row.get("models_refreshed") and isinstance(updates, dict):
+                updates["_replace_model_state"] = True
             # Drop huge nested blobs from the in-memory health cache row
             row.pop("endpoint_capabilities", None)
             row.pop("check_layers", None)
@@ -1650,12 +1710,12 @@ def check_all_keys(
                 # Only patch models that were probed this pass (merge in _apply_key_fields)
                 tried = list(row.get("tried_models") or [])
                 caps = updates.get("endpoint_capabilities")
-                if isinstance(caps, dict) and tried:
+                if isinstance(caps, dict) and tried and not updates.get("_replace_model_state"):
                     updates["endpoint_capabilities"] = {
                         mid: caps[mid] for mid in tried if mid in caps
                     }
                 mh = updates.get("model_health")
-                if isinstance(mh, dict) and tried:
+                if isinstance(mh, dict) and tried and not updates.get("_replace_model_state"):
                     updates["model_health"] = {
                         mid: mh[mid] for mid in tried if mid in mh
                     }
@@ -1681,6 +1741,8 @@ def check_all_keys(
                 "healthy": row.get("healthy"),
                 "latency_ms": row.get("latency_ms"),
                 "error": (str(row.get("error") or "")[:200] or None) if row.get("healthy") is False else None,
+                "raw_error": row.get("raw_error") or row.get("error"),
+                "raw_results": list(row.get("raw_results") or []),
                 "error_code": row.get("error_code"),
                 "error_label": row.get("error_label"),
                 "suggestion": row.get("suggestion"),

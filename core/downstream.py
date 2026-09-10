@@ -266,7 +266,7 @@ def _upstream_candidates() -> list[dict]:
             # only route to known-healthy or not-yet-checked (treat unchecked as usable if enabled)
             if h.get("healthy") is False:
                 continue
-            models = get_enabled_models(k) or list_model_ids(k)
+            models = get_enabled_models(k)
             if not models and h.get("models"):
                 models = [
                     (m if isinstance(m, str) else (m.get("id") or m.get("name") or ""))

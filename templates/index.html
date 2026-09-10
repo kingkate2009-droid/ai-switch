@@ -3928,7 +3928,7 @@ function filterKeys() {
       if (h.message) statusDetail = h.message;
     } else if (healthy === false) {
       statusLabel = _('health.unhealthy');
-      var rawErr = h.error || h.message || '';
+      var rawErr = h.raw_error || h.error || h.message || '';
       var cat = (typeof classifyHealthError === 'function') ? classifyHealthError(rawErr) : '';
       statusDetail = cat ? (cat + (rawErr ? ' — ' + rawErr : '')) : rawErr;
     } else {
@@ -3946,6 +3946,7 @@ function filterKeys() {
         else checkedAt = ' ' + Math.floor(mins / 60) + 'h ago';
       } catch(e) { checkedAt = ''; }
     }
+    var rawTitle = h.raw_error || h.error || h.message || '';
     var fullStatus = statusLabel + (statusDetail ? ': ' + statusDetail : '') + checkedAt;
     const latency = h.latency_ms ? h.latency_ms + 'ms' : '-';
     const models = k.models && k.models.length ? k.models : (h.models || []);
@@ -3982,7 +3983,7 @@ function filterKeys() {
       '<td class="col-check"><input type="checkbox" class="key-check" value="' + k.id + '" onchange="onCheckChange()"></td>',
       '<td><span class="key-name">' + esc(k.name) + '</span>' + roleBadge + checkBadge + (enabled ? '' : ' <span class="badge disabled-badge">' + _('badge.disabled') + '</span>') + '</td>',
       '<td class="key-cell"><code>' + esc(k.api_key.slice(0,8)) + '...' + esc(k.api_key.slice(-4)) + '</code> <button class="btn-icon" onclick="copyText(\'' + esc(k.api_key) + '\')" title="' + esc(_('common.copy') || 'Copy') + '"><svg width="12" height="12"><use href="#ico-copy"/></svg></button></td>',
-      '<td class="status-cell" title="' + esc(fullStatus) + '"><div class="status-inner">'
+      '<td class="status-cell" title="' + esc(rawTitle || fullStatus) + '"><div class="status-inner">'
         + '<span class="dot ' + statusClass + '"></span>'
         + '<span class="status-text selectable" data-status="' + esc(fullStatus) + '" onclick="copyStatusText(this)" title="' + esc((_('common.copyStatus') || 'Click to copy status') + ': ' + fullStatus) + '">'
         + esc(statusLabel) + (statusDetail ? ': ' + esc(statusDetail) : '') + checkedAt
@@ -3997,7 +3998,8 @@ function filterKeys() {
         '<button class="btn-icon" onclick="' + (enabled ? 'disableKey' : 'enableKey') + '(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(enabled ? (_('action.disable') || 'Disable') : (_('action.enable') || 'Enable')) + '">'
         + '<svg width="15" height="15"><use href="#' + (enabled ? 'ico-check' : 'ico-x') + '"/></svg></button>',
         '<button class="btn-icon" onclick="checkKeyHealth(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('action.check') || 'Check') + '"><svg width="15" height="15"><use href="#ico-play"/></svg></button>',
-        '<button class="btn-icon" onclick="editKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('action.edit') || 'Edit') + '"><svg width="15" height="15"><use href="#ico-edit"/></svg></button>',
+         '<button class="btn-icon" onclick="syncKey(\'' + _currentVendor.id + '\',\'' + k.id + '\');event.stopPropagation()" title="' + esc(_('action.sync') || 'Sync') + '"><svg width="15" height="15"><use href="#ico-refresh"/></svg></button>',
+         '<button class="btn-icon" onclick="editKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('action.edit') || 'Edit') + '"><svg width="15" height="15"><use href="#ico-edit"/></svg></button>',
         '<button class="btn-icon btn-danger" onclick="deleteKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('action.delete') || 'Delete') + '"><svg width="15" height="15"><use href="#ico-trash"/></svg></button>',
         '<div class="actions-more" id="' + moreId + '">'
           + '<button class="btn-icon" onclick="toggleActionsMore(\'' + moreId + '\')" title="' + 'More' + '"><svg width="15" height="15"><use href="#ico-more-h"/></svg></button>'
@@ -4391,6 +4393,23 @@ async function checkKeyHealth(vendorId, keyId) {
   });
 }
 
+async function syncKey(vendorId, keyId) {
+  try {
+    var res = await api('/api/sync/push', {
+      method: 'POST',
+      body: JSON.stringify({
+        key_ids: [String(vendorId) + ':' + String(keyId)],
+        wait: true,
+      }),
+    });
+    if (res.error || res.success === false) throw new Error(res.error || res.message || 'Sync failed');
+    showToast(res.message || (_('sync.pushDone') || 'Backend synced'), 'success');
+  } catch (e) {
+    var message = String(e && e.message || e || 'Sync failed');
+    showToast((_('sync.pushFailed') || 'Backend sync failed: {err}').replace('{err}', message), 'error');
+  }
+}
+
 async function enableKey(vendorId, keyId) {
   await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/enable', { method: 'POST' });
   await selectVendor(vendorId);
@@ -4551,7 +4570,7 @@ async function checkHealthTargets(targets, opts) {
     setHealthProgress(targets.length, targets.length, _('health.progressDone') || 'Done {total}/{total}');
 
     var syncTaskId = null;
-    if (opts.push !== false) {
+    if (opts.push !== false && ok > 0) {
       try {
         if (taskId) {
           updateTask(taskId, {
@@ -4572,10 +4591,20 @@ async function checkHealthTargets(targets, opts) {
         }
         if (blocking) updateGlobalLoading(_('sync.pushing') || 'Syncing backends…');
         var vendorIds = [];
-        (targets || []).forEach(function(t) { if (t && t.vendor_id && vendorIds.indexOf(String(t.vendor_id)) < 0) vendorIds.push(String(t.vendor_id)); });
+        var keyIdList = [];
+        (targets || []).forEach(function(t) {
+          if (!t || !t.vendor_id) return;
+          if (vendorIds.indexOf(String(t.vendor_id)) < 0) vendorIds.push(String(t.vendor_id));
+          if (t.key_id) {
+            var kid = String(t.vendor_id) + ':' + String(t.key_id);
+            if (keyIdList.indexOf(kid) < 0) keyIdList.push(kid);
+          }
+        });
         var pushBody = {};
-        // Scoped push for single-vendor checks (single key); keep all-vendors full push.
-        if ((opts.scopePush === 'vendor' || (targets.length <= 1 && vendorIds.length <= 1)) && vendorIds.length) {
+        // Scoped push for single-key / single-vendor checks; keep all-vendors full push.
+        if (targets.length <= 1 && keyIdList.length <= 1 && keyIdList.length) {
+          pushBody.key_ids = keyIdList;
+        } else if ((opts.scopePush === 'vendor' || (targets.length <= 1 && vendorIds.length <= 1)) && vendorIds.length) {
           pushBody.vendor_ids = vendorIds;
         }
         var syncRes = await api('/api/sync/push', { method: 'POST', body: JSON.stringify(pushBody) });
@@ -4699,6 +4728,8 @@ async function checkAllHealth() {
             healthy: h.healthy,
             latency_ms: h.latency_ms,
             error: h.error,
+            raw_error: h.raw_error || h.error,
+            raw_results: h.raw_results || [],
           });
         }
       });
@@ -4859,6 +4890,7 @@ function renderModelsModalList(k) {
   const models = k.models || [];
   const disabled = new Set(k.disabled_models || []);
   const healthMap = k.model_health || {};
+  const syncModels = Array.isArray(k.sync_models) ? new Set(k.sync_models.map(String)) : null;
   const checkModel = String(k.check_model || '').trim();
   const list = $('modelsModalList');
   list.innerHTML = '';
@@ -4875,6 +4907,17 @@ function renderModelsModalList(k) {
     '<p class="form-hint" style="margin:8px 0 0">' + esc(_('keyModal.checkModelHint') || 'If set, key health / scheduled checks use this model only.') + '</p>',
   ].join('');
   list.appendChild(head);
+  var syncHint = document.createElement('p');
+  syncHint.className = 'form-hint';
+  syncHint.textContent = syncModels === null
+    ? 'Sync models: all enabled models'
+    : 'Sync models: explicit selection';
+  list.appendChild(syncHint);
+  var allSyncBtn = document.createElement('button');
+  allSyncBtn.className = 'btn btn-sm';
+  allSyncBtn.textContent = 'Sync all models';
+  allSyncBtn.onclick = function() { clearModelSyncSelection(); };
+  list.appendChild(allSyncBtn);
   var sel = $('modelsModalCheckSelect');
   if (sel) {
     sel.innerHTML = '';
@@ -4915,7 +4958,7 @@ function renderModelsModalList(k) {
   models.forEach(function(m) {
     var mid = _modelId(m);
     if (!mid) return;
-    var enabled = !disabled.has(mid);
+    var enabled = syncModels === null ? !disabled.has(mid) : syncModels.has(mid);
     var isPrimary = checkModel && mid === checkModel;
     var mh = healthMap[mid] || {};
     var cap = (k.endpoint_capabilities || {})[mid] || {};
@@ -4927,8 +4970,9 @@ function renderModelsModalList(k) {
     var quality = (k.quality_scores || {})[mid] || {};
     var hClass = mh.healthy === true ? 'ok' : mh.healthy === false ? 'fail' : 'unknown';
     var hText = mh.healthy === true ? _('health.healthy')
-      : mh.healthy === false ? (mh.error || _('health.unhealthy'))
+      : mh.healthy === false ? (mh.raw_error || mh.error || _('health.unhealthy'))
       : _('health.notChecked');
+    var rawDetail = mh.raw_error || mh.error || '';
     var latency = mh.latency_ms ? mh.latency_ms + 'ms' : '';
     var row = document.createElement('div');
     row.className = 'model-row' + (enabled ? '' : ' model-disabled') + (isPrimary ? ' model-check-primary-row' : '');
@@ -4938,7 +4982,8 @@ function renderModelsModalList(k) {
         '<code class="model-id" title="' + esc(mid) + '">' + esc(mid) + '</code>',
         (isPrimary ? '<span class="badge badge-ok" style="margin-left:6px">' + esc(_('keyModal.checkModelBadge') || 'Check') + '</span>' : ''),
         (quality.score != null ? '<span class="quality-inline-score" title="' + esc(_('quality.score') || 'Quality score') + '">' + Number(quality.score) + '</span>' : ''),
-        '<span class="model-health ' + hClass + '" title="' + esc(hText) + '">' + esc(hText) + (latency ? ' · ' + latency : '') + '</span>',
+         '<span class="model-health ' + hClass + '" title="' + esc(hText) + '">' + esc(hText) + (latency ? ' · ' + latency : '') + '</span>',
+         (rawDetail ? '<button class="btn-icon" title="' + esc(rawDetail) + '" onclick="event.stopPropagation();showToast(' + JSON.stringify(rawDetail) + ', \'info\')">ⓘ</button>' : ''),
       '</div>',
       '<div class="model-row-actions">',
         '<button class="btn btn-sm' + (isPrimary ? ' btn-primary' : '') + '" onclick="setKeyCheckModel(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">' +
@@ -4961,7 +5006,7 @@ function renderModelsModalList(k) {
           var ck = endpointChecks[ep] || {};
           var stateClass = ck.healthy === true ? 'endpoint-ok' : ck.healthy === false ? 'endpoint-fail' : 'endpoint-unknown';
           var stateLabel = ck.healthy === true ? (_('quality.supported') || 'Supported') : ck.healthy === false ? (_('quality.unsupported') || 'Unsupported') : (_('health.notChecked') || 'Not checked');
-          return '<label class="model-endpoint-option ' + stateClass + '" title="' + esc(ck.error || ck.message || stateLabel) + '"><input type="checkbox" value="' + esc(ep) + '" ' + (selectedEndpoints.has(ep) ? 'checked' : '') + ' ' + (endpointMode === 'auto' ? 'disabled' : '') + ' onchange="setModelEndpointSelection(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')"><span>' + esc(_endpointLabel(ep)) + '</span><strong>' + esc(stateLabel) + '</strong></label>';
+          return '<label class="model-endpoint-option ' + stateClass + '" title="' + esc(ck.raw_error || ck.error || ck.message || stateLabel) + '"><input type="checkbox" value="' + esc(ep) + '" ' + (selectedEndpoints.has(ep) ? 'checked' : '') + ' ' + (endpointMode === 'auto' ? 'disabled' : '') + ' onchange="setModelEndpointSelection(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')"><span>' + esc(_endpointLabel(ep)) + '</span><strong>' + esc(stateLabel) + '</strong></label>';
         }).join(''),
         '<button class="btn btn-sm" onclick="checkModelEndpoints(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">Check endpoints</button>',
       '</div>',
@@ -5212,6 +5257,19 @@ async function toggleModelSync(vendorId, keyId, modelId, enabled) {
   }
 }
 
+async function clearModelSyncSelection() {
+  if (!_modelsModalCtx.vendorId || !_modelsModalCtx.keyId) return;
+  var res = await api('/api/vendors/' + _modelsModalCtx.vendorId + '/keys/' + _modelsModalCtx.keyId, {
+    method: 'PUT',
+    body: JSON.stringify({ sync_models: null }),
+  });
+  if (res.error) { showToast(res.error, 'error'); return; }
+  await selectVendor(_modelsModalCtx.vendorId);
+  var v = _allVendorsData.find(function(x) { return x.id === _modelsModalCtx.vendorId; });
+  var k = v && (v.keys || []).find(function(x) { return x.id === _modelsModalCtx.keyId; });
+  if (k) renderModelsModalList(k);
+}
+
 // ── Batch Import ─────────────────────────
 
 var _debounceTimer = null;
@@ -5223,7 +5281,12 @@ function onBatchTextInput() {
   // After user edits preview, don't auto-overwrite their fixes
   if (_batchDirty) return;
   if (_debounceTimer) clearTimeout(_debounceTimer);
-  _debounceTimer = setTimeout(function() { parseBatchImport(false); }, 450);
+  var text = ($('batchImportText') && $('batchImportText').value) || '';
+  // Large pastes can emit many input events while the browser is still
+  // inserting text. Parse them only when the user clicks Parse to avoid
+  // overlapping requests and repeated table rebuilds.
+  if (text.length > 12000 || text.split('\n').length > 80) return;
+  _debounceTimer = setTimeout(function() { parseBatchImport(false); }, 700);
 }
 
 function toggleBatchAll(checked) {
@@ -5423,8 +5486,8 @@ function renderBatchPreview() {
       + 'placeholder="' + esc(_('keyModal.name')) + '" oninput="_markBatchDirty()"></td>'
       + '<td class="col-url"><input class="batch-url" type="text" value="' + esc(e.api_url || '') + '" '
       + 'placeholder="https://..." oninput="_markBatchDirty()" title="' + esc(e.api_url || '') + '"></td>'
-      + '<td class="col-key"><input class="batch-key" type="text" value="' + esc(e.api_key || '') + '" '
-      + 'placeholder="sk-..." oninput="_markBatchDirty();renderBatchPreview()" spellcheck="false" autocomplete="off"></td>'
+       + '<td class="col-key"><input class="batch-key" type="text" value="' + esc(e.api_key || '') + '" '
+       + 'placeholder="sk-..." oninput="_markBatchDirty()" spellcheck="false" autocomplete="off"></td>'
       + '<td><select class="batch-endpoint" onchange="_markBatchDirty()" title="Legacy import hint; models are checked after import">'
       + '<option value="openai"' + (e.endpoint_type !== 'anthropic' ? ' selected' : '') + '>' + esc(_('endpoint.openaiShort') || 'OpenAI') + ' (auto-detect)</option>'
       + '<option value="anthropic"' + (e.endpoint_type === 'anthropic' ? ' selected' : '') + '>' + esc(_('endpoint.anthropic') || 'Anthropic') + ' (compatibility hint)</option>'
@@ -5473,6 +5536,10 @@ function removeBatchRow(idx) {
 }
 
 async function parseBatchImport(force) {
+  if (_debounceTimer) {
+    clearTimeout(_debounceTimer);
+    _debounceTimer = null;
+  }
   const text = $('batchImportText').value.trim();
   if (!text) {
     if (force) {

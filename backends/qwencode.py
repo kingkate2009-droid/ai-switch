@@ -101,7 +101,7 @@ class QwenCodeAdapter(BackendAdapter):
             _, selected_key = selected
             from core.data import get_enabled_models
             model_ids = self.filter_model_ids(v, selected_key, get_enabled_models(selected_key))
-            if selected_key.get("models") and not model_ids:
+            if (selected_key.get("models") or isinstance(selected_key.get("sync_models"), list)) and not model_ids:
                 continue
             seen.add(prov)
             slot = slot_for(prov)
