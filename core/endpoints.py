@@ -158,12 +158,14 @@ BACKEND_PREFERENCES = {
 _IMAGE_HINTS = (
     "dall-e", "dalle", "gpt-image", "imagen", "stable-diffusion", "sdxl",
     "flux", "midjourney", "image-gen", "image_gen", "text-to-image", "t2i",
-    "imagine", "cogview", "kolors", "playground-v", "ideogram",
+    "imagine", "cogview", "kolors", "playground-v", "ideogram", "seedream",
+    "qwen-image", "z-image", "recraft", "hidream", "jimeng-image",
 )
 _VIDEO_HINTS = (
     "sora", "runway", "kling", "luma", "pika", "veo", "minimax-video",
     "text-to-video", "t2v", "video-gen", "video_gen", "hailuo", "vidu",
-    "wanx-video", "cogvideo",
+    "wanx-video", "cogvideo", "seedance", "hunyuan-video", "jimeng-video",
+    "wan2", "wan-2",
 )
 _AUDIO_HINTS = (
     "tts", "speech", "whisper", "asr", "transcri", "audio", "voice",
@@ -278,8 +280,11 @@ def classify_model_endpoints(vendor: dict | None, model_id: str) -> list[str]:
 
 def _chat_candidates_for_vendor(vendor: dict) -> list[str]:
     provider = str(vendor.get("provider") or "").strip().lower()
+    endpoint_type = str(vendor.get("endpoint_type") or "").strip().lower()
     url = str(vendor.get("proxy_target") or vendor.get("api_url") or "").lower()
     if (
+        endpoint_type in {"anthropic", "claude", "anthropic_messages"}
+        or
         provider in {"anthropic", "claude"}
         or "anthropic" in provider
         or "claude" in provider
@@ -288,8 +293,12 @@ def _chat_candidates_for_vendor(vendor: dict) -> list[str]:
         or "/claude" in url
     ):
         return [ANTHROPIC_MESSAGES]
-    if provider in {"google", "gemini", "google-gemini"} or "generativelanguage.googleapis.com" in url:
+    if endpoint_type in {"google", "gemini", "gemini_generate"} or provider in {"google", "gemini", "google-gemini"} or "generativelanguage.googleapis.com" in url:
         return [GEMINI_GENERATE]
+    if endpoint_type in {"openai_responses", "responses", "codex"}:
+        return [OPENAI_RESPONSES, OPENAI_CHAT]
+    if endpoint_type in {"openai", "openai_chat", "chat", "chat_completions"}:
+        return [OPENAI_CHAT, OPENAI_RESPONSES]
 
     # Known OpenAI-compatible providers get the two OpenAI API styles.  A
     # genuinely custom gateway has no reliable family hint, so probe Messages

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import traceback
@@ -2546,15 +2547,28 @@ def _proxy_upstream(vendor: dict, key: dict, *, path: str, body: bytes, headers:
     else:
         hdrs["Authorization"] = "Bearer " + key["api_key"]
         hdrs["content-type"] = "application/json"
+    method = request.method if request.method != "GET" else "POST"
     r = py_requests.request(
-        method=request.method if request.method != "GET" else "POST",
-        url=url,
-        headers=hdrs,
-        data=body,
-        stream=stream,
-        verify=False,
-        timeout=120,
+        method=method, url=url, headers=hdrs, data=body, stream=stream,
+        verify=False, timeout=120,
     )
+    # Some OpenAI-compatible gateways expose their API only below /v1 while
+    # users store the bare host. Retry that alternate path only for routing
+    # failures, preserving the existing URL behavior for all other responses.
+    base_low = api_url.lower().rstrip("/")
+    has_version = bool(re.search(r"/v\d+(?:/|$)", base_low))
+    if r.status_code in (404, 405) and not has_version and not path.startswith("v1/"):
+        versioned_url = _join_url(api_url, "v1", path)
+        if versioned_url != url:
+            try:
+                r.close()
+            except Exception:
+                pass
+            r = py_requests.request(
+                method=method, url=versioned_url, headers=hdrs, data=body,
+                stream=stream, verify=False, timeout=120,
+            )
+            url = versioned_url
     return r, url
 
 

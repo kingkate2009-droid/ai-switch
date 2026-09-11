@@ -3512,13 +3512,17 @@ function classifyHealthError(err, codeHint) {
 }
 
 function formatHealthFailToast(res) {
-  var raw = (res && (res.error || res.message)) || '';
+  var raw = (res && (res.raw_error || res.error || res.message)) || '';
+  var rawResults = res && res.raw_results;
+  if (!raw && Array.isArray(rawResults)) {
+    raw = rawResults.map(function(row) {
+      return row && (row.raw_error || row.error || row.message || '');
+    }).filter(Boolean).join('\n');
+  }
   var code = classifyHealthErrorCode(raw, res && res.error_code);
   var label = (res && res.error_label) || healthErrorLabel(code);
-  var hint = healthErrorSuggestion(code, res && res.suggestion);
   var msg = (_('toast.checkFail') || 'Health check failed') + ': ' + label;
-  if (raw) msg += ' — ' + String(raw).slice(0, 120);
-  if (hint) msg += ' · ' + hint;
+  if (raw) msg += ' — ' + String(raw);
   return msg;
 }
 

@@ -385,6 +385,29 @@ def _iter_endpoint_check_errors(checks: dict) -> list[str]:
     return out
 
 
+def format_endpoint_raw_errors(results: list[dict]) -> str:
+    """Format all concrete endpoint responses for display and persistence."""
+    parts = []
+    seen = set()
+    for row in results or []:
+        if not isinstance(row, dict):
+            continue
+        model = str(row.get("model") or "").strip()
+        checks = row.get("endpoint_checks") or {}
+        for endpoint, check in checks.items():
+            if not isinstance(check, dict) or check.get("healthy") is True:
+                continue
+            raw = str(check.get("raw_error") or check.get("error") or check.get("message") or "").strip()
+            if not raw:
+                continue
+            label = "/".join(x for x in (model, str(endpoint or "")) if x)
+            text = f"[{label}] {raw}" if label else raw
+            if text not in seen:
+                seen.add(text)
+                parts.append(text)
+    return "\n".join(parts)
+
+
 def summarize_endpoint_failures(checks: dict, *, mode: str = "auto") -> str:
     """Pick the most actionable failure message from endpoint probe results.
 
@@ -672,11 +695,14 @@ def check_model_endpoints(
         healthy = bool(usable)
         model_health = dict(key.get("model_health") or {})
         fail_msg = None if healthy else summarize_endpoint_failures(checks, mode=mode)
+        raw_fail_msg = None if healthy else (
+            format_endpoint_raw_errors([{"model": model, "endpoint_checks": checks}]) or fail_msg
+        )
         model_health[model] = {
             "healthy": healthy,
             "latency_ms": int((time.time() - started) * 1000),
             "error": fail_msg,
-            "raw_error": fail_msg,
+            "raw_error": raw_fail_msg,
             "message": "; ".join(
                 str(checks[endpoint].get("message"))
                 for endpoint in usable
@@ -721,7 +747,8 @@ def check_model_endpoints(
                 "key_id": key_id,
                 "healthy": key_healthy,
                 "checked_at": state["checked_at"],
-                "error": None if key_healthy else "No usable model",
+                "error": None if key_healthy else raw_fail_msg,
+                "raw_error": None if key_healthy else raw_fail_msg,
             }
             _save_cache(cache)
 
@@ -1306,6 +1333,7 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
         healthy = bool(usable)
         ok_messages = [checks[ep].get("message") for ep in usable if checks.get(ep, {}).get("message")]
         fail_msg = summarize_endpoint_failures(checks, mode=mode)
+        raw_fail_msg = format_endpoint_raw_errors([{"model": mid, "endpoint_checks": checks}]) or fail_msg
         msg = "; ".join(str(x) for x in ok_messages[:2]) if ok_messages else fail_msg
         latency_ms = int(matrix.get("latency_ms") or 0)
         state = capability_record(
@@ -1320,8 +1348,8 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
             "healthy": healthy,
             "latency_ms": latency_ms,
             "message": msg if healthy else None,
-            "error": None if healthy else fail_msg,
-            "raw_error": None if healthy else fail_msg,
+            "error": None if healthy else raw_fail_msg,
+            "raw_error": None if healthy else raw_fail_msg,
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "check_layer": "model",
             "endpoints": usable,
@@ -1335,8 +1363,8 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
         model_health[mid] = {
             "healthy": healthy,
             "latency_ms": latency_ms,
-            "error": None if healthy else fail_msg,
-            "raw_error": None if healthy else fail_msg,
+            "error": None if healthy else raw_fail_msg,
+            "raw_error": None if healthy else raw_fail_msg,
             "message": msg if healthy else None,
             "checked_at": entry["checked_at"],
             "endpoints": usable,
