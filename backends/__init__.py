@@ -332,15 +332,38 @@ def preview_push_all() -> dict:
     }
 
 
-def _run_adapter_reconcile(adapter: BackendAdapter, *, timeout_seconds: float = 90.0):
+def _run_adapter_reconcile(
+    adapter: BackendAdapter,
+    *,
+    timeout_seconds: float = 90.0,
+    vendor_ids=None,
+    key_ids=None,
+):
     """Run one adapter.reconcile with a wall-clock timeout (thread + join)."""
     box: dict = {"runtime": None, "error": None}
 
     def _target() -> None:
+        prev_vendor_scope = getattr(_tls, "vendor_ids", None)
+        prev_key_scope = getattr(_tls, "key_ids", None)
+        vendor_scope = {str(v) for v in (vendor_ids or []) if v}
+        key_scope = {str(k) for k in (key_ids or []) if k}
+        _tls.vendor_ids = vendor_scope or None
+        _tls.key_ids = key_scope or None
         try:
             box["runtime"] = adapter.reconcile()
         except Exception as exc:
             box["error"] = exc
+        finally:
+            if prev_vendor_scope is None:
+                if hasattr(_tls, "vendor_ids"):
+                    delattr(_tls, "vendor_ids")
+            else:
+                _tls.vendor_ids = prev_vendor_scope
+            if prev_key_scope is None:
+                if hasattr(_tls, "key_ids"):
+                    delattr(_tls, "key_ids")
+            else:
+                _tls.key_ids = prev_key_scope
 
     t = threading.Thread(target=_target, name=f"reconcile-{adapter.name}", daemon=True)
     t.start()
@@ -412,7 +435,12 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
                     if name in ("openclaw", "opencode", "codex-cli", "kimi-code", "hermes", "qwencode"):
                         budget = max(budget, 300.0)
                     started = time.monotonic()
-                    runtime = _run_adapter_reconcile(adapter, timeout_seconds=budget)
+                    runtime = _run_adapter_reconcile(
+                        adapter,
+                        timeout_seconds=budget,
+                        vendor_ids=ids,
+                        key_ids=kid_list,
+                    )
                     elapsed_ms = int((time.monotonic() - started) * 1000)
                     results[name] = {"ok": True, "skipped": False, "error": None, "duration_ms": elapsed_ms}
                     if isinstance(runtime, dict):

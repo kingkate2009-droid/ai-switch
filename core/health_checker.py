@@ -1418,7 +1418,17 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
             "vendor_id": vendor_id,
             "healthy": key_healthy,
             "latency_ms": (results[0].get("latency_ms") if results else prev.get("latency_ms") or 0),
-            "error": None if key_healthy else (fail_models and f"{len(fail_models)} model(s) failed" or prev.get("error")),
+            "error": None if key_healthy else (
+                format_endpoint_raw_errors(results)
+                or (fail_models and f"{len(fail_models)} model(s) failed")
+                or prev.get("error")
+            ),
+            "raw_error": None if key_healthy else (
+                format_endpoint_raw_errors(results)
+                or (fail_models and f"{len(fail_models)} model(s) failed")
+                or prev.get("raw_error")
+                or prev.get("error")
+            ),
             "message": (
                 f"{len(ok_models)} model(s) ok"
                 if key_healthy
