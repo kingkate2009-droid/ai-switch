@@ -416,6 +416,11 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
                     # Share snapshot with should_sync / is_key_backend_syncable
                     try:
                         adapter._health_cache_snap = health_snap
+                        # Reset per-reconcile installed cache so is_installed() re-checks fresh
+                        try:
+                            adapter._clear_installed_cache()
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                     cfg = get_backend_config(name)
@@ -456,6 +461,8 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
                     try:
                         if hasattr(adapter, "_health_cache_snap"):
                             delattr(adapter, "_health_cache_snap")
+                        if hasattr(adapter, "_is_installed_cache"):
+                            delattr(adapter, "_is_installed_cache")
                     except Exception:
                         pass
                 r = results.get(name) or {}

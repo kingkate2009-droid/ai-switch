@@ -491,18 +491,32 @@ class BackendAdapter:
         return True
 
     def is_installed(self) -> bool:
-        """Whether the backend tool is installed on this machine."""
+        """Whether the backend tool is installed on this machine.
+
+        Results are cached per-reconcile cycle (similar to health cache)
+        to avoid repeated subprocess calls when checking many vendor/key pairs.
+        """
+        if hasattr(self, "_is_installed_cache"):
+            return self._is_installed_cache
         try:
             st = self.get_status() or {}
             if "installed" in st:
-                return bool(st.get("installed"))
-            # legacy: message keywords
-            msg = str(st.get("message") or "").lower()
-            if any(k in msg for k in ("not found", "not installed", "no such file", "command not found")):
-                return False
-            return bool(st.get("running") or st.get("version"))
+                result = bool(st.get("installed"))
+            else:
+                msg = str(st.get("message") or "").lower()
+                if any(k in msg for k in ("not found", "not installed", "no such file", "command not found")):
+                    result = False
+                else:
+                    result = bool(st.get("running") or st.get("version"))
         except Exception:
-            return False
+            result = False
+        self._is_installed_cache = result
+        return result
+
+    def _clear_installed_cache(self) -> None:
+        """Reset the cached installation status (called at reconcile start)."""
+        if hasattr(self, "_is_installed_cache"):
+            delattr(self, "_is_installed_cache")
 
     def should_sync(self, vendor: dict, key: dict) -> bool:
         """Check if a vendor/key should be synced to this backend.
