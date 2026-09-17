@@ -176,6 +176,25 @@ def _provider_id(vendor_id: str) -> str:
     return f"{_MANAGED_PREFIX}{vendor_id}"
 
 
+def _key_provider_id(vendor: dict, key: dict) -> str:
+    """Unique Codex provider id per vendor+key so multiple keys on one vendor
+    each get their own model_providers.* entry instead of sharing a single slot."""
+    vid = str(vendor.get("id") or "")
+    kname = (key.get("name") or key.get("id") or "key").strip()
+    kslug = re.sub(r"[^A-Za-z0-9_.-]+", "-", kname).strip("-").lower() or "key"
+    number = re.match(r"^(\d+)$", kslug)
+    if number:
+        kslug = f"k{kslug}"
+    return f"{_MANAGED_PREFIX}{vid}-key-{kslug}"
+
+
+def _key_owner_vendor_id(pid: str) -> str:
+    """Extract the vendor id from a per-key or bare managed provider id."""
+    if "-key-" in pid:
+        return pid[len(_MANAGED_PREFIX):].split("-key-", 1)[0]
+    return pid[len(_MANAGED_PREFIX):]
+
+
 def _env_key_for_vendor(vendor: dict) -> str:
     ep = (vendor.get("endpoint_type") or "openai").lower().strip()
     return _ENV_KEY_MAP.get(ep, "OPENAI_API_KEY")
@@ -462,22 +481,33 @@ class CodexCliAdapter(BackendAdapter):
         cfg = self._load_config()
         providers = cfg.get("model_providers") or {}
 
-        # Build set of valid managed provider IDs (GPT-capable vendors only)
+        # Build set of valid managed provider IDs (GPT-capable vendors only).
+        # Every syncable key becomes its own provider so multiple keys on one
+        # vendor are all available to Codex instead of collapsing to one slot.
         valid_ids = set()
         for v in vendors:
             if not _vendor_is_codex_switchable(v):
                 continue
-            selected = self.pick_syncable_key(vendor=v)
-            if not selected:
-                continue
-            _, k = selected
-            pid = _provider_id(v["id"])
-            valid_ids.add(pid)
-            # A Codex provider is a single slot per vendor. The selected key
-            # follows the common primary → backup → first-healthy policy.
             base_url = _base_url(v)
+            for k in v.get("keys") or []:
+                if not k.get("enabled", True) or not k.get("api_key"):
+                    continue
+                if not self.should_sync(v, k):
+                    continue
+                from core.data import get_enabled_models
+                emodels = list(get_enabled_models(k))
+                # skip a key whose inventory is known but has no Codex-compatible model
+                if emodels and not self.filter_model_ids(v, k, emodels):
+                    continue
+                pid = _key_provider_id(v, k)
+                valid_ids.add(pid)
+                if base_url:
+                    providers[pid] = _provider_entry(v, k.get("api_key") or "")
+            # Keep a bare vendor-level slot for the "active provider" concept.
             if base_url:
-                providers[pid] = _provider_entry(v, k.get("api_key") or "")
+                bare = _provider_id(v["id"])
+                if bare not in valid_ids:
+                    valid_ids.add(bare)
 
         # Remove stale managed providers
         stale = [pid for pid in providers if pid.startswith(_MANAGED_PREFIX) and pid not in valid_ids]
@@ -518,7 +548,7 @@ class CodexCliAdapter(BackendAdapter):
         # Keep active provider's auth.json + bearer token aligned
         active_key = ""
         if active.startswith(_MANAGED_PREFIX):
-            vid = active[len(_MANAGED_PREFIX):]
+            vid = _key_owner_vendor_id(active)
             for v in vendors:
                 if str(v.get("id")) != str(vid):
                     continue
@@ -526,7 +556,8 @@ class CodexCliAdapter(BackendAdapter):
                 if selected:
                     _, k = selected
                     active_key = k["api_key"]
-                    # ensure active provider entry has token
+                    # ensure active provider entry exists; if active is a per-key
+                    # pid, keep it pointing at that key's provider when present.
                     providers[active] = _provider_entry(v, active_key)
                     models = _vendor_codex_models(v)
                     if models and not (cfg.get("model") or "").strip():

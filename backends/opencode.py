@@ -419,6 +419,20 @@ class OpenCodeAdapter(BackendAdapter):
         return pid or "custom"
 
     @staticmethod
+    def _key_provider_id(vendor: dict, key: dict) -> str:
+        """Unique provider id per vendor+key: ``<vendor_pid>-<key_slug>``.
+
+        Lets a vendor with several healthy keys expose one OpenCode provider per
+        key instead of collapsing them into a single best-key provider.
+        """
+        base = OpenCodeAdapter._provider_id(vendor)
+        if OpenCodeAdapter._is_opencode_zen(vendor):
+            base = "opencode"
+        kname = (key.get("name") or key.get("id") or "key").strip()
+        kslug = re.sub(r"[^a-zA-Z0-9._-]+", "-", kname).strip("-").lower() or "key"
+        return f"{base}-{kslug}"
+
+    @staticmethod
     def _npm_for_endpoint(endpoint_type: str) -> str:
         ep = (endpoint_type or "openai").lower()
         if ep == "anthropic":
@@ -972,45 +986,38 @@ class OpenCodeAdapter(BackendAdapter):
                     for k in scoped_vendor.get("keys") or []
                 ):
                     continue
-                pid = self._provider_id(scoped_vendor)
-                scoped_pids.add("opencode" if self._is_opencode_zen(scoped_vendor) else pid)
+                # Add every key-suffixed provider id for this vendor plus the bare
+                # vendor id, so a scoped push can clean up all its managed providers.
+                keys = scoped_vendor.get("keys") or []
+                pids = [self._key_provider_id(scoped_vendor, k) for k in keys] or [self._provider_id(scoped_vendor)]
+                pids.append(self._provider_id(scoped_vendor))
+                scoped_pids.update(pids)
                 legacy_pid = self._legacy_provider_id(scoped_vendor)
-                if legacy_pid != pid:
+                if legacy_pid not in pids:
                     scoped_legacy_pids.add(legacy_pid)
 
-        # Group vendors by provider id, pick best key
+        # Group by provider id per KEY (not per vendor): a vendor with several
+        # healthy keys exposes one OpenCode provider per key.
         desired: dict[str, tuple[dict, dict]] = {}
-        # Built-in / Zen: auth only (no provider.models override)
         auth_only_pids: set[str] = set()
         for v in get_vendors():
-            pid = self._provider_id(v)
-            if self._is_opencode_zen(v):
-                pid = "opencode"
-            k = self._pick_best_key(v)
-            if not k or not self.should_sync(v, k):
-                continue
-            # Zen/built-in free catalog does not need per-key model inventory
-            if not self._is_opencode_zen(v):
-                if (k.get("models") or k.get("disabled_models")) and not get_enabled_models(k):
+            for k in v.get("keys") or []:
+                pid = self._key_provider_id(v, k)
+                if not k.get("enabled", True) or not k.get("api_key"):
                     continue
-            prev = desired.get(pid)
-            if not prev:
-                desired[pid] = (v, k)
-            else:
-                prev_score = len(get_enabled_models(prev[1]))
-                cur_score = len(get_enabled_models(k))
-                if cur_score > prev_score:
+                if not self.should_sync(v, k):
+                    continue
+                if not self._is_opencode_zen(v):
+                    if (k.get("models") or k.get("disabled_models")) and not get_enabled_models(k):
+                        continue
+                if pid not in desired:
                     desired[pid] = (v, k)
-                elif cur_score == prev_score and (v.get("api_url") or "") and not (prev[0].get("api_url") or ""):
-                    desired[pid] = (v, k)
-            if self._is_opencode_zen(v) or (
-                not self._is_custom(v) and not v.get("proxy_target")
-            ):
-                auth_only_pids.add(pid)
+                if self._is_opencode_zen(v) or (
+                    not self._is_custom(v) and not v.get("proxy_target")
+                ):
+                    auth_only_pids.add(pid)
 
         if scoped:
-            # A scoped push must not remove credentials belonging to providers
-            # outside the requested vendor/key set.
             new_auth = dict(auth)
             for auth_pid in list(new_auth):
                 if any(
@@ -1026,7 +1033,6 @@ class OpenCodeAdapter(BackendAdapter):
         for pid, (v, k) in desired.items():
             if pid in auth_only_pids or self._is_opencode_zen(v):
                 new_auth[pid] = self._auth_entry(k["api_key"])
-                # Keep models.dev catalog — strip our previous managed override
                 existing = cfg["provider"].get(pid) or {}
                 if existing and (existing.get("options") or {}).get("_managed") == self.MANAGED_TAG:
                     del cfg["provider"][pid]
