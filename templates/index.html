@@ -1297,11 +1297,18 @@
         <label for="vendorApiUrl" data-i18n="vendorModal.apiUrl">{{ t('vendorModal.apiUrl') }}</label>
         <input type="text" id="vendorApiUrl" placeholder="{{ t('vendorModal.placeholderApiUrl') }}" data-i18n-placeholder="vendorModal.placeholderApiUrl">
       </div>
-      <div class="form-group" style="display:none" aria-hidden="true">
+      <div class="form-group">
         <label for="vendorEndpointType" data-i18n="vendorModal.endpointType">{{ t('vendorModal.endpointType') }}</label>
         <select id="vendorEndpointType">
-          <option value="openai" data-i18n="endpoint.openai">{{ t('endpoint.openai') }}</option>
-          <option value="anthropic">Anthropic Compatible</option>
+          <option value="openai">OpenAI</option>
+          <option value="openai_chat">OpenAI Chat</option>
+          <option value="openai_responses">OpenAI Responses</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="google">Google / Gemini</option>
+          <option value="image">Image</option>
+          <option value="video">Video</option>
+          <option value="audio">Audio</option>
+          <option value="translation">Translation</option>
         </select>
       </div>
       <div class="form-group">
@@ -1427,6 +1434,19 @@
           <span data-i18n="quality.evaluateKey">{{ t('quality.evaluateKey') }}</span>
         </button>
         <span class="models-modal-hint" data-i18n="modelsModal.hint">{{ t('modelsModal.hint') }}</span>
+      </div>
+      <div class="models-modal-toolbar" style="margin-top:8px;gap:8px;align-items:center">
+        <input type="search" id="modelsModalSearch" class="form-input" style="flex:1;min-width:160px"
+          placeholder="搜索模型名称…" oninput="onModelsModalFilterChange()">
+        <select id="modelsModalEndpointFilter" style="min-width:150px" onchange="onModelsModalFilterChange()">
+          <option value="">全部端点类型</option>
+          <option value="chat">文本 (Chat)</option>
+          <option value="image">图片 (Image)</option>
+          <option value="video">视频 (Video)</option>
+          <option value="audio">音频 (Audio)</option>
+          <option value="translation">翻译 (Translation)</option>
+        </select>
+        <button class="btn btn-sm" onclick="clearModelsModalFilter()">清除</button>
       </div>
       <div id="modelsModalList"></div>
     </div>
@@ -4125,7 +4145,19 @@ async function editVendor() {
   $('editVendorId').value = v.id;
   $('vendorName').value = v.name;
   $('vendorApiUrl').value = v.api_url;
-  $('vendorEndpointType').value = v.endpoint_type || 'openai';
+  var epSel = $('vendorEndpointType');
+  if (epSel) {
+    var epVal = v.endpoint_type || 'openai';
+    epSel.value = epVal;
+    // ensure the saved value is present even if it's not a built-in option
+    if (epSel.value !== epVal) {
+      var o = document.createElement('option');
+      o.value = epVal;
+      o.textContent = epVal;
+      epSel.appendChild(o);
+      epSel.value = epVal;
+    }
+  }
   $('vendorThinkingDisabled').checked = !!v.thinking_disabled;
   $('vendorProxyEnabled').checked = !!v.proxy_target;
   $('vendorProxyTarget').value = v.proxy_target || '';
@@ -4831,6 +4863,51 @@ function _modelEndpointCandidates(k, mid) {
   return ['openai_chat', 'openai_responses'];
 }
 
+function _modelEndpointModality(k, mid) {
+  // Prefer persisted capability endpoints; fall back to model-id heuristics.
+  var cap = (k && k.endpoint_capabilities || {})[mid] || {};
+  var eps = cap.detected || cap.classified || [];
+  var lower = String(mid || '').toLowerCase();
+  if (!eps.length) {
+    if (/dall-e|dalle|gpt-image|imagen|flux|stable-diffusion|-image|image-/.test(lower)) return 'image';
+    if (/sora|runway|kling|veo|-video|video-/.test(lower)) return 'video';
+    if (/tts|whisper|speech|translat|-audio|audio-|-asr/.test(lower)) {
+      if (/translat/.test(lower)) return 'translation';
+      return 'audio';
+    }
+    return 'chat';
+  }
+  var all = eps.join(' ');
+  if (/image/.test(all)) return 'image';
+  if (/video/.test(all)) return 'video';
+  if (/audio/.test(all)) return /translat/.test(all) ? 'translation' : 'audio';
+  if (/translat/.test(all)) return 'translation';
+  return 'chat';
+}
+
+function onModelsModalFilterChange() {
+  var q = $('modelsModalSearch');
+  var ep = $('modelsModalEndpointFilter');
+  _modelsModalFilter.query = q ? q.value : '';
+  _modelsModalFilter.endpoint = ep ? ep.value : '';
+  var v = _allVendorsData && _modelsModalCtx.vendorId && _modelsModalCtx.keyId
+    ? _allVendorsData.find(function(x) { return x.id === _modelsModalCtx.vendorId; }) : null;
+  var k = v && v.keys ? v.keys.find(function(x) { return x.id === _modelsModalCtx.keyId; }) : null;
+  if (k) renderModelsModalList(k);
+}
+
+function clearModelsModalFilter() {
+  _modelsModalFilter = { query: '', endpoint: '' };
+  var q = $('modelsModalSearch');
+  var ep = $('modelsModalEndpointFilter');
+  if (q) q.value = '';
+  if (ep) ep.value = '';
+  var v = _allVendorsData && _modelsModalCtx.vendorId && _modelsModalCtx.keyId
+    ? _allVendorsData.find(function(x) { return x.id === _modelsModalCtx.vendorId; }) : null;
+  var k = v && v.keys ? v.keys.find(function(x) { return x.id === _modelsModalCtx.keyId; }) : null;
+  if (k) renderModelsModalList(k);
+}
+
 function _endpointLabel(ep) {
   return ({
     openai_chat: 'Chat',
@@ -4890,6 +4967,9 @@ async function setModelEndpointSelection(vendorId, keyId, modelId) {
   if (k) renderModelsModalList(k);
 }
 
+var _modelsModalFilter = { query: '', endpoint: '' };
+var _modelsModalCheckModels = [];
+
 function renderModelsModalList(k) {
   const models = k.models || [];
   const disabled = new Set(k.disabled_models || []);
@@ -4897,18 +4977,36 @@ function renderModelsModalList(k) {
   const syncModels = Array.isArray(k.sync_models) ? new Set(k.sync_models.map(String)) : null;
   const checkModel = String(k.check_model || '').trim();
   const list = $('modelsModalList');
-  list.innerHTML = '';
+list.innerHTML = '';
+
   // Primary check-model control at top
   var head = document.createElement('div');
   head.className = 'model-check-primary';
   head.style.cssText = 'margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg2)';
+  const checkModels = (k.check_models && k.check_models.length)
+    ? k.check_models.map(String)
+    : (checkModel ? [checkModel] : []);
+  // Prefer the live in-memory cache: it is updated synchronously on every
+  // toggle so rapid multi-select never gets overwritten by a stale refresh.
+  if (_modelsModalCheckModels && _modelsModalCheckModels.length) {
+    _modelsModalCheckModels.forEach(function(m) {
+      if (checkModels.indexOf(String(m)) < 0) checkModels.push(String(m));
+    });
+  } else {
+    _modelsModalCheckModels = checkModels.slice();
+  }
+  const checkModelsSet = new Set(checkModels);
   head.innerHTML = [
     '<div style="font-weight:600;font-size:13px;margin-bottom:6px">' + esc(_('keyModal.checkModel') || 'Primary check model') + '</div>',
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">',
-      '<select id="modelsModalCheckSelect" style="min-width:220px;max-width:100%;flex:1" onchange="onModelsModalCheckChange()"></select>',
+      '<span style="font-size:12px;color:var(--text2)">' + esc(
+        checkModels.length
+          ? (checkModels.join(', ').length > 60 ? checkModels.join(', ').slice(0, 60) + '…' : checkModels.join(', '))
+          : (_('keyModal.checkModelAuto') || 'Auto (existing logic)')
+      ) + '</span>',
       '<button class="btn btn-sm" onclick="clearKeyCheckModel()">' + esc(_('keyModal.checkModelClear') || 'Use auto') + '</button>',
     '</div>',
-    '<p class="form-hint" style="margin:8px 0 0">' + esc(_('keyModal.checkModelHint') || 'If set, key health / scheduled checks use this model only.') + '</p>',
+    '<p class="form-hint" style="margin:8px 0 0">' + esc(_('keyModal.checkModelHintMulti') || 'Check the box next to each model to make it a primary check model. KEY health will probe ALL selected check models.') + '</p>',
   ].join('');
   list.appendChild(head);
   var syncHint = document.createElement('p');
@@ -4934,7 +5032,7 @@ function renderModelsModalList(k) {
       if (!mid) return;
       var o = document.createElement('option');
       o.value = mid;
-      o.textContent = mid + (mid === checkModel ? ' ★' : '');
+      o.textContent = mid + (checkModelsSet.has(mid) ? ' ★' : '');
       sel.appendChild(o);
     });
     if (checkModel) {
@@ -4959,11 +5057,34 @@ function renderModelsModalList(k) {
     list.appendChild(empty);
     return;
   }
-  models.forEach(function(m) {
+
+  // Build filter-predicate
+  var q = (_modelsModalFilter.query || '').toLowerCase().trim();
+  var epFilter = _modelsModalFilter.endpoint || '';
+  var filtered = models.filter(function(m) {
+    var mid = _modelId(m);
+    if (!mid) return false;
+    if (q && mid.toLowerCase().indexOf(q) < 0) return false;
+    if (epFilter) {
+      var modality = _modelEndpointModality(k, mid);
+      if (modality !== epFilter) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    var noFilter = document.createElement('p');
+    noFilter.style.color = 'var(--text2)';
+    noFilter.textContent = _('modelsModal.noFiltered') || 'No models match filter';
+    list.appendChild(noFilter);
+    return;
+  }
+
+  filtered.forEach(function(m) {
     var mid = _modelId(m);
     if (!mid) return;
     var enabled = syncModels === null ? !disabled.has(mid) : syncModels.has(mid);
-    var isPrimary = checkModel && mid === checkModel;
+    var isPrimary = checkModelsSet.has(mid);
     var mh = healthMap[mid] || {};
     var cap = (k.endpoint_capabilities || {})[mid] || {};
     var endpointChecks = cap.checks || {};
@@ -4990,9 +5111,10 @@ function renderModelsModalList(k) {
          (rawDetail ? '<button class="btn-icon" title="' + esc(rawDetail) + '" onclick="event.stopPropagation();showToast(' + JSON.stringify(rawDetail) + ', \'info\')">ⓘ</button>' : ''),
       '</div>',
       '<div class="model-row-actions">',
-        '<button class="btn btn-sm' + (isPrimary ? ' btn-primary' : '') + '" onclick="setKeyCheckModel(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">' +
-          esc(isPrimary ? (_('keyModal.checkModelCurrent') || 'Primary') : (_('keyModal.setCheckModel') || 'Set as check')) +
-        '</button>',
+        '<label class="model-toggle" title="' + (isPrimary ? (_('keyModal.unsetCheckModel') || 'Remove from check models') : (_('keyModal.setCheckModel') || 'Set as check model')) + '">',
+          '<input type="checkbox" ' + (isPrimary ? 'checked' : '') + ' onchange="toggleKeyCheckModel(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\', this.checked)">',
+          '<span>' + (isPrimary ? (_('keyModal.checkModelBadge') || 'Check') : (_('keyModal.setCheckModel') || 'Set as check')) + '</span>',
+        '</label>',
         '<label class="model-toggle" title="' + (enabled ? _('modelsModal.disableSync') : _('modelsModal.enableSync')) + '">',
           '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' onchange="toggleModelSync(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\', this.checked)">',
           '<span>' + (enabled ? _('modelsModal.synced') : _('modelsModal.notSynced')) + '</span>',
@@ -5019,12 +5141,14 @@ function renderModelsModalList(k) {
   });
 }
 
-async function setKeyCheckModel(vendorId, keyId, modelId) {
+async function saveKeyCheckModels(vendorId, keyId, checkModels) {
+  // Update the in-memory cache immediately so rapid toggles don't lose entries.
+  _modelsModalCheckModels = (checkModels || []).slice();
   var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId, {
     method: 'PUT',
-    body: JSON.stringify({ check_model: modelId || '' }),
+    body: JSON.stringify({ check_models: checkModels, check_model: (checkModels[0] || '') }),
   });
-  if (res.error) { showToast(res.error, 'error'); return; }
+  if (res.error) { showToast(res.error, 'error'); return false; }
   showToast(_('toast.saved') || 'Saved', 'success');
   // refresh local caches
   try {
@@ -5047,11 +5171,35 @@ async function setKeyCheckModel(vendorId, keyId, modelId) {
   if (selectedVendorId === vendorId) {
     try { filterKeys(); } catch (e) {}
   }
+  return true;
+}
+
+async function toggleKeyCheckModel(vendorId, keyId, modelId, enabled) {
+  var cur = _modelsModalCheckModels.slice();
+  if (enabled) {
+    if (cur.indexOf(String(modelId)) < 0) cur.push(String(modelId));
+  } else {
+    cur = cur.filter(function(m) { return m !== String(modelId); });
+  }
+  _modelsModalCheckModels = cur.slice();
+  await saveKeyCheckModels(vendorId, keyId, cur);
+}
+
+async function setKeyCheckModel(vendorId, keyId, modelId) {
+  var v = (_allVendorsData || []).find(function(x) { return x.id === vendorId; });
+  var k = v && v.keys ? v.keys.find(function(x) { return x.id === keyId; }) : null;
+  var cur = k && Array.isArray(k.check_models) ? k.check_models.map(String) : [];
+  if (!modelId) {
+    await saveKeyCheckModels(vendorId, keyId, []);
+    return;
+  }
+  if (cur.indexOf(String(modelId)) < 0) cur.push(String(modelId));
+  await saveKeyCheckModels(vendorId, keyId, cur);
 }
 
 async function clearKeyCheckModel() {
   if (!_modelsModalCtx.vendorId || !_modelsModalCtx.keyId) return;
-  await setKeyCheckModel(_modelsModalCtx.vendorId, _modelsModalCtx.keyId, '');
+  await saveKeyCheckModels(_modelsModalCtx.vendorId, _modelsModalCtx.keyId, []);
 }
 
 async function onModelsModalCheckChange() {

@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from core.data import (
+    get_check_models,
     get_enabled_models,
     get_settings,
     get_vendor,
@@ -594,7 +595,7 @@ def _slim_key_updates_for_bulk(updates: dict) -> dict:
     if not isinstance(updates, dict):
         return {}
     out = {}
-    for k in ("enabled", "models", "default_model", "disabled_models", "sync_models", "check_model"):
+    for k in ("enabled", "models", "default_model", "disabled_models", "sync_models", "check_model", "check_models"):
         if k in updates:
             out[k] = updates[k]
     if updates.get("_replace_model_state"):
@@ -893,35 +894,40 @@ def _sibling_model_ids(vendor: dict, key_id: str) -> list[str]:
 
 def _build_probe_order(
     *,
-    check_model: str,
+    check_models: list[str] = None,
     inventory: list[str],
     default_model: str = "",
     prefer_gptish: bool = False,
+    check_model: str = "",
 ) -> list[str]:
-    """Primary check_model first; remaining inventory shuffled (capped)."""
+    """Primary check models first (all of them); remaining inventory shuffled (capped)."""
     pool = list(inventory or [])
     if prefer_gptish:
         gpt = [m for m in pool if m.lower().startswith(("gpt-", "o1", "o3", "o4")) or "codex" in m.lower()]
         if gpt:
             pool = gpt
-    primary = (check_model or "").strip()
+    primaries = [str(m).strip() for m in (check_models or []) if str(m or "").strip()]
+    if not primaries and check_model:
+        primaries = [str(check_model).strip()]
     dm = (default_model or "").strip()
     ordered = []
     seen = set()
-    if primary and primary in pool:
-        ordered.append(primary)
-        seen.add(primary)
+    # All user-specified check models come first (probe every one).
+    for primary in primaries:
+        if primary and primary in pool and primary not in seen:
+            ordered.append(primary)
+            seen.add(primary)
     rest = [m for m in pool if m and m not in seen]
     # prefer default next (before shuffle) so common path is stable-ish
     if dm and dm in rest:
         rest.remove(dm)
         rest.insert(0, dm)
-    # randomize fallbacks so we don't always hit the same dead models
-    head = rest[:1]  # keep default sticky if present
+    # randomize fallbacks so dead keys do not always hit the same dead model
+    head = rest[:1]
     tail = rest[1:]
     random.shuffle(tail)
     rest = head + tail
-    cap = 1 + _max_fallback_models()
+    cap = len(ordered) + 1 + _max_fallback_models()
     for m in rest:
         if len(ordered) >= cap:
             break
@@ -1035,6 +1041,7 @@ def _check_key_health_inner(
     check_type = _resolve_check_type(vendor)
     wants_responses = check_type == "openai_responses" or _vendor_wants_responses(vendor, key_entry)
     check_model = str(key_entry.get("check_model") or "").strip()
+    check_models = get_check_models(key_entry)
     default_model = str(key_entry.get("default_model") or "").strip()
     disabled = set(key_entry.get("disabled_models") or [])
 
@@ -1078,9 +1085,10 @@ def _check_key_health_inner(
         models = _merge_model_ids(existing, siblings)
     # drop disabled from probe pool but keep full inventory for storage
     probe_pool = [m for m in models if m not in disabled] or list(models)
-    # Ensure primary check model is always in the probe pool (user explicitly chose it)
-    if check_model and check_model not in probe_pool and check_model in models:
-        probe_pool.insert(0, check_model)
+    # Ensure every primary check model is always in the probe pool
+    for cm in check_models:
+        if cm and cm not in probe_pool and cm in models:
+            probe_pool.insert(0, cm)
 
     if not default_model and models:
         default_model = pick_default_model(models)
@@ -1091,6 +1099,7 @@ def _check_key_health_inner(
             "models": models,
             "default_model": default_model,
             "check_model": check_model,
+            "check_models": check_models,
         }
 
     # 2) Model-level endpoint matrix.  This is now the authoritative key
@@ -1105,7 +1114,8 @@ def _check_key_health_inner(
         disabled.intersection_update(model_set)
         if default_model and default_model not in model_set:
             default_model = ""
-        if check_model and check_model not in model_set:
+        check_models = [m for m in check_models if m in model_set]
+        if not check_models and check_model and check_model not in model_set:
             check_model = ""
         selected_sync = key_entry.get("sync_models")
         if isinstance(selected_sync, list):
@@ -1113,14 +1123,16 @@ def _check_key_health_inner(
     endpoint_results = []
     cache_key = f"{vendor_id}:{key_id}"
     ordered_models = _build_probe_order(
-        check_model=check_model,
+        check_models=check_models,
         inventory=probe_pool,
         default_model=default_model,
         prefer_gptish=False,
     )
-    # Key-level health always caps models; full inventory matrix is check_key_models().
-    # When check_model is available in the pool, probe only that model (no fallbacks).
-    if check_model and check_model in probe_pool:
+    # Key-level health probes ALL user-selected check models. When none are
+    # set, fall back to the normal fallback cap.
+    if check_models:
+        cap = len(check_models)
+    elif check_model and check_model in probe_pool:
         cap = 1
     else:
         cap = _MAX_FALLBACK_MODELS_QUICK if quick else _MAX_FALLBACK_MODELS
@@ -1192,6 +1204,7 @@ def _check_key_health_inner(
             "models": models,
             "default_model": default_model,
             "check_model": check_model,
+            "check_models": check_models,
         })
         if isinstance(selected_sync, list):
             updates["sync_models"] = selected_sync
@@ -1232,6 +1245,7 @@ def _check_key_health_inner(
         "models": models,
         "default_model": updated_key.get("default_model") or default_model,
         "check_model": check_model,
+        "check_models": check_models,
         "used_model": used,
         "tried_models": [r["model"] for r in endpoint_results],
         "used_check_model": bool(check_model and used == check_model),

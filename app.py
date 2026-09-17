@@ -889,6 +889,9 @@ def api_create_key(vendor_id):
             extra["role"] = data.get("role")
         if "check_model" in data:
             extra["check_model"] = str(data.get("check_model") or "").strip()
+        if "check_models" in data:
+            cms = data.get("check_models")
+            extra["check_models"] = [str(m).strip() for m in cms if str(m or "").strip()] if isinstance(cms, list) else []
         if extra:
             k = update_key(vendor_id, k["id"], **extra) or k
 
@@ -932,7 +935,7 @@ def api_update_key(vendor_id, key_id):
     data = request.get_json() or {}
     allowed = {k: data[k] for k in (
         "name", "api_key", "enabled", "models", "default_model",
-        "check_model", "sync_models", "disabled_models", "model_health", "endpoint_capabilities", "notes", "role",
+        "check_model", "check_models", "sync_models", "disabled_models", "model_health", "endpoint_capabilities", "notes", "role",
         "archived",
     ) if k in data}
     k = update_key(vendor_id, key_id, **allowed)

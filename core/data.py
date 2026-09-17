@@ -864,7 +864,8 @@ def batch_import_entries(entries: list) -> dict:
 
 _KEY_FIELDS = (
     "name", "api_key", "enabled", "models", "default_model",
-    "check_model",  # primary model for health / scheduled checks; empty = auto
+    "check_model",  # primary model for health / scheduled checks; empty = auto (legacy single)
+    "check_models",  # multiple primary models for health checks; empty = auto
     "disabled_models", "sync_models", "model_health", "endpoint_capabilities", "quality_scores", "notes", "role",
     "archived",
 )
@@ -918,6 +919,23 @@ def get_sync_models(key: dict) -> list[str]:
 
 def has_explicit_sync_models(key: dict) -> bool:
     return isinstance(key.get("sync_models"), list)
+
+
+def get_check_models(key: dict) -> list[str]:
+    """Return the primary models that a KEY health check must probe.
+
+    Priority:
+    1. ``check_models`` (list) if set → probe all of them
+    2. ``check_model`` (legacy single string) if set → probe that one
+    3. otherwise → [] (auto: use fallback ordering)
+    """
+    cms = key.get("check_models")
+    if isinstance(cms, list):
+        out = [model_id_of(m) for m in cms if model_id_of(m)]
+        if out:
+            return list(dict.fromkeys(out))
+    legacy = str(key.get("check_model") or "").strip()
+    return [legacy] if legacy else []
 
 
 def get_model_endpoint_capabilities(key: dict, model: str = "") -> dict:
@@ -1028,6 +1046,11 @@ def _apply_key_fields(k: dict, kwargs: dict) -> None:
         if key == "notes":
             val = str(val or "")[:500]
         elif key == "sync_models":
+            if val is not None and not isinstance(val, list):
+                val = []
+            if isinstance(val, list):
+                val = list(dict.fromkeys(model_id_of(m) for m in val if model_id_of(m)))
+        elif key == "check_models":
             if val is not None and not isinstance(val, list):
                 val = []
             if isinstance(val, list):

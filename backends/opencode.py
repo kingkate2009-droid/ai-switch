@@ -406,6 +406,14 @@ class OpenCodeAdapter(BackendAdapter):
 
     @staticmethod
     def _provider_id(vendor: dict) -> str:
+        # Mirror the system vendor name. Using a generic protocol/provider id
+        # such as "newapi" collapses unrelated vendors into one OpenCode slot.
+        pid = (vendor.get("name") or vendor.get("provider") or "custom").strip()
+        pid = re.sub(r"[^a-zA-Z0-9._-]+", "-", pid).strip("-").lower()
+        return pid or "custom"
+
+    @staticmethod
+    def _legacy_provider_id(vendor: dict) -> str:
         pid = (vendor.get("provider") or vendor.get("name") or "custom").strip()
         pid = re.sub(r"[^a-zA-Z0-9._-]+", "-", pid).strip("-").lower()
         return pid or "custom"
@@ -703,7 +711,7 @@ class OpenCodeAdapter(BackendAdapter):
         auth = self._load_auth()
         # Also drop endpoint-split ids (for example provider-anthropic) and
         # the legacy id if Zen was stored under a non-opencode id.
-        legacy = self._provider_id(vendor)
+        legacy = self._legacy_provider_id(vendor)
         drop_ids = {pid, legacy}
         auth_changed = False
         for auth_pid in list(auth):
@@ -953,6 +961,7 @@ class OpenCodeAdapter(BackendAdapter):
         key_scope = _scope_key_ids()
         scoped = vendor_scope is not None or key_scope is not None
         scoped_pids = set()
+        scoped_legacy_pids = set()
         if scoped:
             for scoped_vendor in get_vendors():
                 vid = str(scoped_vendor.get("id") or "")
@@ -965,6 +974,9 @@ class OpenCodeAdapter(BackendAdapter):
                     continue
                 pid = self._provider_id(scoped_vendor)
                 scoped_pids.add("opencode" if self._is_opencode_zen(scoped_vendor) else pid)
+                legacy_pid = self._legacy_provider_id(scoped_vendor)
+                if legacy_pid != pid:
+                    scoped_legacy_pids.add(legacy_pid)
 
         # Group vendors by provider id, pick best key
         desired: dict[str, tuple[dict, dict]] = {}
@@ -1001,7 +1013,10 @@ class OpenCodeAdapter(BackendAdapter):
             # outside the requested vendor/key set.
             new_auth = dict(auth)
             for auth_pid in list(new_auth):
-                if any(auth_pid == pid or auth_pid.startswith(pid + "-") for pid in scoped_pids):
+                if any(
+                    auth_pid == pid or auth_pid.startswith(pid + "-")
+                    for pid in (scoped_pids | scoped_legacy_pids)
+                ):
                     del new_auth[auth_pid]
         else:
             new_auth = {k: v for k, v in auth.items()
@@ -1031,8 +1046,9 @@ class OpenCodeAdapter(BackendAdapter):
 
         # Drop managed providers no longer desired
         for pid, entry in list(cfg.get("provider", {}).items()):
-            if scoped and pid not in scoped_pids and not any(
-                pid.startswith(target + "-") for target in scoped_pids
+            scoped_targets = scoped_pids | scoped_legacy_pids
+            if scoped and pid not in scoped_targets and not any(
+                pid.startswith(target + "-") for target in scoped_targets
             ):
                 continue
             if (entry.get("options") or {}).get("_managed") == self.MANAGED_TAG and \

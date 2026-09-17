@@ -312,13 +312,13 @@ def _guess_provider_from_url(url: str) -> str:
 
 def _vendor_name_from_url(url: str, *, match_existing: bool = True) -> tuple[str, bool]:
     """Generate vendor name from URL. Returns (name, matched_existing)."""
+    matched_existing = False
     if url and match_existing:
         try:
             from core.data import find_vendor_by_url
             existing = find_vendor_by_url(url)
             if existing:
-                name = (existing.get("name") or "").strip() or (existing.get("provider") or "").strip()
-                return name, True
+                matched_existing = True
         except Exception:
             pass
     try:
@@ -328,16 +328,16 @@ def _vendor_name_from_url(url: str, *, match_existing: bool = True) -> tuple[str
         p = None
         host = re.sub(r"^https?://", "", url).split("/")[0].split(":", 1)[0].lower()
     if not host:
-        return "provider", False
+        return "provider", matched_existing
     port = p.port if p is not None else None
     if re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
-        return (f"{host}:{port}" if port else host), False
+        return (f"{host}:{port}" if port else host), matched_existing
     # Use the complete hostname so similarly named gateways remain distinct:
     # https://aaa.xxx.com/v1 -> aaa-xxx-com.
     name = re.sub(r"[^a-zA-Z0-9]+", "-", host).strip("-") or "provider"
     if port:
         name = f"{name}-{port}"
-    return name, False
+    return name, matched_existing
 
 
 def smart_vendor_name_from_url(url: str) -> str:
