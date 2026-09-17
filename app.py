@@ -2008,6 +2008,8 @@ def api_sync_push():
       - ``{"vendor_ids": [...]}`` limits the push to those vendors
       - ``{"key_ids": ["vid:kid", ...]}`` pushes only specific vendor:key pairs
         (single-key sync always uses wait mode to guarantee config is written).
+      - ``{"model_ids": [...]}`` limits the push to specific models (best-effort,
+        only adapters that support per-key model filtering honour it).
     """
     try:
         body = request.get_json(silent=True) or {}
@@ -2021,14 +2023,19 @@ def api_sync_push():
             key_ids = [str(k) for k in key_ids if str(k).strip()] or None
         else:
             key_ids = None
+        model_ids = body.get("model_ids")
+        if isinstance(model_ids, list):
+            model_ids = [str(m) for m in model_ids if str(m).strip()] or None
+        else:
+            model_ids = None
         wait = bool(body.get("wait")) or request.args.get("wait") in ("1", "true", "yes")
         # Single-key pushes use wait mode to
         # guarantee the backend config file is written before the frontend
         # marks the sync task as complete.
-        if not wait and key_ids:
+        if not wait and (key_ids or model_ids):
             wait = True
         if not wait:
-            reconcile_all_async(vendor_ids=vendor_ids, key_ids=key_ids)
+            reconcile_all_async(vendor_ids=vendor_ids, key_ids=key_ids, model_ids=model_ids)
             log_event("sync.push", mode="async", vendors=len(vendor_ids) if vendor_ids else "all")
             return jsonify({
                 "success": True,
@@ -2038,7 +2045,7 @@ def api_sync_push():
                 "fail": 0,
                 "skipped": 0,
             })
-        results = reconcile_all(vendor_ids=vendor_ids, key_ids=key_ids)
+        results = reconcile_all(vendor_ids=vendor_ids, key_ids=key_ids, model_ids=model_ids)
         log_event("sync.push", backends=len(results or {}), mode="wait", vendors=len(vendor_ids) if vendor_ids else "all")
         ok = sum(1 for r in (results or {}).values() if r.get("ok"))
         fail = sum(1 for r in (results or {}).values() if not r.get("ok") and not r.get("skipped"))
@@ -2055,6 +2062,66 @@ def api_sync_push():
     except Exception as e:
         log.exception("push failed")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/sync/push/stream", methods=["POST"])
+def api_sync_push_stream():
+    """SSE stream of per-backend reconcile progress for the task center.
+
+    Body may includ ``vendor_ids`` / ``key_ids`` / ``model_ids`` scope (single
+    key / single vendor / single model sync). Emits one ``data:`` event per
+    backend as it finishes, e.g. ``{"done":2,"total":11,"name":"opencode","ok":true}``.
+    """
+    from flask import Response, stream_with_context
+    import queue, threading
+
+    def _events():
+        q = queue.Queue()
+        body = request.get_json(silent=True) or {}
+        vendor_ids = body.get("vendor_ids") if isinstance(body.get("vendor_ids"), list) else None
+        key_ids = body.get("key_ids") if isinstance(body.get("key_ids"), list) else None
+        model_ids = body.get("model_ids") if isinstance(body.get("model_ids"), list) else None
+        vendor_ids = [str(v) for v in vendor_ids if str(v).strip()] or None if vendor_ids else None
+        key_ids = [str(k) for k in key_ids if str(k).strip()] or None if key_ids else None
+        model_ids = [str(m) for m in model_ids if str(m).strip()] or None if model_ids else None
+
+        results = {}
+
+        def cb(done, total, name, res):
+            results[name] = dict(res)
+            q.put(("progress", done, total, name, dict(res)))
+            if done >= total:
+                q.put(("done", results))
+
+        def _worker():
+            try:
+                reconcile_all(
+                    vendor_ids=vendor_ids, key_ids=key_ids, model_ids=model_ids,
+                    progress_callback=cb,
+                )
+            except Exception as e:
+                q.put(("error", str(e)[:500]))
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        while True:
+            msg = q.get()
+            if msg[0] == "progress":
+                _, done, total, name, res = msg
+                yield f"data: {json.dumps({'done': done, 'total': total, 'name': name, 'ok': bool(res.get('ok')), 'skipped': bool(res.get('skipped')), 'error': (res.get('error') or '')[:200]})}\n\n"
+            elif msg[0] == "done":
+                final = msg[1]
+                ok = sum(1 for r in final.values() if r.get("ok"))
+                fail = sum(1 for r in final.values() if not r.get("ok") and not r.get("skipped"))
+                yield f"data: {json.dumps({'done': 'done', 'ok': ok, 'fail': fail, 'results': final})}\n\n"
+                break
+            elif msg[0] == "error":
+                yield f"data: {json.dumps({'error': msg[1]})}\n\n"
+                break
+
+    return Response(stream_with_context(_events()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.route("/api/sync/last-push", methods=["GET"])

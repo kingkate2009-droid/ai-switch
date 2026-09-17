@@ -4430,19 +4430,93 @@ async function checkKeyHealth(vendorId, keyId) {
 }
 
 async function syncKey(vendorId, keyId) {
-  try {
-    var res = await api('/api/sync/push', {
-      method: 'POST',
-      body: JSON.stringify({
-        key_ids: [String(vendorId) + ':' + String(keyId)],
-        wait: true,
-      }),
+  return _syncWithStreamProgress({
+    key_ids: [String(vendorId) + ':' + String(keyId)],
+  }, _('sync.syncingKey') || 'Syncing key…');
+}
+
+async function syncModel(vendorId, keyId, modelId) {
+  return _syncWithStreamProgress({
+    key_ids: [String(vendorId) + ':' + String(keyId)],
+    model_ids: [String(modelId)],
+  }, _('sync.syncingModel') || 'Syncing model…');
+}
+
+async function syncVendor(vendorId) {
+  return _syncWithStreamProgress({
+    vendor_ids: [String(vendorId)],
+  }, _('sync.syncingVendor') || 'Syncing vendor…');
+}
+
+async function _syncWithStreamProgress(body, title) {
+  body.wait = true;
+  var taskId = null;
+  if (typeof createTask === 'function') {
+    taskId = createTask({
+      type: 'sync',
+      title: title || (_('sync.pushing') || 'Syncing backends…'),
+      detail: _('sync.starting') || 'Starting…',
+      cur: 0,
+      total: 100,
+      open: window.innerWidth >= 600,
     });
-    if (res.error || res.success === false) throw new Error(res.error || res.message || 'Sync failed');
-    showToast(res.message || (_('sync.pushDone') || 'Backend synced'), 'success');
+  }
+  try {
+    var resp = await fetch('/api/sync/push/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+if (!resp.ok) {
+      try { var errBody = await resp.json(); } catch (ee) { var errBody = {}; }
+      throw new Error((errBody && errBody.error) || 'HTTP ' + resp.status);
+    }
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder();
+    var buf = '';
+    while (true) {
+      var { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      var lines = buf.split('\n');
+      buf = lines.pop();
+      for (var line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          var data = JSON.parse(line.slice(6));
+        } catch (e) { continue; }
+        if (data.done === 'done') {
+          if (taskId) {
+            var totalN = data.total || data.ok + data.fail;
+            completeTask(taskId, {
+              status: data.fail > 0 ? (data.ok > 0 ? 'partial' : 'error') : 'success',
+              error: data.fail > 0 && !data.ok ? (data.error || data.message || '') : '',
+              detail: (_('sync.pushDone') || 'Synced') + ' — ' + data.ok + ' ok, ' + data.fail + ' fail',
+              cur: totalN,
+              total: totalN,
+            });
+          }
+          if (data.fail === 0) showToast((_('sync.pushDone') || 'Backends synced'), 'success');
+          else showToast((_('sync.pushDoneFail') || 'Sync incomplete: {n} failed').replace('{n}', data.fail), 'warn');
+          return data;
+        } else {
+          if (taskId) {
+            updateTask(taskId, {
+              cur: data.done,
+              total: data.total,
+              detail: (_('sync.perBackend') || 'Syncing {name} ({cur}/{total})')
+                .replace('{name}', data.name || '')
+                .replace('{cur}', String(data.done))
+                .replace('{total}', String(data.total)),
+            });
+          }
+        }
+      }
+    }
   } catch (e) {
-    var message = String(e && e.message || e || 'Sync failed');
-    showToast((_('sync.pushFailed') || 'Backend sync failed: {err}').replace('{err}', message), 'error');
+    var msg = String(e && e.message || e);
+    if (taskId) completeTask(taskId, { error: msg, detail: msg });
+    showToast((_('sync.pushFailed') || 'Backend sync failed: {err}').replace('{err}', msg), 'error');
   }
 }
 
@@ -5120,6 +5194,7 @@ list.innerHTML = '';
           '<span>' + (enabled ? _('modelsModal.synced') : _('modelsModal.notSynced')) + '</span>',
         '</label>',
         '<button class="btn btn-sm" onclick="checkSingleModel(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">' + _('action.check') + '</button>',
+        '<button class="btn btn-sm" onclick="syncModel(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')" title="' + esc(_('action.sync') || 'Sync') + '">' + esc(_('action.sync') || 'Sync') + '</button>',
         '<button class="btn btn-sm" onclick="checkModelQuality(\'' + esc(_modelsModalCtx.vendorId) + '\',\'' + esc(_modelsModalCtx.keyId) + '\',\'' + esc(mid).replace(/'/g, "\\'") + '\')">' + esc(_('quality.evaluate') || 'Evaluate quality') + '</button>',
       '</div>',
       '<div class="model-endpoints" data-endpoint-model="' + esc(mid) + '">',

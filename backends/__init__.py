@@ -29,6 +29,10 @@ def _scope_key_ids() -> Optional[set]:
     return getattr(_tls, "key_ids", None)
 
 
+def _scope_model_ids() -> Optional[set]:
+    return getattr(_tls, "model_ids", None)
+
+
 def register(adapter: BackendAdapter) -> None:
     _adapters[adapter.name] = adapter
 
@@ -41,16 +45,18 @@ def get_all() -> dict[str, BackendAdapter]:
     return dict(_adapters)
 
 
-def reconcile_all_async(vendor_ids=None, key_ids=None) -> None:
+def reconcile_all_async(vendor_ids=None, key_ids=None, model_ids=None) -> None:
     """Coalesce background reconcile requests so API writes can return quickly.
 
     ``vendor_ids``: when given, only those vendors are written (scoped push).
     ``key_ids``: when given (list of "vid:kid"), only those keys are written.
+    ``model_ids``: when given, only those models are synced (best-effort).
     """
     global _reconcile_requested, _reconcile_worker, _pending_vendor_ids, _pending_key_ids
     with _reconcile_request_lock:
         ids = [str(v) for v in (vendor_ids or []) if v]
         kid_list = [str(k) for k in (key_ids or []) if k]
+        model_list = [str(m) for m in (model_ids or []) if m]
         _reconcile_requested = True
         if _reconcile_worker and _reconcile_worker.is_alive():
             # An unscoped follow-up supersedes an earlier narrow request.
@@ -82,6 +88,7 @@ def reconcile_all_async(vendor_ids=None, key_ids=None) -> None:
                 reconcile_all(
                     vendor_ids=None if batch is None else (batch or None),
                     key_ids=None if key_batch is None else (key_batch or kid_list or None),
+                    model_ids=model_list or None,
                 )
 
         _pending_vendor_ids = ids
@@ -375,7 +382,7 @@ def _run_adapter_reconcile(
     return box["runtime"]
 
 
-def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_ids=None) -> dict:
+def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_ids=None, model_ids=None, progress_callback=None) -> dict:
     """Push system keys to backends. Returns per-backend result summary.
 
     Each installed backend is bounded by ``timeout_per_backend`` so one slow
@@ -386,7 +393,14 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
     written. None/empty = all vendors.
     ``key_ids``: when given (list of "vendor_id:key_id"), only those specific
     keys are written. None/empty = all keys (subject to vendor_ids scope).
+    ``model_ids``: when given, adapters that support model filtering only sync
+    those models (single-model sync). Best-effort: adapters ignore it if they
+    rebuild full provider configs.
+    ``progress_callback``: ``fn(done, total, name, result)`` invoked after each
+    backend finishes, so a UI can surface live per-backend progress.
     """
+    import logging as _logging
+    total = len(_adapters)
     from datetime import datetime, timezone
     from core.data import get_backend_config, _load_data, _save_data
     from core.health_checker import get_health_cache_snapshot, invalidate_health_cache_snapshot
@@ -399,10 +413,13 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
         # Scoped pushes must not leak their scope into a concurrent full push.
         prev_vendor_scope = getattr(_tls, "vendor_ids", None)
         prev_key_scope = getattr(_tls, "key_ids", None)
+        prev_model_scope = getattr(_tls, "model_ids", None)
         ids = [str(v) for v in (vendor_ids or []) if v]
         kid_list = [str(k) for k in (key_ids or []) if k]
+        model_list = [str(m) for m in (model_ids or []) if m]
         _tls.vendor_ids = set(ids) if ids else None
         _tls.key_ids = set(kid_list) if kid_list else None
+        _tls.model_ids = set(model_list) if model_list else None
         try:
             # Fresh health snapshot shared by all adapters this round
             invalidate_health_cache_snapshot()
@@ -473,6 +490,11 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
                     "error": r.get("error"),
                     "duration_ms": r.get("duration_ms"),
                 }
+                if progress_callback:
+                    try:
+                        progress_callback(sum(1 for _ in results), total, name, r)
+                    except Exception:
+                        pass
             # One DB write for all last_sync + last_push (was N full saves before)
             try:
                 data = _load_data()
@@ -504,3 +526,8 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
                     delattr(_tls, "key_ids")
             else:
                 _tls.key_ids = prev_key_scope
+            if prev_model_scope is None:
+                if hasattr(_tls, "model_ids"):
+                    delattr(_tls, "model_ids")
+            else:
+                _tls.model_ids = prev_model_scope
