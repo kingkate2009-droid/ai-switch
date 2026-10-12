@@ -539,7 +539,7 @@ def update_vendor(vendor_id: str, **kwargs) -> Optional[dict]:
     data = _load_data()
     for v in data["vendors"]:
         if v["id"] == vendor_id:
-            for key in ("name", "provider", "api_url", "endpoint_type", "thinking_disabled", "proxy_target", "checkin_url", "vtype", "archived"):
+            for key in ("name", "provider", "api_url", "endpoint_type", "thinking_disabled", "proxy_target", "checkin_url", "vtype", "archived", "availability", "availability_checked_at"):
                 if key in kwargs:
                     if key == "vtype":
                         v[key] = _normalize_vendor_type(kwargs[key])

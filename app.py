@@ -1012,6 +1012,64 @@ def api_check_key_health(vendor_id, key_id):
     return jsonify(health)
 
 
+@app.route("/api/vendors/<vendor_id>/availability", methods=["POST"])
+def api_vendor_availability(vendor_id):
+    from core.providers import check_vendor_availability
+    from core.data import update_vendor
+
+    vendor = get_vendor(vendor_id)
+    if not vendor:
+        return jsonify({"error": "not found"}), 404
+    availability = check_vendor_availability(vendor)
+    update_vendor(
+        vendor_id,
+        availability=availability,
+        availability_checked_at=availability.get("checked_at") or "",
+    )
+    log_event("vendor.availability", vendor_id=vendor_id, reachable=availability.get("reachable"))
+    return jsonify(availability)
+
+
+@app.route("/api/vendors/availability", methods=["POST"])
+def api_vendors_availability():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from core.providers import check_vendor_availability
+    from core.data import update_vendor
+
+    vendors = [vendor for vendor in get_vendors() if str(vendor.get("id"))]
+    results = {}
+    if not vendors:
+        return jsonify({"results": results, "reachable": 0, "unreachable": 0, "total": 0})
+
+    workers = min(6, len(vendors))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(check_vendor_availability, vendor): str(vendor["id"])
+            for vendor in vendors
+        }
+        for future in as_completed(futures):
+            try:
+                vendor_id = futures[future]
+                availability = future.result()
+                update_vendor(
+                    vendor_id,
+                    availability=availability,
+                    availability_checked_at=availability.get("checked_at") or "",
+                )
+                results[vendor_id] = availability
+            except Exception:
+                continue
+
+    reachable = sum(1 for result in results.values() if result.get("reachable"))
+    log_event("vendors.availability", total=len(results), reachable=reachable)
+    return jsonify({
+        "results": results,
+        "total": len(results),
+        "reachable": reachable,
+        "unreachable": len(results) - reachable,
+    })
+
+
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>/opencode-config", methods=["GET"])
 def api_key_opencode_config(vendor_id, key_id):
     """Generate OpenCode config snippet for a single vendor/key pair.

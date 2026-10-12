@@ -1,6 +1,6 @@
 {
   "name": "@kingkate/ai-switch",
-  "version": "2.2.0",
+  "version": "2.4.9",
   "description": "Local AI API Key hub \u2014 change once, every tool works",
   "main": "run.py",
   "bin": {

@@ -1840,6 +1840,33 @@ def check_all_keys(
             )
         except Exception:
             pass
+    try:
+        from core.providers import check_vendor_availability
+        from core.data import update_vendor
+
+        vendors = {str(v.get("id")): v for v, _ in targets if v.get("id")}
+        if vendors:
+            with ThreadPoolExecutor(
+                max_workers=min(6, len(vendors)),
+                thread_name_prefix="vendor-availability",
+            ) as pool:
+                futures = {
+                    pool.submit(check_vendor_availability, vendor): vendor_id
+                    for vendor_id, vendor in vendors.items()
+                }
+                for future in as_completed(futures):
+                    try:
+                        availability = future.result()
+                        update_vendor(
+                            futures[future],
+                            availability=availability,
+                            availability_checked_at=availability.get("checked_at") or "",
+                        )
+                    except Exception:
+                        continue
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("vendor availability sweep failed")
     return results
 
 
