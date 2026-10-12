@@ -34,21 +34,39 @@
 
 ## 介面預覽
 
-<p align="center">
-  <img src="docs/screenshots/01-dashboard.png" alt="儀表板" width="800">
-</p>
+<p align="center"><img src="docs/screenshots/01-dashboard.png" alt="儀表板" width="800"></p>
 
 <p align="center">
+  <img src="docs/screenshots/02-vendors.png" alt="供應商" width="390">
+  &nbsp;
   <img src="docs/screenshots/03-backends.png" alt="後端" width="390">
-  &nbsp;
-  <img src="docs/screenshots/04-health.png" alt="健康監測" width="390">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/05-task-center.png" alt="任務中心" width="390">
+  <img src="docs/screenshots/04-models.png" alt="模型目錄" width="390">
   &nbsp;
-  <img src="docs/screenshots/06-dashboard-dark.png" alt="深色主題" width="390">
+  <img src="docs/screenshots/05-quality.png" alt="品質檢查" width="390">
 </p>
+
+<p align="center">
+  <img src="docs/screenshots/06-routes.png" alt="下游路由" width="390">
+  &nbsp;
+  <img src="docs/screenshots/07-health.png" alt="健康監測" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/08-stats.png" alt="統計" width="390">
+  &nbsp;
+  <img src="docs/screenshots/09-checkin.png" alt="簽到" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/10-archived.png" alt="封存" width="390">
+  &nbsp;
+  <img src="docs/screenshots/11-diagnostics.png" alt="診斷" width="390">
+</p>
+
+<p align="center"><img src="docs/screenshots/12-settings.png" alt="設定" width="800"></p>
 
 ## 三分鐘上手
 

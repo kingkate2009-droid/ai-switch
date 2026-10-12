@@ -48,27 +48,39 @@ If you juggle **relay / multi-vendor API keys** across **OpenClaw, OpenCode, Cod
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/screenshots/01-dashboard.png" alt="Dashboard" width="800">
-</p>
+<p align="center"><img src="docs/screenshots/01-dashboard.png" alt="Dashboard" width="800"></p>
 
 <p align="center">
+  <img src="docs/screenshots/02-vendors.png" alt="Vendors" width="390">
+  &nbsp;
   <img src="docs/screenshots/03-backends.png" alt="Backends" width="390">
-  &nbsp;
-  <img src="docs/screenshots/04-health.png" alt="Health monitor" width="390">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/05-task-center.png" alt="Task center" width="390">
+  <img src="docs/screenshots/04-models.png" alt="Models" width="390">
   &nbsp;
-  <img src="docs/screenshots/06-dashboard-dark.png" alt="Dark theme" width="390">
+  <img src="docs/screenshots/05-quality.png" alt="Quality checks" width="390">
 </p>
 
-| | |
-|--|--|
-| Dashboard | Backends sync status |
-| Health monitor | Non-blocking task center |
-| Light / dark theme | |
+<p align="center">
+  <img src="docs/screenshots/06-routes.png" alt="Routes" width="390">
+  &nbsp;
+  <img src="docs/screenshots/07-health.png" alt="Health monitor" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/08-stats.png" alt="Statistics" width="390">
+  &nbsp;
+  <img src="docs/screenshots/09-checkin.png" alt="Check-in" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/10-archived.png" alt="Archived" width="390">
+  &nbsp;
+  <img src="docs/screenshots/11-diagnostics.png" alt="Diagnostics" width="390">
+</p>
+
+<p align="center"><img src="docs/screenshots/12-settings.png" alt="Settings" width="800"></p>
 
 ---
 

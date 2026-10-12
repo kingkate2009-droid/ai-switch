@@ -48,27 +48,39 @@
 
 ## 界面预览
 
-<p align="center">
-  <img src="docs/screenshots/01-dashboard.png" alt="仪表盘" width="800">
-</p>
+<p align="center"><img src="docs/screenshots/01-dashboard.png" alt="仪表盘" width="800"></p>
 
 <p align="center">
+  <img src="docs/screenshots/02-vendors.png" alt="供应商" width="390">
+  &nbsp;
   <img src="docs/screenshots/03-backends.png" alt="后端" width="390">
-  &nbsp;
-  <img src="docs/screenshots/04-health.png" alt="健康监测" width="390">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/05-task-center.png" alt="任务中心" width="390">
+  <img src="docs/screenshots/04-models.png" alt="模型目录" width="390">
   &nbsp;
-  <img src="docs/screenshots/06-dashboard-dark.png" alt="深色主题" width="390">
+  <img src="docs/screenshots/05-quality.png" alt="质量检测" width="390">
 </p>
 
-| | |
-|--|--|
-| 仪表盘总览 | 后端同步状态 |
-| 健康监测 | 不阻塞页面的任务中心 |
-| 浅色 / 深色主题 | |
+<p align="center">
+  <img src="docs/screenshots/06-routes.png" alt="下游路由" width="390">
+  &nbsp;
+  <img src="docs/screenshots/07-health.png" alt="健康监测" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/08-stats.png" alt="统计" width="390">
+  &nbsp;
+  <img src="docs/screenshots/09-checkin.png" alt="签到" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/10-archived.png" alt="归档" width="390">
+  &nbsp;
+  <img src="docs/screenshots/11-diagnostics.png" alt="诊断" width="390">
+</p>
+
+<p align="center"><img src="docs/screenshots/12-settings.png" alt="设置" width="800"></p>
 
 ---
 
