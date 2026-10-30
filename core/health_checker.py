@@ -12,7 +12,9 @@ from core.data import (
     get_vendor,
     get_vendors,
     list_model_ids,
+    load_kv_payload,
     model_id_of,
+    save_kv_payload,
     update_key_data,
     update_keys_data_bulk,
 )
@@ -773,15 +775,23 @@ def check_model_endpoints(
 
 
 def _load_cache() -> dict:
-    if HEALTH_CACHE_PATH.exists():
-        with open(HEALTH_CACHE_PATH) as f:
-            return json.load(f)
-    return {}
+    cache = load_kv_payload("health_cache")
+    if cache is None:
+        # one-time migration from the legacy health_cache.json
+        if HEALTH_CACHE_PATH.exists():
+            try:
+                with open(HEALTH_CACHE_PATH) as f:
+                    cache = json.load(f)
+                save_kv_payload("health_cache", cache or {})
+            except Exception:
+                cache = {}
+        else:
+            cache = {}
+    return cache if isinstance(cache, dict) else {}
 
 
 def _save_cache(cache: dict) -> None:
-    with open(HEALTH_CACHE_PATH, "w") as f:
-        json.dump(cache, f, separators=(",", ":"))
+    save_kv_payload("health_cache", cache or {})
     invalidate_health_cache_snapshot()
 
 
@@ -1840,34 +1850,137 @@ def check_all_keys(
             )
         except Exception:
             pass
+    # Vendor availability is also part of a health pass: probe each vendor's
+    # endpoint (network-level, key-independent) once and persist the result so
+    # the UI keeps it across refreshes. Do this outside the per-key lock.
     try:
         from core.providers import check_vendor_availability
         from core.data import update_vendor
-
-        vendors = {str(v.get("id")): v for v, _ in targets if v.get("id")}
-        if vendors:
+        vendor_ids = {}
+        for _v, _k in targets:
+            vendor_ids[str(_v.get("id"))] = _v
+        # Add vendors referenced by deferred/skipped rows too
+        for row in results:
+            vid = row.get("vendor_id")
+            if vid and vid not in vendor_ids:
+                v = get_vendor(vid)
+                if v:
+                    vendor_ids[str(vid)] = v
+        if vendor_ids:
+            avails = {}
             with ThreadPoolExecutor(
-                max_workers=min(6, len(vendors)),
+                max_workers=min(6, len(vendor_ids)),
                 thread_name_prefix="vendor-availability",
             ) as pool:
-                futures = {
-                    pool.submit(check_vendor_availability, vendor): vendor_id
-                    for vendor_id, vendor in vendors.items()
-                }
-                for future in as_completed(futures):
+                futs = {pool.submit(check_vendor_availability, v): vid for vid, v in vendor_ids.items()}
+                for fut in as_completed(futs):
                     try:
-                        availability = future.result()
-                        update_vendor(
-                            futures[future],
-                            availability=availability,
-                            availability_checked_at=availability.get("checked_at") or "",
-                        )
+                        avails[futs[fut]] = fut.result()
                     except Exception:
                         continue
+            for vid, av in avails.items():
+                try:
+                    update_vendor(vid, availability=av, availability_checked_at=(av or {}).get("checked_at") or "")
+                except Exception:
+                    continue
     except Exception:
-        import logging
-        logging.getLogger(__name__).exception("vendor availability sweep failed")
+        try:
+            import logging
+            logging.getLogger(__name__).exception("vendor availability sweep failed")
+        except Exception:
+            pass
     return results
+
+
+def _key_in_rotation(key: dict) -> bool:
+    """Whether a key is one the user is actively relying on.
+
+    Archived keys are deliberately excluded from health checks, and disabled
+    keys are already out of rotation (often *because* they failed), so alerting
+    about either is noise the user already handled.
+    """
+    return (key.get("enabled") is not False
+            and bool(key.get("api_key"))
+            and not key.get("archived"))
+
+
+def notify_health_failures(results: list, *, fail_threshold=None) -> list:
+    """Push notifications for failing keys and for vendors with no working key.
+
+    Called after a health-check round. Two events:
+
+    * ``key_failing`` — one key crossed the consecutive-failure threshold.
+    * ``vendor_all_keys_failed`` — every in-rotation key of a vendor (>= 2 keys)
+      is currently failing, i.e. the vendor is unusable.
+
+    Only keys still in rotation are considered (see :func:`_key_in_rotation`).
+    Both events are rate-limited by the notification engine, so a permanently
+    broken key reminds you periodically instead of on every round.
+    """
+    from core.notify import EVENT_KEY_FAILING, EVENT_VENDOR_ALL_KEYS_FAILED, notify
+
+    outcomes: list[dict] = []
+    try:
+        cfg = _adaptive_cfg()
+        threshold = int(fail_threshold if fail_threshold is not None else cfg["fail_streak"])
+        vendors = {str(v.get("id") or ""): v for v in get_vendors()}
+
+        for r in results or []:
+            if r.get("skipped") or r.get("healthy") is not False or r.get("archived"):
+                continue
+            vid = str(r.get("vendor_id") or "")
+            kid = str(r.get("key_id") or "")
+            if not vid or not kid:
+                continue
+            streak = int(r.get("fail_streak") or 0)
+            if streak < threshold:
+                continue
+            vendor = vendors.get(vid) or {}
+            key = next((k for k in (vendor.get("keys") or [])
+                        if str(k.get("id") or "") == kid), {})
+            if not _key_in_rotation(key):
+                continue
+            label = f"{vendor.get('name') or vid} / {key.get('name') or kid}"
+            outcomes.append(notify(
+                EVENT_KEY_FAILING,
+                f"Key failing: {label}",
+                f"{streak} consecutive failed health checks.",
+                level="warning",
+                detail={
+                    "vendor": vendor.get("name") or vid,
+                    "key": key.get("name") or kid,
+                    "fail_streak": streak,
+                    "last_error": str(r.get("error") or "")[:200],
+                },
+                dedup_key=f"key_fail:{vid}:{kid}",
+            ))
+
+        # Vendor-wide: every in-rotation key is explicitly unhealthy right now.
+        status = get_all_health_status() or {}
+        for vid, vendor in vendors.items():
+            keys = [k for k in (vendor.get("keys") or []) if _key_in_rotation(k)]
+            if len(keys) < 2:
+                continue  # a single-key vendor is already covered by key_failing
+            states = [status.get(f"{vid}:{k.get('id')}") or {} for k in keys]
+            if any(st.get("healthy") is not False for st in states):
+                continue
+            outcomes.append(notify(
+                EVENT_VENDOR_ALL_KEYS_FAILED,
+                f"No working key left: {vendor.get('name') or vid}",
+                f"All {len(keys)} keys of this vendor are failing health checks.",
+                level="critical",
+                detail={
+                    "vendor": vendor.get("name") or vid,
+                    "keys": len(keys),
+                    "failed_keys": ", ".join(str(k.get("name") or k.get("id")) for k in keys),
+                },
+                dedup_key=f"vendor_all_failed:{vid}",
+            ))
+    except Exception as exc:  # notifications must never break a health round
+        import logging
+
+        logging.getLogger(__name__).warning("notify_health_failures failed: %s", exc)
+    return outcomes
 
 
 def get_all_health_status(*, blocking: bool = False) -> dict:

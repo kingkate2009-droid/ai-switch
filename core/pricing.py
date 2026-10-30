@@ -98,6 +98,31 @@ def get_pricing_table() -> dict:
     return merged
 
 
+def get_model_price(model: str) -> dict:
+    """Return per-1M-token USD rates for a model.
+
+    {input, output, blended, known} where ``blended`` is a single comparable
+    number (input + 3*output)/4 (output-heavy weighting, closer to real cost).
+    ``known`` is False when the model fell back to the generic default.
+    """
+    inp, out = _lookup_rates(model)
+    known = True
+    try:
+        mid = (model or "").strip().lower()
+        if "/" in mid:
+            mid = mid.rsplit("/", 1)[-1]
+        if mid not in _rates_table():
+            known = any(mid.startswith(k) or k in mid for k in _rates_table())
+    except Exception:
+        known = True
+    return {
+        "input": round(float(inp), 6),
+        "output": round(float(out), 6),
+        "blended": round((float(inp) + 3.0 * float(out)) / 4.0, 6),
+        "known": bool(known),
+    }
+
+
 _RATES_CACHE = None  # type: Optional[dict]
 _RATES_MODEL_CACHE = {}  # type: dict
 _RATES_CACHE_TS = 0.0

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import platform
 import shutil
 import subprocess
@@ -71,9 +72,8 @@ def collect_diagnostics(*, for_issue: bool = False) -> dict:
     """
     from core.data import DATA_PATH, SQLITE_PATH, DATA_DIR, get_vendors, get_settings
     try:
-        from core.data import USAGE_PATH, _load_usage_raw
+        from core.data import _load_usage_raw
     except Exception:
-        USAGE_PATH = DATA_DIR / "usage.json"
         def _load_usage_raw():
             return []
     from core.audit import AUDIT_PATH, list_events
@@ -121,7 +121,15 @@ def collect_diagnostics(*, for_issue: bool = False) -> dict:
         })
 
     data_size = SQLITE_PATH.stat().st_size if SQLITE_PATH.exists() else 0
-    usage_size = USAGE_PATH.stat().st_size if USAGE_PATH.exists() else 0
+    # usage now lives inside the SQLite store; report its decoded size there
+    usage_size = 0
+    try:
+        from core.data import load_kv_payload
+        usage_payload = load_kv_payload("usage")
+        if usage_payload is not None:
+            usage_size = len(json.dumps(usage_payload, ensure_ascii=False))
+    except Exception:
+        pass
     try:
         usage_n = len(_load_usage_raw())
     except Exception:
@@ -156,7 +164,7 @@ def collect_diagnostics(*, for_issue: bool = False) -> dict:
             "dir": str(DATA_DIR),
             "exists": SQLITE_PATH.exists(),
             "size_bytes": data_size,
-            "usage_path": str(USAGE_PATH),
+            "usage_path": "",  # usage now lives in SQLite app_state('usage')
             "usage_size_bytes": usage_size,
             "usage_records": usage_n,
             "vendors": len(vendors),

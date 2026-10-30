@@ -1,10 +1,13 @@
 import importlib
+import logging
 import pkgutil
 import threading
 import time
 from typing import Optional
 
 from backends.base import BackendAdapter
+
+log = logging.getLogger(__name__)
 
 _adapters: dict[str, BackendAdapter] = {}
 _reconcile_lock = threading.Lock()
@@ -33,6 +36,42 @@ def _scope_model_ids() -> Optional[set]:
     return getattr(_tls, "model_ids", None)
 
 
+_scope_promotion_warned = False
+
+
+def normalize_push_scope(vendor_ids=None, key_ids=None, model_ids=None):
+    """Return the push scope that is actually safe to honour.
+
+    Scoped pushes (``vendor_ids`` / ``key_ids``) are destructive in most
+    adapters today: they rebuild their managed entry set from the *scoped* key
+    list while computing the "stale entries to drop" set from **all** vendors,
+    so pushing a single key silently deletes every other vendor's entry from
+    the engine config files (see ``tests/test_scoped_push_safety.py``).
+
+    Until per-adapter scoped removal exists, any scoped push is promoted to a
+    full reconcile. A full reconcile is declarative -- it rewrites each engine
+    from the current key database -- and fast, so the resulting engine state is
+    exactly what a *correct* scoped push would have produced, without the data
+    loss.
+
+    ``model_ids`` is left untouched: it never widens or narrows the set of
+    vendors/keys an adapter writes, so it cannot delete entries.
+    """
+    global _scope_promotion_warned
+    if vendor_ids or key_ids:
+        if not _scope_promotion_warned:
+            _scope_promotion_warned = True
+            log.warning(
+                "Scoped push (vendor_ids=%r, key_ids=%r) promoted to a full "
+                "reconcile for safety; scoped removals would delete other "
+                "vendors' entries.",
+                bool(vendor_ids),
+                bool(key_ids),
+            )
+        return None, None, model_ids
+    return vendor_ids, key_ids, model_ids
+
+
 def register(adapter: BackendAdapter) -> None:
     _adapters[adapter.name] = adapter
 
@@ -53,6 +92,7 @@ def reconcile_all_async(vendor_ids=None, key_ids=None, model_ids=None) -> None:
     ``model_ids``: when given, only those models are synced (best-effort).
     """
     global _reconcile_requested, _reconcile_worker, _pending_vendor_ids, _pending_key_ids
+    vendor_ids, key_ids, model_ids = normalize_push_scope(vendor_ids, key_ids, model_ids)
     with _reconcile_request_lock:
         ids = [str(v) for v in (vendor_ids or []) if v]
         kid_list = [str(k) for k in (key_ids or []) if k]
@@ -393,6 +433,9 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
     written. None/empty = all vendors.
     ``key_ids``: when given (list of "vendor_id:key_id"), only those specific
     keys are written. None/empty = all keys (subject to vendor_ids scope).
+
+    NOTE: both are currently promoted to a full reconcile for safety by
+    :func:`normalize_push_scope` -- see that docstring.
     ``model_ids``: when given, adapters that support model filtering only sync
     those models (single-model sync). Best-effort: adapters ignore it if they
     rebuild full provider configs.
@@ -414,6 +457,7 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
         prev_vendor_scope = getattr(_tls, "vendor_ids", None)
         prev_key_scope = getattr(_tls, "key_ids", None)
         prev_model_scope = getattr(_tls, "model_ids", None)
+        vendor_ids, key_ids, model_ids = normalize_push_scope(vendor_ids, key_ids, model_ids)
         ids = [str(v) for v in (vendor_ids or []) if v]
         kid_list = [str(k) for k in (key_ids or []) if k]
         model_list = [str(m) for m in (model_ids or []) if m]
@@ -514,6 +558,30 @@ def reconcile_all(*, timeout_per_backend: float = 120.0, vendor_ids=None, key_id
                 _save_data(data)
             except Exception as e:
                 log.warning("Failed to save last_push: %s", e)
+
+            # Tell the user when a backend could not be written.
+            try:
+                failed = {n: r for n, r in results.items()
+                          if not r.get("ok") and not r.get("skipped")}
+                if failed:
+                    from core.notify import EVENT_SYNC_FAILED, notify
+
+                    detail = {
+                        "failed_backends": ", ".join(sorted(failed)),
+                        "count": len(failed),
+                    }
+                    first_err = next((str(r.get("error") or "") for r in failed.values()
+                                      if r.get("error")), "")
+                    notify(
+                        EVENT_SYNC_FAILED,
+                        f"Backend sync failed ({len(failed)})",
+                        first_err[:300] or "One or more backends could not be written.",
+                        level="warning",
+                        detail=detail,
+                        dedup_key="sync_failed",
+                    )
+            except Exception as e:
+                log.warning("Sync failure notify skipped: %s", e)
             return results
         finally:
             if prev_vendor_scope is None:

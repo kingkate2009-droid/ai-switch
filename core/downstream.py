@@ -164,6 +164,24 @@ def find_downstream_by_secret(api_key: str) -> Optional[dict]:
     return None
 
 
+def _norm_model_prices(raw) -> dict:
+    """Normalize {model: price} to a clean dict of positive floats."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k, v in raw.items():
+        m = str(k or "").strip()
+        if not m:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f > 0:
+            out[m[:200]] = round(f, 6)
+    return out
+
+
 def create_downstream_key(
     name: str,
     *,
@@ -172,6 +190,7 @@ def create_downstream_key(
     auto_update: bool = True,
     notes: str = "",
     enabled: bool = True,
+    model_prices=None,
 ) -> dict:
     with _lock:
         data = _load_data()
@@ -183,6 +202,7 @@ def create_downstream_key(
             "enabled": bool(enabled),
             "endpoint_types": _norm_endpoint_types(endpoint_types),
             "selected_models": _norm_models(selected_models),
+            "model_prices": _norm_model_prices(model_prices),
             "auto_update": bool(auto_update),
             "routes": [],
             "notes": str(notes or "")[:500],
@@ -218,6 +238,8 @@ def update_downstream_key(key_id: str, **kwargs) -> Optional[dict]:
             found["endpoint_types"] = _norm_endpoint_types(kwargs["endpoint_types"])
         if "selected_models" in kwargs and kwargs["selected_models"] is not None:
             found["selected_models"] = _norm_models(kwargs["selected_models"])
+        if "model_prices" in kwargs and kwargs["model_prices"] is not None:
+            found["model_prices"] = _norm_model_prices(kwargs["model_prices"])
         if kwargs.get("rotate_secret"):
             found["api_key"] = _gen_secret()
         found["updated_at"] = _now()
@@ -358,13 +380,27 @@ def available_models_catalog(endpoint: str = None) -> dict:
             })
             rec["endpoint_types"].add(ep)
     items = []
+    from core.pricing import get_model_price
     for mid, rec in by_model.items():
+        price = get_model_price(mid)
+        # min = cheapest of input/output rate, max = most expensive
+        rates = [r for r in (price.get("input"), price.get("output")) if isinstance(r, (int, float))]
+        p_min = min(rates) if rates else 0.0
+        p_max = max(rates) if rates else 0.0
         items.append({
             "model": mid,
             "source_count": len(rec["sources"]),
             "sources": rec["sources"],
             "endpoint_types": sorted(rec["endpoint_types"]),
             "modality": rec.get("modality") or model_modality(mid),
+            "price": {
+                "min": round(float(p_min), 6),
+                "max": round(float(p_max), 6),
+                "input": price.get("input"),
+                "output": price.get("output"),
+                "blended": price.get("blended"),
+                "known": price.get("known"),
+            },
         })
     items.sort(key=lambda x: (-x["source_count"], str(x["model"]).lower()))
     return {"count": len(items), "models": items, "endpoint_types": list(ENDPOINT_TYPES)}
@@ -496,7 +532,13 @@ def resolve_route(downstream: dict, model: str, *, endpoint_type: str = "openai"
 
 
 def list_models_for_downstream(downstream: dict) -> list[dict]:
-    """Flatten models exposed by a downstream key."""
+    """Flatten models exposed by a downstream key.
+
+    Includes the effective usage price: the per-model override when set, else
+    the model's highest rate (default = max).
+    """
+    from core.pricing import get_model_price
+    overrides = downstream.get("model_prices") or {}
     seen = set()
     out = []
     for r in downstream.get("routes") or []:
@@ -504,12 +546,22 @@ def list_models_for_downstream(downstream: dict) -> list[dict]:
             if m in seen:
                 continue
             seen.add(m)
+            price = get_model_price(m)
+            rates = [x for x in (price.get("input"), price.get("output")) if isinstance(x, (int, float))]
+            p_min = min(rates) if rates else 0.0
+            p_max = max(rates) if rates else 0.0
+            override = overrides.get(m)
+            usage = override if isinstance(override, (int, float)) and override > 0 else p_max
             out.append({
                 "id": m,
                 "object": "model",
                 "owned_by": r.get("provider") or "ai-switch",
                 "vendor_id": r.get("vendor_id"),
                 "key_id": r.get("key_id"),
+                "price_min": round(float(p_min), 6),
+                "price_max": round(float(p_max), 6),
+                "usage_price": round(float(usage), 6),
+                "price_overridden": m in overrides,
             })
     out.sort(key=lambda x: str(x["id"]).lower())
     return out

@@ -522,8 +522,12 @@ def parse_batch_text(text: str) -> list[dict]:
         return _dedupe_entries(json_entries)
 
     lines = text.strip().split("\n")
-    urls_with_names: list[tuple[str, str, str]] = []  # (url, provider, endpoint_type)
-    keys: list[str] = []
+    # Preserve the ORDER of keys and URLs so each key pairs with its neighbouring
+    # URL. A pasted list is a sequence of records where each record is either
+    # "URL then key" or "key then URL". The old code cross-joined every key with
+    # every URL, which fabricated unrelated vendor/key combinations (a Cartesian
+    # product) whenever several providers were pasted together.
+    tokens: list[tuple] = []  # ("url", url, provider, endpoint_type) | ("key", key)
     pending_name = ""
     pending_endpoint_type = "openai"
 
@@ -548,73 +552,92 @@ def parse_batch_text(text: str) -> list[dict]:
         found_urls = _find_urls(work) or _find_urls(stripped)
         found_keys = _find_api_keys(stripped) or _find_api_keys(work)
 
-        # IMPORTANT: a single line may contain both URL and key
-        if found_urls or found_keys:
-            if found_urls:
-                for u in found_urls:
-                    prov = _guess_provider_from_url(u)
-                    if pending_name:
-                        prov = re.sub(r"[^a-zA-Z0-9_-]", "", pending_name.split()[0].lower())
-                        pending_name = ""
-                    # provider token before URL on same line
-                    # e.g. "openai https://... sk-..."
-                    head = work.split()
-                    if head and not head[0].startswith("http") and _NAME_ONLY_RE.match(head[0]):
-                        if not URL_RE.search(head[0]) and not _looks_like_api_key(head[0]):
-                            prov = re.sub(r"[^a-zA-Z0-9_-]", "", head[0].lower()) or prov
-                    urls_with_names.append((u, prov, pending_endpoint_type))
-                pending_endpoint_type = "openai"
-            if found_keys:
-                keys.extend(found_keys)
-                pending_name = ""
-        elif _is_provider_name(work):
-            pending_name = work
+        if not found_urls and not found_keys:
+            if _is_provider_name(work):
+                pending_name = work
+            continue
 
-    if not urls_with_names and not keys:
+        # provider token before the URL on the same line, e.g. "openai https://… sk-…"
+        prov_override = ""
+        head = work.split()
+        if head and not head[0].startswith("http") and _NAME_ONLY_RE.match(head[0]) \
+                and not URL_RE.search(head[0]) and not _looks_like_api_key(head[0]):
+            prov_override = re.sub(r"[^a-zA-Z0-9_-]", "", head[0].lower())
+
+        for u in found_urls:
+            prov = prov_override or _guess_provider_from_url(u)
+            if pending_name:
+                prov = re.sub(r"[^a-zA-Z0-9_-]", "", pending_name.split()[0].lower())
+                pending_name = ""
+            tokens.append(("url", u, prov, pending_endpoint_type))
+        # a single line may contain both URL and key: both tokens are appended in
+        # order, so adjacency pairing below pairs them together.
+        for k in found_keys:
+            tokens.append(("key", k))
+        if found_urls:
+            pending_endpoint_type = "openai"
+        pending_name = ""
+
+    if not tokens:
         return []
 
-    entries: list[dict] = []
-    if urls_with_names and keys:
-        for url, prov, ep_type in urls_with_names:
-            ep = ep_type
-            if ep == "openai" and ("/anthropic" in url.lower() or "api.anthropic.com" in url.lower()):
-                ep = "anthropic"
-            for k in keys:
-                vname, matched = _vendor_name_from_url(url)
-                entries.append({
-                    "provider": prov,
-                    "vendor_name": vname,
-                    "name": _make_key_name(k),
-                    "api_url": url,
-                    "api_key": k,
-                    "endpoint_type": ep,
-                    "_matched_existing": matched,
-                })
-    elif urls_with_names:
-        for url, prov, ep_type in urls_with_names:
-            ep = ep_type
-            if ep == "openai" and ("/anthropic" in url.lower() or "api.anthropic.com" in url.lower()):
-                ep = "anthropic"
+    def _make_entry(url: str, prov: str, ep_type: str, key: str) -> dict:
+        ep = ep_type
+        if ep == "openai" and ("/anthropic" in url.lower() or "api.anthropic.com" in url.lower()):
+            ep = "anthropic"
+        if url:
             vname, matched = _vendor_name_from_url(url)
-            entries.append({
-                "provider": prov,
-                "vendor_name": vname,
-                "name": "(need key)",
-                "api_url": url,
-                "api_key": "",
-                "endpoint_type": ep,
-                "_matched_existing": matched,
-            })
-    elif keys:
-        for k in keys:
-            entries.append({
-                "provider": "unknown",
-                "vendor_name": "Unknown",
-                "name": _make_key_name(k),
-                "api_url": "",
-                "api_key": k,
-                "endpoint_type": "openai",
-            })
+        else:
+            vname, matched = "Unknown", False
+        return {
+            "provider": prov or "unknown",
+            "vendor_name": vname,
+            "name": _make_key_name(key) if key else "(need key)",
+            "api_url": url.rstrip("/") if url else "",
+            "api_key": key,
+            "endpoint_type": ep,
+            "_matched_existing": matched,
+        }
+
+    entries: list[dict] = []
+    used_url_idx: set[int] = set()
+    active_url = None          # most recent URL token (tuple)
+    active_url_idx = -1
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok[0] == "url":
+            active_url = tok
+            active_url_idx = i
+            i += 1
+            continue
+
+        # A key whose NEXT token is a URL belongs to that following URL
+        # ("sk-… \\n URL: https://…"). This is what makes multi-provider
+        # pastes pair correctly instead of cross-joining.
+        if i + 1 < n and tokens[i + 1][0] == "url":
+            url_tok = tokens[i + 1]
+            entries.append(_make_entry(url_tok[1], url_tok[2], url_tok[3], tok[1]))
+            used_url_idx.add(i + 1)
+            active_url = url_tok
+            active_url_idx = i + 1
+            i += 2
+            continue
+
+        # Otherwise the key falls under the most recent URL still in effect
+        # (e.g. one "URL:" line followed by several keys for that endpoint).
+        if active_url is not None:
+            entries.append(_make_entry(active_url[1], active_url[2], active_url[3], tok[1]))
+            used_url_idx.add(active_url_idx)
+        else:
+            entries.append(_make_entry("", "unknown", "openai", tok[1]))
+        i += 1
+
+    # URLs that never received a key still surface as "(need key)" rows.
+    for idx, tok in enumerate(tokens):
+        if tok[0] == "url" and idx not in used_url_idx:
+            entries.append(_make_entry(tok[1], tok[2], tok[3], ""))
 
     return _dedupe_entries(entries)
 

@@ -75,8 +75,9 @@ def _html_gateway_error(response, path: str) -> str:
     return detail + ": request blocked by site WAF/proxy before the API handled it"
 
 
-# Some gateways return a 4xx/5xx error page with HTTP 200 (for example,
-# misconfigured nginx error_page rules or WAF interception).
+# Some gateways/CDNs answer with HTTP 200 while serving a 4xx/5xx error page
+# body (nginx ``error_page``, WAF interception). Detect those so a broken site
+# is not mistaken for a healthy one.
 _HTML_ERROR_STATUS_RE = re.compile(
     r"<(?:title|h1|h2|center)[^>]*>\s*(?:error\s*)?(4\d{2}|5\d{2})\b[^<]{0,40}</(?:title|h1|h2|center)>",
     re.IGNORECASE,
@@ -92,21 +93,25 @@ _HTML_ERROR_PHRASES = (
 
 
 def _html_error_page(response) -> str:
-    """Return a reason for an HTML proxy error page, including fake HTTP 200s."""
+    """Reason string when an HTML body is a proxy/nginx error page, else ''.
+
+    Handles the common case where the HTTP status is 200 but the body is a
+    4xx/5xx error page (misconfigured ``error_page`` or a WAF).
+    """
     try:
-        content_type = str((response.headers or {}).get("Content-Type") or "").lower()
+        ctype = str((response.headers or {}).get("Content-Type") or "").lower()
         body = response.text or ""
     except Exception:
         return ""
     sample = body[:4000]
-    lower = sample.lower()
-    if not ("html" in content_type or "<html" in lower or "<center" in lower or "<title" in lower):
+    low = sample.lower()
+    if not ("html" in ctype or "<html" in low or "<center" in low or "<title" in low):
         return ""
-    match = _HTML_ERROR_STATUS_RE.search(sample)
-    if match:
-        return f"HTTP error page ({match.group(1)})"
+    m = _HTML_ERROR_STATUS_RE.search(sample)
+    if m:
+        return f"HTTP error page ({m.group(1)})"
     for phrase in _HTML_ERROR_PHRASES:
-        if phrase in lower:
+        if phrase in low:
             return f"HTTP error page ({phrase})"
     return ""
 
@@ -1187,22 +1192,29 @@ def pick_default_model(models: list[str]) -> str:
                 return m
     return models[0] if models else ""
 
-
 def check_vendor_availability(vendor: dict) -> dict:
-    """Check the vendor's configured check-in page, or API URL if absent.
+    """Check whether a vendor's user-facing site is actually reachable.
 
-    2xx/3xx normal responses are reachable. HTTP errors, HTML error pages,
-    timeouts, TLS failures, and connection failures are unavailable.
+    Prefers the check-in / login page (``checkin_url``) — the page the user
+    actually opens — and falls back to the API base (``proxy_target`` /
+    ``api_url``). Independent of API keys, check-in tokens or check-in links.
+
+      - 2xx / 3xx with a normal body          -> reachable
+      - 4xx / 5xx, or a 2xx response whose body is a proxy error page -> unreachable
+      - timeout / DNS / conn                  -> unreachable (after retries)
+
+    Transient TLS/connection failures (common when many hosts are probed at
+    once through a local proxy/VPN) are retried so they do not become false
+    "unreachable" verdicts. A definitive HTTP answer is never retried.
     """
     from datetime import datetime, timezone
-    import random as _random
     import time as _time
-
-    vendor = vendor or {}
-    checkin_url = str(vendor.get("checkin_url") or "").strip()
-    api_url = str(vendor.get("proxy_target") or vendor.get("api_url") or "").strip()
+    import random as _random
+    v = vendor or {}
+    checkin_url = str(v.get("checkin_url") or "").strip()
+    api_url = str(v.get("proxy_target") or v.get("api_url") or "").strip()
     url = checkin_url or api_url
-    result = {
+    res = {
         "reachable": None,
         "status_code": None,
         "latency_ms": None,
@@ -1210,53 +1222,73 @@ def check_vendor_availability(vendor: dict) -> dict:
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
     if not url:
-        result.update(reachable=False, error="No API URL configured")
-        return result
+        res["reachable"] = False
+        res["error"] = "No API URL configured"
+        return res
 
     base = url.rstrip("/")
+    # When a check-in page is configured it is the authoritative target. For
+    # API-only vendors, also try the model-list paths as a fallback.
     candidates = [base]
     if not checkin_url and api_url:
-        candidates.extend((base + "/v1/models", base + "/models"))
-    last_error = ""
-    for attempt in range(2):
+        candidates += [base + "/v1/models", base + "/models"]
+    session = _new_session()
+    last_err = ""
+    attempts = 2
+
+    for attempt in range(attempts):
         saw_transient = False
-        session = _new_session()
         for target in candidates:
             started = _time.time()
             try:
-                response = session.get(target, timeout=get_probe_timeout(8), allow_redirects=True)
+                r = session.get(target, timeout=get_probe_timeout(8), allow_redirects=True)
             except requests.exceptions.Timeout:
-                last_error = "Timeout"
+                last_err = "Timeout"
                 saw_transient = True
                 continue
             except requests.exceptions.SSLError:
-                last_error = "SSL error"
+                last_err = "SSL error"
                 saw_transient = True
                 continue
             except requests.exceptions.ConnectionError:
-                last_error = "Connection failed / DNS"
+                last_err = "Connection failed / DNS"
                 saw_transient = True
                 continue
             except Exception as exc:  # noqa: BLE001
-                last_error = str(exc)[:150]
+                last_err = str(exc)[:150]
                 continue
-
-            result["status_code"] = response.status_code
-            result["latency_ms"] = int((_time.time() - started) * 1000)
-            if response.status_code >= 400:
-                result.update(reachable=False, error=f"HTTP {response.status_code}")
-                return result
-            error_page = _html_error_page(response)
-            if error_page:
-                result.update(reachable=False, error=error_page)
-                return result
-            result.update(reachable=True, error="")
-            return result
-
-        if not saw_transient or attempt == 1:
+            code = r.status_code
+            res["status_code"] = code
+            res["latency_ms"] = int((_time.time() - started) * 1000)
+            if code >= 400:
+                # Definitive HTTP answer (4xx/5xx): no point retrying.
+                last_err = f"HTTP {code}"
+                res["reachable"] = False
+                res["error"] = last_err
+                return res
+            # 2xx/3xx: guard against error pages served with a success status
+            err_page = _html_error_page(r)
+            if err_page:
+                last_err = err_page
+                res["reachable"] = False
+                res["error"] = last_err
+                return res
+            res["reachable"] = True
+            res["error"] = ""
+            return res
+        # Every candidate failed with a transient network/TLS error: retry with
+        # a fresh session and a little jittered backoff to ride out bursts.
+        if not saw_transient or attempt + 1 >= attempts:
             break
-        _time.sleep(0.4 + _random.uniform(0, 0.3))
-        _session_local.session = None
+        _time.sleep(0.4 * (attempt + 1) + _random.uniform(0, 0.3))
+        try:
+            # Drop the (possibly poisoned) pooled connection before retrying.
+            if getattr(_session_local, "session", None) is not None:
+                _session_local.session = None
+        except Exception:
+            pass
+        session = _new_session()
 
-    result.update(reachable=False, error=last_error or "Unreachable")
-    return result
+    res["reachable"] = False
+    res["error"] = last_err or "Unreachable"
+    return res

@@ -39,6 +39,30 @@ def _epoch() -> float:
     return time.time()
 
 
+# Budget alerts must fire even when scheduled health checks are off, so they get
+# their own throttled tick inside the loop below.
+_BUDGET_CHECK_INTERVAL = 300
+_budget_last_check = 0.0
+
+
+def _maybe_notify_budgets() -> None:
+    """Evaluate budget limits and push alerts. Never raises."""
+    global _budget_last_check
+    now = _epoch()
+    if now - _budget_last_check < _BUDGET_CHECK_INTERVAL:
+        return
+    _budget_last_check = now
+    try:
+        from core import budget, notify
+
+        if not notify.is_enabled():
+            return
+        snap = budget.snapshot()
+        budget.notify_alerts(snap.get("alerts") or [])
+    except Exception as e:
+        log.warning("Budget notification check failed: %s", e)
+
+
 def _set_next_run(seconds: float) -> None:
     if seconds is None or seconds < 0:
         _state["next_run_at"] = None
@@ -148,6 +172,13 @@ def run_health_check(
             "Health check done source=%s ok=%s fail=%s (%sms)",
             source, summary["ok"], summary["fail"], elapsed_ms,
         )
+        # Push failing keys / dead vendors out to the configured channels.
+        try:
+            from core.health_checker import notify_health_failures
+
+            notify_health_failures(results)
+        except Exception as e:
+            log.warning("Health failure notify skipped: %s", e)
         return {"ok": True, "busy": False, "run_id": rec.get("id"), "summary": _state["last_summary"], "results": results}
     except Exception as e:
         log.warning("Health check failed: %s", e)
@@ -185,6 +216,9 @@ def _loop() -> None:
             interval = int(settings.get("check_interval_seconds") or 300)
             if interval < 60:
                 interval = 60
+
+            # Independent of the health-check schedule: push budget alerts.
+            _maybe_notify_budgets()
 
             if not enabled:
                 _set_next_run(None)
@@ -224,7 +258,7 @@ def start_scheduler() -> None:
         _thread = threading.Thread(target=_loop, name="ai-switch-health-scheduler", daemon=True)
         _thread.start()
         _state["thread_started_at"] = _now_iso()
-        log.info("Health scheduler thread started (disabled until health_check_enabled=true)")
+        log.info("Background scheduler thread started (health checks off until health_check_enabled=true; budget notifications run regardless)")
 
 
 def stop_scheduler() -> None:

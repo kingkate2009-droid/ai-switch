@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from core.data import get_vendor, get_vendors, list_model_ids, update_model_quality_score
 from core.endpoints import effective_model_endpoints, model_is_verified_usable
+from core.pricing import get_model_price
 from core.providers import (
     _anthropic_messages_url,
     _new_session,
@@ -18,7 +19,7 @@ from core.providers import (
 )
 
 
-BENCHMARK_VERSION = 1
+BENCHMARK_VERSION = 2
 BENCHMARKS = (
     ("exact", "Return exactly AISWITCH-7F2A and nothing else.", "AISWITCH-7F2A"),
     ("math", "Compute 37 * 29. Return only the integer.", "1073"),
@@ -31,6 +32,14 @@ BENCHMARKS = (
         "json",
         'Return exactly this JSON object with no markdown: {"a":3,"b":[2,4,6]}',
         '{"a":3,"b":[2,4,6]}',
+    ),
+    ("reverse", "Reverse the string 'aiswitch'. Reply only the reversed string.", "hctiwsia"),
+    ("count", "How many times does the letter 'a' appear in the word 'banana'? Reply only the number.", "3"),
+    ("multi", "What is (12 + 8) * 3 - 5? Reply only the integer.", "55"),
+    (
+        "extract",
+        'Extract the email from this line and reply with only the email: "contact bob@example.com today".',
+        "bob@example.com",
     ),
 )
 
@@ -122,13 +131,17 @@ def _request_text(endpoint: str, api_url: str, api_key: str, model: str, prompt:
 
 def _answer_correct(case_id: str, answer: str, expected: str) -> bool:
     value = str(answer or "").strip()
+    # Strip common wrappers the model might add despite instructions
+    value = value.strip("` \n\r\t\"'")
     if case_id == "json":
         try:
             return json.loads(value) == json.loads(expected)
         except Exception:
             return False
-    if case_id in ("math", "logic", "exact"):
+    if case_id in ("math", "logic", "exact", "count", "multi"):
         return value.upper() == expected.upper()
+    if case_id in ("reverse", "extract"):
+        return value.strip().lower() == expected.lower()
     return False
 
 
@@ -180,19 +193,43 @@ def evaluate_model_quality(vendor_id: str, key_id: str, model_id: str) -> dict:
             results.append({"id": case_id, "correct": False, "error": str(exc)[:240]})
 
     correct_count = sum(1 for item in results if item.get("correct"))
-    accuracy_score = correct_count * 20
+    total_cases = len(BENCHMARKS)
+    # ---- Component scores (total 100) ----
+    # Accuracy 0-60
+    accuracy_score = round(correct_count / total_cases * 60) if total_cases else 0
+    # Latency 0-15
     avg_latency = int(sum(latencies) / len(latencies)) if latencies else 0
-    latency_score = 0 if not avg_latency else 10 if avg_latency <= 1500 else 7 if avg_latency <= 3000 else 4 if avg_latency <= 6000 else 1
+    latency_score = 0 if not avg_latency else (15 if avg_latency <= 1500 else 11 if avg_latency <= 3000 else 7 if avg_latency <= 6000 else 3)
+    # Identity 0-10
     identity_ok = all(_model_identity_matches(model_id, item) for item in response_models)
     identity_score = 10 if identity_ok else 0
-    score = accuracy_score + latency_score + identity_score
+    # Price / cost-effectiveness 0-15 (cheaper → higher); unknown models get neutral
+    price = get_model_price(model_id)
+    blended = price.get("blended") or 0.0
+    if not price.get("known"):
+        price_score = 7  # neutral when price is unknown
+    elif blended <= 0.5:
+        price_score = 15
+    elif blended <= 1.0:
+        price_score = 13
+    elif blended <= 3.0:
+        price_score = 10
+    elif blended <= 8.0:
+        price_score = 6
+    elif blended <= 20.0:
+        price_score = 2
+    else:
+        price_score = 0
+    score = accuracy_score + latency_score + identity_score + price_score
     record = {
         "score": score,
         "accuracy_score": accuracy_score,
         "latency_score": latency_score,
         "identity_score": identity_score,
+        "price_score": price_score,
+        "price": price,
         "correct": correct_count,
-        "total": len(BENCHMARKS),
+        "total": total_cases,
         "avg_latency_ms": avg_latency,
         "endpoint": endpoint,
         "response_models": sorted(set(response_models)),
@@ -280,6 +317,7 @@ def get_quality_catalog(*, include_official: bool = False) -> dict:
                     "model_syncable": model_is_verified_usable(key, model_id),
                     "quality_checked": isinstance(record, dict) and bool(record.get("checked_at")),
                     "quality": record if isinstance(record, dict) else None,
+                    "price": get_model_price(model_id),
                 })
     rows.sort(key=lambda item: (item["vendor_name"].lower(), item["model"].lower()))
     return {"count": len(rows), "checked": sum(1 for row in rows if row["quality_checked"]), "rows": rows}

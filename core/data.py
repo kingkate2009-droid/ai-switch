@@ -22,6 +22,14 @@ _DATA_LOCK = threading.RLock()
 _SQLITE_INIT_LOCK = threading.Lock()
 _USAGE_LOCK = threading.RLock()
 _SQLITE_READY = False
+# Parsed document memo. The main document is multi-MB (endpoint_capabilities
+# dominate), and hot paths such as backend reconcile call _load_data() hundreds
+# of times per push. Without this every call reopens SQLite and json.loads the
+# whole payload (~90 ms), which turned a single push into minutes of pure
+# parsing. Invalidated on every write; a cheap store-stamp check also drops the
+# memo when another process rewrote the store, so readers never see stale state.
+_DOC_CACHE: Optional[dict] = None
+_DOC_CACHE_STAMP: Optional[tuple] = None
 _DEFAULT_DATA = {
     "vendors": [],
     "settings": {
@@ -59,6 +67,32 @@ def _sqlite_connection() -> sqlite3.Connection:
     return conn
 
 
+def load_kv_payload(key: str, default=None):
+    """Read a JSON payload row from the SQLite app_state table (``default`` if absent)."""
+    _ensure_sqlite()
+    conn = _sqlite_connection()
+    try:
+        row = conn.execute("SELECT payload FROM app_state WHERE key=?", (key,)).fetchone()
+        if row is None:
+            return default
+        return json.loads(row[0])
+    finally:
+        conn.close()
+
+
+def save_kv_payload(key: str, payload) -> None:
+    """Write/overwrite a JSON payload row in the SQLite app_state table."""
+    _ensure_sqlite()
+    conn = _sqlite_connection()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_state(key, payload) VALUES(?, ?)",
+            (key, json.dumps(payload, ensure_ascii=False, separators=(",", ":"))),
+        )
+    finally:
+        conn.close()
+
+
 def _valid_json_source() -> tuple[dict, str]:
     """Find the newest valid legacy JSON snapshot for the SQLite migration."""
     candidates = [DATA_PATH, *_backup_candidates()]
@@ -74,10 +108,26 @@ def _valid_json_source() -> tuple[dict, str]:
     return dict(_DEFAULT_DATA), "empty"
 
 
+def _harden_db_perms() -> None:
+    """Lock the SQLite store (and its WAL/SHM sidecars) to owner-only.
+
+    The store now also holds OAuth login tokens that used to live in a 0600
+    accounts.json; the document already carried API keys, so this closes the
+    gap for the whole store.
+    """
+    for p in (SQLITE_PATH, SQLITE_PATH.with_name(SQLITE_PATH.name + "-wal"),
+              SQLITE_PATH.with_name(SQLITE_PATH.name + "-shm")):
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
+
+
 def _ensure_sqlite() -> None:
     """Create the SQL store and migrate legacy JSON exactly once."""
     global _SQLITE_READY
     if _SQLITE_READY and SQLITE_PATH.exists():
+        _harden_db_perms()
         return
     with _SQLITE_INIT_LOCK:
         if _SQLITE_READY and SQLITE_PATH.exists():
@@ -111,6 +161,26 @@ def _ensure_sqlite() -> None:
         finally:
             conn.close()
         _SQLITE_READY = True
+        _harden_db_perms()
+
+
+def _invalidate_doc_cache() -> None:
+    """Drop the parsed-document memo so the next read re-reads SQLite."""
+    global _DOC_CACHE, _DOC_CACHE_STAMP
+    _DOC_CACHE = None
+    _DOC_CACHE_STAMP = None
+
+
+def _doc_store_stamp() -> tuple:
+    """Cheap fingerprint of the SQLite store (main + WAL) for external writes."""
+    stamp = []
+    for path in (SQLITE_PATH, SQLITE_PATH.with_name(SQLITE_PATH.name + "-wal")):
+        try:
+            st = path.stat()
+            stamp.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            stamp.append((0, 0))
+    return tuple(stamp)
 
 
 def _load_sqlite_document() -> dict:
@@ -130,6 +200,9 @@ def _save_sqlite_document(data: dict) -> None:
     _ensure_sqlite()
     if not isinstance(data, dict):
         raise TypeError("data must be a dict")
+    # Drop the parsed-document memo first: any read after this write must see
+    # the new payload (covers the failed-write case as well).
+    _invalidate_doc_cache()
     conn = _sqlite_connection()
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -231,19 +304,29 @@ def _atomic_write_json(path: Path, payload) -> None:
 
 
 def _load_usage_raw() -> list:
-    """Load usage records from usage.json (empty list if missing/corrupt)."""
+    """Load usage records from the SQLite store (empty list if missing/corrupt)."""
     with _USAGE_LOCK:
-        _ensure_dirs()
-        if not USAGE_PATH.exists():
-            return []
         try:
-            raw = _read_json_file(USAGE_PATH)
-            recs = raw.get("records") if isinstance(raw, dict) else raw
+            recs = load_kv_payload("usage")
+            if recs is None:
+                # one-time migration from the legacy usage.json
+                if USAGE_PATH.exists():
+                    try:
+                        raw = _read_json_file(USAGE_PATH)
+                        raw_recs = raw.get("records") if isinstance(raw, dict) else raw
+                        recs = raw_recs if isinstance(raw_recs, list) else []
+                        save_kv_payload("usage", {"format": "ai-switch-usage", "version": 1, "records": recs})
+                    except Exception:
+                        recs = []
+                else:
+                    recs = []
+            if isinstance(recs, dict):
+                recs = recs.get("records")
             if not isinstance(recs, list):
                 return []
             return recs
         except Exception as e:
-            log.warning("usage.json unreadable (%s); starting empty", e)
+            log.warning("usage store unreadable (%s); starting empty", e)
             return []
 
 
@@ -251,17 +334,7 @@ def _save_usage_raw(records: list) -> None:
     with _USAGE_LOCK:
         if not isinstance(records, list):
             raise TypeError("usage records must be a list")
-        # light rotate: keep one bak
-        try:
-            if USAGE_PATH.exists():
-                bak = USAGE_PATH.with_suffix(USAGE_PATH.suffix + ".bak")
-                try:
-                    shutil.copy2(USAGE_PATH, bak)
-                except OSError:
-                    pass
-        except Exception:
-            pass
-        _atomic_write_json(USAGE_PATH, {
+        save_kv_payload("usage", {
             "format": "ai-switch-usage",
             "version": 1,
             "records": records,
@@ -310,10 +383,10 @@ def _migrate_usage_out_of_data(data: dict) -> dict:
                     r["id"] = str(i)
             _save_usage_raw(merged)
             log.info(
-                "Migrated usage out of data.json → usage.json (%d legacy + %d existing → %d)",
+                "Migrated usage out of data.json → usage store (%d legacy + %d existing → %d)",
                 len(legacy), len(existing), len(merged),
             )
-        elif not existing and not USAGE_PATH.exists():
+        elif not existing:
             _save_usage_raw([])
     except Exception as e:
         log.warning("usage migration failed: %s", e)
@@ -329,13 +402,19 @@ def _migrate_usage_out_of_data(data: dict) -> dict:
 
 
 def _load_data() -> dict:
+    global _DOC_CACHE, _DOC_CACHE_STAMP
     with _DATA_LOCK:
+        stamp = _doc_store_stamp()
+        if _DOC_CACHE is not None and _DOC_CACHE_STAMP == stamp:
+            return _DOC_CACHE
         data = _load_sqlite_document()
         # one-time / residual: split usage out of main config
         if isinstance(data, dict) and "usage" in data:
             data = _migrate_usage_out_of_data(data)
         if isinstance(data, dict):
             data = _hydrate_secrets_in_memory(data)
+        _DOC_CACHE = data
+        _DOC_CACHE_STAMP = stamp
         return data
 
 
@@ -516,6 +595,10 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
         "tags": _normalize_tags(tags),
         "vtype": vtype,
         "archived": False,
+        "access_token_user_id": "",
+        "status": "normal",
+        "availability": None,
+        "availability_checked_at": "",
         "keys": [],
     }
     data["vendors"].append(vendor)
@@ -535,11 +618,56 @@ def _normalize_vendor_type(raw) -> str:
     return ""
 
 
+def _normalize_vendor_status(raw) -> str:
+    """Vendor lifecycle status: unreachable|registrable|normal|banned."""
+    s = str(raw or "").strip().lower()
+    if s in ("unreachable", "无法访问", "down", "offline"):
+        return "unreachable"
+    if s in ("registrable", "可注册", "register", "signup"):
+        return "registrable"
+    if s in ("banned", "已封禁", "blocked", "disabled"):
+        return "banned"
+    if s in ("normal", "正常", "active", "ok"):
+        return "normal"
+    return "normal"
+
+
+def record_checkin(vendor_id: str, date: str, entry: dict, keep_days: int = 60) -> Optional[dict]:
+    """Persist one day's check-in result on a vendor.
+
+    ``checkin_log`` is a dict keyed by ``YYYY-MM-DD``, pruned to the newest
+    ``keep_days`` entries. On success the date is mirrored into
+    ``checkin_last`` so the daily "already signed in" badge survives refresh.
+    """
+    data = _load_data()
+    for v in data["vendors"]:
+        if v["id"] != vendor_id:
+            continue
+        log = v.get("checkin_log")
+        if not isinstance(log, dict):
+            log = {}
+        log[str(date)] = {
+            "status": str(entry.get("status") or ""),
+            "reward": entry.get("reward"),
+            "error": str(entry.get("error") or "")[:300],
+            "ts": entry.get("ts") or "",
+        }
+        if len(log) > keep_days:
+            for old in sorted(log.keys())[:-keep_days]:
+                log.pop(old, None)
+        v["checkin_log"] = log
+        if entry.get("status") in ("success", "done"):
+            v["checkin_last"] = str(date)
+        _save_data(data)
+        return v
+    return None
+
+
 def update_vendor(vendor_id: str, **kwargs) -> Optional[dict]:
     data = _load_data()
     for v in data["vendors"]:
         if v["id"] == vendor_id:
-            for key in ("name", "provider", "api_url", "endpoint_type", "thinking_disabled", "proxy_target", "checkin_url", "vtype", "archived", "availability", "availability_checked_at"):
+            for key in ("name", "provider", "api_url", "endpoint_type", "thinking_disabled", "proxy_target", "checkin_url", "vtype", "archived", "checkin_last", "checkin_log", "access_token_user_id"):
                 if key in kwargs:
                     if key == "vtype":
                         v[key] = _normalize_vendor_type(kwargs[key])
@@ -549,6 +677,9 @@ def update_vendor(vendor_id: str, **kwargs) -> Optional[dict]:
                         v[key] = str(kwargs[key] or "").rstrip("/")
                     else:
                         v[key] = kwargs[key]
+            for key in ("availability", "availability_checked_at"):
+                if key in kwargs:
+                    v[key] = kwargs[key]
             if "tags" in kwargs:
                 v["tags"] = _normalize_tags(kwargs["tags"])
             _save_data(data)
@@ -868,6 +999,7 @@ _KEY_FIELDS = (
     "check_models",  # multiple primary models for health checks; empty = auto
     "disabled_models", "sync_models", "model_health", "endpoint_capabilities", "quality_scores", "notes", "role",
     "archived",
+    "access_token",  # optional system token used only for relay balance lookups (New API / One API)
 )
 
 # role: "" | "primary" | "backup"
@@ -1276,6 +1408,14 @@ _SETTINGS_KEYS = (
     "last_push",
     "usage_imported_at",
     "data_recovery",  # one-shot notice after corrupt data.json restore
+    # ── Outbound notifications (core/notify.py) ──
+    "notify_enabled",           # bool, default False
+    "notify_channel_feishu",    # str — Feishu bot webhook URL
+    "notify_channel_slack",     # str — Slack incoming webhook URL
+    "notify_channel_webhook",   # str — any JSON endpoint
+    "notify_events",            # list[str] — subscribed event names
+    "notify_quiet_hours",       # str "23:00-08:00", "" = off
+    "notify_min_interval_minutes",  # int, default 60 — per-event rate limit
 )
 
 # ── At-rest secrets vault (in-memory master key) ──────────
@@ -1784,6 +1924,12 @@ def get_models_catalog(endpoint: str = None, modality: str = None, vtype: str = 
                 continue
         if want_modality and want_modality not in modalities and rec.get("modality") != want_modality:
             continue
+        # Per-model price (USD per 1M tokens); min=input, max=output
+        try:
+            from core.pricing import get_model_price
+            rec["price"] = get_model_price(mid)
+        except Exception:
+            rec["price"] = None
         items.append(rec)
     items.sort(key=lambda r: (-r["key_count"], str(r["model"]).lower()))
     return {
@@ -2207,6 +2353,11 @@ def export_backup(*, password: str = "") -> dict:
     """
     from datetime import datetime, timezone
     data = _load_data()
+    try:
+        from core.accounts import export_accounts
+        oauth_accounts = export_accounts()
+    except Exception:
+        oauth_accounts = []
     payload = {
         "format": "ai-switch-backup",
         "version": 1,
@@ -2215,6 +2366,7 @@ def export_backup(*, password: str = "") -> dict:
             "vendors": data.get("vendors") or [],
             "settings": data.get("settings") or {},
             "backends": data.get("backends") or {},
+            "accounts": oauth_accounts,
         },
     }
     pwd = (password or "").strip()
@@ -2267,6 +2419,12 @@ def import_backup(payload: dict, *, mode: str = "merge", password: str = "") -> 
         if isinstance(body.get("backends"), dict):
             data["backends"] = body["backends"]
         _save_data(data)
+        if isinstance(body.get("accounts"), list):
+            try:
+                from core.accounts import import_accounts
+                import_accounts(body["accounts"])
+            except Exception:
+                log.exception("failed to import oauth accounts from backup")
         return {
             "mode": "replace",
             "vendors": len(data.get("vendors") or []),
@@ -2334,11 +2492,23 @@ def import_backup(payload: dict, *, mode: str = "merge", password: str = "") -> 
         data["backends"] = cur_b
         _save_data(data)
 
+    accounts_added = accounts_updated = 0
+    if isinstance(body.get("accounts"), list) and body.get("accounts"):
+        try:
+            from core.accounts import import_accounts
+            res = import_accounts(body["accounts"])
+            accounts_added = res.get("added", 0)
+            accounts_updated = res.get("updated", 0)
+        except Exception:
+            log.exception("failed to import oauth accounts from backup")
+
     return {
         "mode": "merge",
         "vendors_added": added_v,
         "keys_added": added_k,
         "keys_skipped": skipped_k,
+        "accounts_added": accounts_added,
+        "accounts_updated": accounts_updated,
     }
 
 
@@ -2440,41 +2610,39 @@ def _builtin_policy_templates() -> list[dict]:
     ]
 
 
-def _custom_policies_path() -> Path:
-    return DATA_DIR / "policy_templates.json"
+_CUSTOM_POLICIES_LEGACY = DATA_DIR / "policy_templates.json"
 
 
 def _load_custom_policies() -> list[dict]:
-    path = _custom_policies_path()
-    if not path.exists():
-        return []
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        items = data if isinstance(data, list) else data.get("templates") or []
-        out = []
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            name = str(it.get("name") or "").strip()
-            if not name:
-                continue
-            settings = it.get("settings") if isinstance(it.get("settings"), dict) else {}
-            out.append({
-                "id": str(it.get("id") or _sanitize_policy_id(name)),
-                "name": name[:80],
-                "description": str(it.get("description") or "")[:200],
-                "builtin": False,
-                "settings": {k: settings[k] for k in _POLICY_FIELD_KEYS if k in settings},
-            })
-        return out
-    except Exception:
-        return []
+    data = load_kv_payload("policy_templates")
+    if data is None and _CUSTOM_POLICIES_LEGACY.exists():
+        # one-time migration from the legacy policy_templates.json
+        try:
+            with open(_CUSTOM_POLICIES_LEGACY, encoding="utf-8") as f:
+                data = json.load(f)
+            save_kv_payload("policy_templates", data or {"templates": []})
+        except Exception:
+            data = None
+    items = data if isinstance(data, list) else (data or {}).get("templates") or []
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = str(it.get("name") or "").strip()
+        if not name:
+            continue
+        settings = it.get("settings") if isinstance(it.get("settings"), dict) else {}
+        out.append({
+            "id": str(it.get("id") or _sanitize_policy_id(name)),
+            "name": name[:80],
+            "description": str(it.get("description") or "")[:200],
+            "builtin": False,
+            "settings": {k: settings[k] for k in _POLICY_FIELD_KEYS if k in settings},
+        })
+    return out
 
 
 def _save_custom_policies(items: list[dict]) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    path = _custom_policies_path()
     clean = []
     for it in items:
         if not isinstance(it, dict):
@@ -2489,11 +2657,7 @@ def _save_custom_policies(items: list[dict]) -> None:
             "description": str(it.get("description") or "")[:200],
             "settings": {k: settings[k] for k in _POLICY_FIELD_KEYS if k in settings},
         })
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"templates": clean}, f, ensure_ascii=False, indent=2)
-        f.flush()
-    tmp.replace(path)
+    save_kv_payload("policy_templates", {"templates": clean})
 
 
 def _sanitize_policy_id(name: str) -> str:
@@ -2670,32 +2834,36 @@ def dedupe_keys(*, dry_run: bool = True) -> dict:
 
 def save_import_snapshot(meta: dict) -> None:
     """Save snapshot of vendors/keys before a bulk import for undo."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    path = DATA_DIR / "last_import_snapshot.json"
     payload = {
         "meta": meta,
         "backup": export_backup(),
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    save_kv_payload("last_import_snapshot", payload)
 
 
 def load_import_snapshot() -> Optional[dict]:
-    path = DATA_DIR / "last_import_snapshot.json"
-    if not path.exists():
-        return None
     try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
+        snap = load_kv_payload("last_import_snapshot")
+        if snap is None:
+            # one-time migration from the legacy last_import_snapshot.json
+            path = DATA_DIR / "last_import_snapshot.json"
+            if path.exists():
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        snap = json.load(f)
+                    save_kv_payload("last_import_snapshot", snap if isinstance(snap, dict) else {})
+                except Exception:
+                    snap = {}
+            else:
+                snap = {}
+        return snap if isinstance(snap, dict) and snap else None
     except Exception:
         return None
 
 
 def clear_import_snapshot() -> None:
-    path = DATA_DIR / "last_import_snapshot.json"
     try:
-        if path.exists():
-            path.unlink()
+        save_kv_payload("last_import_snapshot", {})
     except Exception:
         pass
 
