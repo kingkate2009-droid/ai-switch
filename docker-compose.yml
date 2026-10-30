@@ -3,7 +3,10 @@ services:
     build: .
     container_name: ai-switch
     ports:
-      - "8787:8787"
+      # Keep the published port on the loopback interface. Change this to
+      # "8787:8787" only if you understand that it exposes the key database
+      # (with token protection) to your whole network.
+      - "127.0.0.1:8787:8787"
     volumes:
       - ~/.openclaw:/root/.openclaw:ro
       - ~/.ai-switch:/root/.ai-switch

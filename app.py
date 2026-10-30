@@ -78,8 +78,12 @@ app = _create_app()
 init_backends()
 
 try:
-    from core.scheduler import start_scheduler
-    start_scheduler()
+    # Tests and tooling import this module for the Flask app only; starting the
+    # background health scheduler there would fire real checks. Set
+    # AI_SWITCH_NO_SCHEDULER=1 to skip it (see tests/test_app_smoke.py).
+    if os.environ.get("AI_SWITCH_NO_SCHEDULER", "").strip().lower() not in ("1", "true", "yes"):
+        from core.scheduler import start_scheduler
+        start_scheduler()
 except Exception as _e:
     log.warning("Scheduler not started: %s", _e)
 
@@ -93,6 +97,11 @@ _AUTH_EXEMPT_PREFIXES = (
 
 
 def _get_access_token() -> str:
+    # An explicit env token wins so Docker secrets / systemd units can inject one
+    # without writing it to the data file.
+    env_token = str(os.environ.get("AI_SWITCH_ACCESS_TOKEN") or "").strip()
+    if env_token:
+        return env_token
     try:
         from core.data import get_settings
         return str((get_settings() or {}).get("access_token") or "").strip()
@@ -142,10 +151,12 @@ def _check_read_only():
     if not path.startswith("/api/"):
         return None
     # always allow auth + settings (to turn off read_only) + lang + encrypted backup export
+    # /api/notify/test is exempt too: it sends one message and mutates nothing here.
     if (
         path.startswith("/api/auth/")
         or path.startswith("/api/settings")
         or path.startswith("/api/lang")
+        or path == "/api/notify/test"
         or path == "/api/backup/export"
     ):
         return None
@@ -241,6 +252,33 @@ def api_auth_logout():
     resp = jsonify({"success": True})
     resp.set_cookie("aiswitch_token", "", max_age=0)
     return resp
+
+
+# ── Outbound notifications ────────────────────────────────
+
+@app.route("/api/notify/status", methods=["GET"])
+def api_notify_status():
+    """Current notification configuration + recent delivery attempts."""
+    from core import notify as _notify
+    try:
+        limit = int(request.args.get("history", 20))
+    except Exception:
+        limit = 20
+    return jsonify({**_notify.status(), "history": _notify.history(limit)})
+
+
+@app.route("/api/notify/test", methods=["POST"])
+def api_notify_test():
+    """Send a test message so the user can verify a webhook without waiting."""
+    from core import notify as _notify
+    data = request.get_json(silent=True) or {}
+    channel = str(data.get("channel") or "").strip() or None
+    if channel and channel not in _notify.CHANNELS:
+        return jsonify({"ok": False, "error": f"unknown channel: {channel}"}), 400
+    result = _notify.send_test(channel)
+    log_event("notify.test", channels=[r.get("channel") for r in result.get("results", [])],
+              ok=bool(result.get("ok")))
+    return jsonify(result)
 
 
 @app.route("/api/diagnostics", methods=["GET"])
@@ -609,7 +647,55 @@ def _slim_key_for_list(key: dict) -> dict:
         out["quality_scores_count"] = len(qs)
         out.pop("quality_scores", None)
     # Never send full secrets larger than needed — UI masks anyway
+    out["pricing"] = _key_pricing_summary(out)
+    # Expose whether a balance access token is configured, never the token itself
+    if "access_token" in out:
+        out["access_token_set"] = bool(str(out.pop("access_token") or "").strip())
     return out
+
+
+def _key_pricing_summary(key: dict) -> dict:
+    """Return per-model pricing rates for a key's models, using the pricing table."""
+    try:
+        from core.pricing import _rates_table
+        table = _rates_table()
+        out = {}
+        models = key.get("models") or []
+        if not models:
+            return out
+        for m in models:
+            mid = m if isinstance(m, str) else (m.get("id") or m.get("name") or "")
+            if not mid:
+                continue
+            rates = _lookup_rate(mid, table)
+            if rates:
+                out[mid] = {"input": rates[0], "output": rates[1]}
+        return out
+    except Exception:
+        return {}
+
+
+def _lookup_rate(model: str, table: dict) -> tuple:
+    """Look up (input_rate, output_rate) for a model from the pricing table."""
+    mid = (model or "").strip().lower()
+    if not mid or not table:
+        return None
+    if "/" in mid:
+        mid = mid.rsplit("/", 1)[-1]
+    if mid in table:
+        return table[mid]
+    best = ""
+    rates = None
+    for key, val in table.items():
+        if mid.startswith(key) and len(key) > len(best):
+            best = key
+            rates = val
+    if not best:
+        for key, val in table.items():
+            if key in mid and len(key) > len(best):
+                best = key
+                rates = val
+    return rates
 
 
 def _slim_vendor_for_list(vendor: dict) -> dict:
@@ -619,6 +705,9 @@ def _slim_vendor_for_list(vendor: dict) -> dict:
     keys = out.get("keys")
     if isinstance(keys, list):
         out["keys"] = [_slim_key_for_list(k) for k in keys]
+    # Never echo the vendor-level system access token; expose a presence flag.
+    if "access_token" in out:
+        out["access_token_set"] = bool(str(out.pop("access_token") or "").strip())
     return out
 
 
@@ -658,6 +747,345 @@ def api_list_vendors():
     return jsonify({"vendors": slim, "health": health_slim})
 
 
+# ── OAuth / login-state accounts ───────────────────────────
+
+def _account_providers_meta():
+    from core import account_oauth
+    from core import account_adapters
+    from core.accounts import PROVIDERS, PROVIDER_LABELS
+    meta = []
+    for p in PROVIDERS:
+        adapter = account_adapters.get(p)
+        entry = {
+            "provider": p,
+            "label": PROVIDER_LABELS.get(p, p),
+            "supports_login": account_oauth.supports_login(p),
+            "supports_switch": bool(adapter and adapter.supports_switch),
+            "installed": bool(adapter and adapter.detect()),
+            "install_hint": (adapter.install_hint if adapter else ""),
+            "credential_path": "",
+        }
+        if adapter:
+            path = adapter.credential_path()
+            entry["credential_path"] = str(path) if path else ""
+        meta.append(entry)
+    return meta
+
+
+@app.route("/api/accounts", methods=["GET"])
+def api_list_accounts():
+    """List stored OAuth/login accounts (secrets never leave the server)."""
+    from core.accounts import list_accounts, public_view, stats
+
+    provider = (request.args.get("provider") or "").strip()
+    rows = list_accounts(provider)
+    return jsonify({
+        "accounts": [public_view(a) for a in rows],
+        "stats": stats(list_accounts()),
+        "providers": _account_providers_meta(),
+    })
+
+
+@app.route("/api/accounts/parse", methods=["POST"])
+def api_accounts_parse():
+    """Preview-parse pasted credentials without importing."""
+    from core.account_import import parse_accounts
+
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text") or "")
+    hint = str(body.get("provider") or "")
+    result = parse_accounts(text, hint)
+    items = []
+    for it in result.get("items") or []:
+        f = it.get("fields") or {}
+        items.append({
+            "provider": it.get("provider"),
+            "label": it.get("label"),
+            "email": f.get("email") or "",
+            "account_id": f.get("account_id") or "",
+            "project_id": f.get("project_id") or "",
+            "plan_type": f.get("plan_type") or "",
+            "source_name": it.get("source_name") or "",
+            "has_refresh_token": bool(f.get("refresh_token")),
+            "error": it.get("error"),
+        })
+    return jsonify({"items": items, "errors": result.get("errors") or [], "count": result.get("count") or 0})
+
+
+@app.route("/api/accounts/import", methods=["POST"])
+def api_accounts_import():
+    """Import OAuth/login credentials (raw text or pre-parsed entries)."""
+    from core.account_import import parse_accounts
+    from core.accounts import add_account
+
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text") or "")
+    hint = str(body.get("provider") or "")
+    if not text.strip() and not body.get("entries"):
+        return jsonify({"error": "text is required"}), 400
+
+    parsed = parse_accounts(text, hint) if text.strip() else {"items": [], "errors": []}
+    items = list(parsed.get("items") or [])
+    for entry in body.get("entries") or []:
+        if isinstance(entry, dict):
+            items.append({"provider": entry.get("provider"), "fields": entry, "source_name": "entry"})
+
+    created = updated = 0
+    results = []
+    errors = list(parsed.get("errors") or [])
+    for it in items:
+        try:
+            res = add_account(it.get("fields") or {})
+            if res.get("created"):
+                created += 1
+            else:
+                updated += 1
+            results.append({"provider": it.get("provider"), "label": it.get("label"), "updated": not res.get("created")})
+        except Exception as e:
+            errors.append({"source_name": it.get("source_name") or "", "error": str(e)})
+
+    log_event("accounts.import", created=created, updated=updated, errors=len(errors))
+    return jsonify({"created": created, "updated": updated, "results": results, "errors": errors, "count": len(items)})
+
+
+@app.route("/api/accounts/<account_id>", methods=["PATCH"])
+def api_update_account(account_id):
+    from core.accounts import update_account, get_account, public_view
+
+    if not get_account(account_id):
+        return jsonify({"error": "not found"}), 404
+    body = request.get_json(silent=True) or {}
+    fields = {}
+    if "label" in body:
+        fields["label"] = str(body.get("label") or "")
+    if "notes" in body:
+        fields["notes"] = str(body.get("notes") or "")
+    if "status" in body and str(body.get("status")) in ("active", "disabled", "expired"):
+        fields["status"] = str(body.get("status"))
+    updated = update_account(account_id, **fields)
+    return jsonify(public_view(updated) if updated else {"error": "not found"})
+
+
+@app.route("/api/accounts/<account_id>", methods=["DELETE"])
+def api_delete_account(account_id):
+    from core.accounts import delete_account
+
+    ok = delete_account(account_id)
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+    log_event("accounts.delete", account_id=str(account_id))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/accounts/<account_id>/quota", methods=["POST"])
+def api_account_quota(account_id):
+    from core.account_quota import refresh_and_store
+
+    snapshot = refresh_and_store(account_id)
+    if snapshot.get("error") and snapshot.get("error") == "账号不存在":
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"quota": snapshot})
+
+
+@app.route("/api/accounts/<account_id>/activate", methods=["POST"])
+def api_activate_account(account_id):
+    """Switch this account into its tool — the actual 换号.
+
+    Writes the account's credential into the tool's own store (Keychain,
+    ``auth.json``, ``state.vscdb``, ...) after backing the previous file up.
+    """
+    from core import account_adapters
+    from core.accounts import get_account, public_view
+
+    account = get_account(account_id)
+    if not account:
+        return jsonify({"error": "not found"}), 404
+    try:
+        result = account_adapters.switch(account)
+    except account_adapters.SwitchError as e:
+        log_event("accounts.activate_failed", account_id=str(account_id), error=str(e)[:160])
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:  # noqa: BLE001
+        log_event("accounts.activate_failed", account_id=str(account_id), error=str(e)[:160])
+        return jsonify({"error": f"切换失败: {e}"}), 500
+    log_event(
+        "accounts.activate",
+        account_id=str(account_id),
+        provider=account.get("provider"),
+        target=result.get("target"),
+    )
+    return jsonify({"ok": True, "result": result, "account": public_view(account)})
+
+
+@app.route("/api/accounts/detect", methods=["POST"])
+def api_accounts_detect():
+    """Probe the local tools for their *currently active* login.
+
+    Explicit user action on purpose: on macOS reading Claude Code's credential
+    can pop a Keychain access prompt.
+    """
+    from core import account_adapters
+
+    body = request.get_json(silent=True) or {}
+    only = account_adapters.norm(str(body.get("provider") or "")) if body.get("provider") else ""
+    out = {}
+    for adapter in account_adapters.all_adapters():
+        if only and adapter.provider != only:
+            continue
+        installed = adapter.detect()
+        fields = None
+        # Only probe tools that are actually present; a bulk probe must not
+        # touch a Keychain (which can prompt) for tools the user does not have.
+        if installed or (only and adapter.provider == only):
+            try:
+                fields = adapter.read()
+            except Exception:  # noqa: BLE001 - a probe must never 500
+                fields = None
+        out[adapter.provider] = {
+            "provider": adapter.provider,
+            "label": adapter.label,
+            "installed": installed,
+            "logged_in": bool(fields),
+            "email": (fields or {}).get("email", ""),
+            "account_id": (fields or {}).get("account_id", ""),
+            "plan_type": (fields or {}).get("plan_type", ""),
+            "credential_path": str(adapter.credential_path() or ""),
+            "supports_switch": adapter.supports_switch,
+            "install_hint": adapter.install_hint,
+        }
+    return jsonify({"detected": out})
+
+
+@app.route("/api/accounts/quota/refresh", methods=["POST"])
+def api_accounts_quota_refresh_all():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from core.accounts import list_accounts
+    from core.account_quota import refresh_and_store
+
+    rows = list_accounts()
+    done = {}
+    if rows:
+        with ThreadPoolExecutor(max_workers=min(5, len(rows))) as ex:
+            futs = {ex.submit(refresh_and_store, str(a.get("id"))): a for a in rows}
+            for fut in as_completed(futs):
+                a = futs[fut]
+                try:
+                    done[str(a.get("id"))] = fut.result()
+                except Exception as e:
+                    done[str(a.get("id"))] = {"status": "error", "lastError": str(e)[:160]}
+    return jsonify({"results": done, "count": len(done)})
+
+
+@app.route("/api/accounts/oauth/start", methods=["POST"])
+def api_accounts_oauth_start():
+    from core import account_oauth
+
+    body = request.get_json(silent=True) or {}
+    provider = str(body.get("provider") or "").strip().lower()
+    try:
+        info = account_oauth.start_login(provider)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+    log_event("accounts.oauth_start", provider=provider)
+    return jsonify(info)
+
+
+@app.route("/api/accounts/oauth/status", methods=["GET"])
+def api_accounts_oauth_status():
+    from core import account_oauth
+
+    state = (request.args.get("state") or "").strip()
+    if not state:
+        return jsonify({"error": "state is required"}), 400
+    return jsonify(account_oauth.get_login_status(state))
+
+
+@app.route("/api/balances", methods=["GET"])
+def api_list_balances():
+    """Fetch balances for all vendor keys (with caching).
+
+    Query params:
+      - force=1       bypass cache
+      - clear_cache=1 clear cache first
+      - vendor_id=xx  limit to one vendor
+      - cached_only=1 only return already-cached results (never hit network)
+      - timeout=N     max seconds to wait for all fetches (default 20)
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from core.balance import (
+        clear_balance_cache,
+        get_balance_for_key,
+        get_cached_balance,
+    )
+
+    if request.args.get("clear_cache") in ("1", "true"):
+        clear_balance_cache()
+
+    cached_only = request.args.get("cached_only") in ("1", "true", "yes")
+    force = request.args.get("force", "0") in ("1", "true", "yes")
+    vendor_filter = (request.args.get("vendor_id") or "").strip()
+    try:
+        max_wait = float(request.args.get("timeout") or 20)
+    except ValueError:
+        max_wait = 20.0
+    max_wait = max(1.0, min(max_wait, 60.0))
+
+    vendors = get_vendors()
+    if vendor_filter:
+        vendors = [v for v in vendors if str(v.get("id")) == vendor_filter]
+
+    targets = []
+    for v in vendors:
+        for k in v.get("keys", []):
+            if not k.get("api_key"):
+                continue
+            targets.append((v, k))
+
+    results = {}
+    pending = []
+    for v, k in targets:
+        key_id = str(v.get("id", "")) + ":" + str(k.get("id", ""))
+        cached = get_cached_balance(
+            v.get("provider", ""),
+            v.get("api_url", ""),
+            k.get("api_key", ""),
+            k.get("access_token", ""),
+        )
+        if cached is not None and not force:
+            results[key_id] = cached
+            continue
+        if cached_only:
+            continue
+        pending.append((key_id, v, k))
+
+    if pending and not cached_only:
+        workers = min(8, len(pending))
+        executor = ThreadPoolExecutor(max_workers=workers)
+        try:
+            futures = {
+                executor.submit(get_balance_for_key, v, k, force): key_id
+                for key_id, v, k in pending
+            }
+            try:
+                for fut in as_completed(futures, timeout=max_wait):
+                    key_id = futures[fut]
+                    try:
+                        results[key_id] = fut.result()
+                    except Exception as exc:
+                        results[key_id] = {"error": str(exc)[:200], "available": None}
+            except Exception:
+                pass
+            # Fill in anything that didn't finish in time
+            for key_id, v, k in pending:
+                if key_id not in results:
+                    results[key_id] = {"error": "timeout", "available": None}
+        finally:
+            executor.shutdown(wait=False)
+
+    return jsonify({"balances": results})
+
+
 @app.route("/api/vendors", methods=["POST"])
 def api_create_vendor():
     data = request.get_json()
@@ -685,7 +1113,7 @@ def api_update_vendor(vendor_id):
     allowed = {k: data[k] for k in (
         "name", "provider", "api_url", "endpoint_type",
         "thinking_disabled", "proxy_target", "tags", "checkin_url",
-        "vtype", "archived",
+        "vtype", "archived", "access_token_user_id", "status",
     ) if k in data}
     if "vtype" not in allowed and "type" in data:
         allowed["vtype"] = data["type"]
@@ -693,7 +1121,7 @@ def api_update_vendor(vendor_id):
     if not v:
         return jsonify({"error": "not found"}), 404
     reconcile_all_async()
-    return jsonify(v)
+    return jsonify(_slim_vendor_for_list(v))
 
 
 @app.route("/api/tags", methods=["GET"])
@@ -900,7 +1328,7 @@ def api_create_key(vendor_id):
         health = {"healthy": None, "error": "deferred"}
         threading.Thread(target=reconcile_all, daemon=True).start()
         log_event("key.add", vendor_id=vendor_id, key_id=(k or {}).get("id"), name=(k or {}).get("name"))
-        return jsonify({"key": k, "health": health}), 201
+        return jsonify({"key": _slim_key_for_list(k), "health": health}), 201
 
     health = check_key_health(vendor_id, k["id"])
     v = get_vendor(vendor_id)
@@ -927,7 +1355,7 @@ def api_create_key(vendor_id):
         name=(k or {}).get("name"),
         healthy=bool(health.get("healthy")),
     )
-    return jsonify({"key": k, "health": health}), 201
+    return jsonify({"key": _slim_key_for_list(k), "health": health}), 201
 
 
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>", methods=["PUT"])
@@ -936,7 +1364,7 @@ def api_update_key(vendor_id, key_id):
     allowed = {k: data[k] for k in (
         "name", "api_key", "enabled", "models", "default_model",
         "check_model", "check_models", "sync_models", "disabled_models", "model_health", "endpoint_capabilities", "notes", "role",
-        "archived",
+        "archived", "access_token", "access_token_user_id",
     ) if k in data}
     k = update_key(vendor_id, key_id, **allowed)
     if not k:
@@ -945,7 +1373,7 @@ def api_update_key(vendor_id, key_id):
     # same primary → backup → first-healthy selection as full push. Fire in the
     # background so key edits return immediately instead of blocking the UI.
     reconcile_all_async()
-    return jsonify(k)
+    return jsonify(_slim_key_for_list(k))
 
 
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>", methods=["DELETE"])
@@ -1014,53 +1442,52 @@ def api_check_key_health(vendor_id, key_id):
 
 @app.route("/api/vendors/<vendor_id>/availability", methods=["POST"])
 def api_vendor_availability(vendor_id):
+    """Check a single vendor's network reachability (no auth required)."""
     from core.providers import check_vendor_availability
     from core.data import update_vendor
 
-    vendor = get_vendor(vendor_id)
-    if not vendor:
+    v = get_vendor(vendor_id)
+    if not v:
         return jsonify({"error": "not found"}), 404
-    availability = check_vendor_availability(vendor)
-    update_vendor(
-        vendor_id,
-        availability=availability,
-        availability_checked_at=availability.get("checked_at") or "",
-    )
-    log_event("vendor.availability", vendor_id=vendor_id, reachable=availability.get("reachable"))
-    return jsonify(availability)
+    res = check_vendor_availability(v)
+    update_vendor(vendor_id, availability=res, availability_checked_at=res.get("checked_at") or "")
+    log_event("vendor.availability", vendor_id=vendor_id, reachable=res.get("reachable"))
+    return jsonify(res)
 
 
 @app.route("/api/vendors/availability", methods=["POST"])
 def api_vendors_availability():
+    """Check every vendor's reachability in parallel and persist results.
+
+    Works regardless of check-in support (token / link are irrelevant).
+    """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from core.providers import check_vendor_availability
     from core.data import update_vendor
 
-    vendors = [vendor for vendor in get_vendors() if str(vendor.get("id"))]
+    vendors = [v for v in get_vendors() if str(v.get("id"))]
     results = {}
     if not vendors:
-        return jsonify({"results": results, "reachable": 0, "unreachable": 0, "total": 0})
+        return jsonify({"results": {}, "reachable": 0, "unreachable": 0, "total": 0})
 
+    def _check(v):
+        return str(v.get("id")), check_vendor_availability(v)
+
+    # Keep concurrency modest: bursting many TLS handshakes at once through a
+    # local proxy/VPN triggers spurious SSL EOF errors. check_vendor_availability
+    # also retries transient failures.
     workers = min(6, len(vendors))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(check_vendor_availability, vendor): str(vendor["id"])
-            for vendor in vendors
-        }
-        for future in as_completed(futures):
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(_check, v) for v in vendors]
+        for fut in as_completed(futs):
             try:
-                vendor_id = futures[future]
-                availability = future.result()
-                update_vendor(
-                    vendor_id,
-                    availability=availability,
-                    availability_checked_at=availability.get("checked_at") or "",
-                )
-                results[vendor_id] = availability
+                vid, res = fut.result()
+                update_vendor(vid, availability=res, availability_checked_at=res.get("checked_at") or "")
+                results[vid] = res
             except Exception:
                 continue
 
-    reachable = sum(1 for result in results.values() if result.get("reachable"))
+    reachable = sum(1 for r in results.values() if r.get("reachable"))
     log_event("vendors.availability", total=len(results), reachable=reachable)
     return jsonify({
         "results": results,
@@ -1068,6 +1495,130 @@ def api_vendors_availability():
         "reachable": reachable,
         "unreachable": len(results) - reachable,
     })
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/balance", methods=["GET"])
+def api_key_balance(vendor_id, key_id):
+    """Fetch real-time balance/quota for a specific key from the provider's billing API."""
+    from core.balance import get_balance_for_key, clear_balance_cache
+
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+
+    force = request.args.get("force", "0") in ("1", "true", "yes")
+    if request.args.get("clear_cache") in ("1", "true"):
+        clear_balance_cache()
+    result = get_balance_for_key(v, k, force=force)
+    return jsonify(result)
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/checkin", methods=["POST"])
+def api_key_checkin(vendor_id, key_id):
+    """Perform a daily sign-in on a relay site (New API / One API / sub2api).
+
+    Requires the key to have an ``access_token`` (system token) set.
+    """
+    from core.balance import checkin
+    from core.data import record_checkin
+
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+    result = checkin(v, k)
+
+    import datetime as _dt
+    _now = _dt.datetime.now(_dt.timezone.utc)
+    _today = result.get("checkin_date") or _now.date().isoformat()
+
+    # Normalize the outcome into a persistable status
+    if result.get("claimed"):
+        status = "success"
+    elif result.get("checkin_date"):
+        status = "done"
+    elif result.get("needs_access_token"):
+        status = "no_token"
+    elif result.get("error"):
+        status = "failed"
+    else:
+        status = "unsupported"
+
+    result["status"] = status
+    result["checkin_date"] = _today if status in ("success", "done") else result.get("checkin_date")
+
+    # Persist a rich per-day record (survives restart, auto-resets daily)
+    try:
+        record_checkin(vendor_id, _today, {
+            "status": status,
+            "reward": result.get("quota_awarded"),
+            "error": result.get("error") or "",
+            "ts": _now.isoformat(),
+        })
+    except Exception:
+        log.exception("Failed to record check-in for %s", vendor_id)
+
+    if result.get("claimed"):
+        log_event("key.checkin_claimed", vendor_id=vendor_id, key_id=key_id, quota=result.get("quota_awarded"))
+    return jsonify(result)
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/ratios", methods=["GET"])
+def api_key_ratios(vendor_id, key_id):
+    """Fetch a relay site's model ratios + group ratios (New API /api/pricing)."""
+    from core.balance import fetch_ratios
+
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+    force = request.args.get("force", "0") in ("1", "true", "yes")
+    return jsonify(fetch_ratios(v, k, force=force))
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/checkin-status", methods=["GET"])
+def api_key_checkin_status(vendor_id, key_id):
+    """Query today's check-in status without claiming a reward.
+
+    Returns the same shape as POST /checkin (claimed=False, checkin_date set
+    when already signed in today), so the UI can show a badge.
+    """
+    from core.balance import checkin_status
+
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(checkin_status(v, k))
+
+
+@app.route("/api/vendors/<vendor_id>/keys/<key_id>/consumption", methods=["GET"])
+def api_key_consumption(vendor_id, key_id):
+    """Fetch consumption logs from a relay site's ``/api/log/self``.
+
+    Query params:
+      - days=N  (default 7)
+      - max=N   (default 500)
+    """
+    from core.balance import fetch_consumption_logs
+
+    v = get_vendor(vendor_id)
+    k = get_key(vendor_id, key_id)
+    if not v or not k:
+        return jsonify({"error": "not found"}), 404
+    days = request.args.get("days", "7", type=str)
+    try:
+        days = max(1, min(90, int(days)))
+    except (ValueError, TypeError):
+        days = 7
+    max_entries = request.args.get("max", "500", type=str)
+    try:
+        max_entries = max(10, min(5000, int(max_entries)))
+    except (ValueError, TypeError):
+        max_entries = 500
+    result = fetch_consumption_logs(v, k, days=days, max_entries=max_entries)
+    return jsonify(result)
 
 
 @app.route("/api/vendors/<vendor_id>/keys/<key_id>/opencode-config", methods=["GET"])
@@ -1078,6 +1629,7 @@ def api_key_opencode_config(vendor_id, key_id):
     for built-in providers). One key = one independent provider for OpenCode.
     """
     import re as _re
+    from backends.opencode import OpenCodeAdapter
     from core.data import get_enabled_models
 
     v = get_vendor(vendor_id)
@@ -1085,64 +1637,36 @@ def api_key_opencode_config(vendor_id, key_id):
     if not v or not k:
         return jsonify({"error": "not found"}), 404
 
-    pid = _re.sub(r"[^a-zA-Z0-9._-]+", "-", (v.get("provider") or v.get("name") or "custom")).strip("-").lower() or "custom"
+    # Provider ids follow the OpenCode backend's naming rules:
+    #   base   = slug(vendor name)         (name-first, matches system vendors)
+    #   per-key = <base>-<key-name-slug>   (one provider per key)
+    base_pid = OpenCodeAdapter._provider_id(v)
+    pid = OpenCodeAdapter._key_provider_id(v, k)
+
     api_key = k.get("api_key", "")
     api_url = v.get("proxy_target") or v.get("api_url") or ""
     ep = (v.get("endpoint_type") or "openai").lower()
-
     if (not ep or ep == "openai") and ("/anthropic" in (api_url or "").lower() or "api.anthropic.com" in (api_url or "").lower()):
         ep = "anthropic"
     if ep not in ("anthropic", "google", "gemini"):
         ep = "openai"
 
-    npm = "@ai-sdk/openai-compatible"
-    if ep == "anthropic":
-        npm = "@ai-sdk/anthropic"
-    elif ep in ("google", "gemini"):
-        npm = "@ai-sdk/google"
-
-    base_url = api_url.rstrip("/")
-    if base_url and not _re.search(r"/v\d+$", base_url):
-        base_url += "/v1"
-    if not base_url:
-        base_url = "https://api.openai.com/v1"
+    npm = OpenCodeAdapter._npm_for_endpoint(ep)
+    base_url = OpenCodeAdapter._normalize_base_url(api_url, ep) or "https://api.openai.com/v1"
 
     _BUILTIN = {"openai", "anthropic", "google", "gemini", "deepseek", "openrouter", "groq", "xai", "mistral", "cohere", "together", "fireworks", "perplexity", "azure", "bedrock", "amazon-bedrock", "ollama", "deepinfra", "cerebras", "moonshot", "minimax", "nvidia", "huggingface", "vercel", "opencode", "github-copilot", "gitlab", "baseten", "helicone", "nebius", "venice", "zenmux", "zai", "zhipu"}
-    is_builtin = pid in _BUILTIN
-    is_zen = pid in ("opencode", "opencode-zen", "zen") or "opencode" in pid
     _DEFAULT_HOSTS = {"openai": "api.openai.com", "anthropic": "api.anthropic.com", "deepseek": "api.deepseek.com", "openrouter": "openrouter.ai", "groq": "api.groq.com", "xai": "api.x.ai", "google": "generativelanguage.googleapis.com", "gemini": "generativelanguage.googleapis.com", "opencode": "opencode.ai", "zai": "api.z.ai", "zhipu": "open.bigmodel.cn"}
-    default_host = _DEFAULT_HOSTS.get(pid, "")
+    is_zen = base_pid in ("opencode", "opencode-zen", "zen") or "opencode" in base_pid
+    default_host = _DEFAULT_HOSTS.get(base_pid, "")
     is_default_url = bool(default_host) and default_host in api_url and not v.get("proxy_target")
-    is_custom = not (is_builtin and is_default_url)
-
-    models_dict = {}
-    if is_zen:
-        pass
-    else:
-        enabled = set(get_enabled_models(k))
-        key_models = k.get("models") or []
-        if key_models or enabled:
-            for m in key_models:
-                mid = m["id"] if isinstance(m, dict) else str(m)
-                if not mid:
-                    continue
-                if enabled and mid not in enabled:
-                    continue
-                models_dict[mid] = {"name": mid}
-            if not models_dict:
-                for mid in enabled:
-                    models_dict[str(mid)] = {"name": str(mid)}
-            if not models_dict and k.get("default_model"):
-                dm = str(k["default_model"])
-                if not enabled or dm in enabled:
-                    models_dict[dm] = {"name": dm}
+    is_custom = not (base_pid in _BUILTIN and is_default_url) and not is_zen
 
     auth_entry = {pid: {"type": "api", "key": api_key}}
 
     if not is_custom:
         config_text = json.dumps(auth_entry, indent=2)
-        if not models_dict:
-            config_text = json.dumps(auth_entry, indent=2) + "\n\n// No models configured. Add models manually or run health check."
+        if not get_enabled_models(k) and not (k.get("models") or []):
+            config_text += "\n\n// No models configured. Add models manually or run health check."
         return jsonify({
             "vendor_id": vendor_id,
             "key_id": key_id,
@@ -1153,18 +1677,40 @@ def api_key_opencode_config(vendor_id, key_id):
             "provider_block": None,
         })
 
+    models_dict = {}
+    if not is_zen:
+        enabled = set(get_enabled_models(k))
+        for m in k.get("models") or []:
+            mid = m["id"] if isinstance(m, dict) else str(m)
+            if not mid:
+                continue
+            if enabled and mid not in enabled:
+                continue
+            models_dict[mid] = {"name": mid}
+        if not models_dict:
+            for mid in enabled:
+                models_dict[str(mid)] = {"name": str(mid)}
+        if not models_dict and k.get("default_model"):
+            dm = str(k["default_model"])
+            if not enabled or dm in enabled:
+                models_dict[dm] = {"name": dm}
+
     provider_block = {
         "npm": npm,
-        "name": v.get("name") or pid,
+        "name": v.get("name") or base_pid,
         "options": {
             "baseURL": base_url,
             "apiKey": api_key,
-            "_managed": "ai-switch",
+            "_managed": OpenCodeAdapter.MANAGED_TAG,
         },
         "models": models_dict,
     }
-    full_config = {"$schema": "https://opencode.ai/config.json", "provider": {pid: provider_block}}
-    config_text = json.dumps(full_config, indent=2)
+
+    # Emit only this key's entry — no outer braces, no ``provider`` wrapper, no
+    # ``$schema`` — so it drops straight into the existing ``"provider"`` object
+    # of an opencode.jsonc that already defines other providers.
+    inner = json.dumps({pid: provider_block}, indent=2)
+    config_text = "\n".join(inner.splitlines()[1:-1])  # drop the wrapping { ... }
 
     return jsonify({
         "vendor_id": vendor_id,
@@ -1172,6 +1718,7 @@ def api_key_opencode_config(vendor_id, key_id):
         "provider_id": pid,
         "is_custom": True,
         "config_text": config_text,
+        "provider_snippet": {pid: provider_block},
         "auth_entry": auth_entry,
         "provider_block": provider_block,
     })
@@ -2068,6 +2615,11 @@ def api_sync_push():
         (single-key sync always uses wait mode to guarantee config is written).
       - ``{"model_ids": [...]}`` limits the push to specific models (best-effort,
         only adapters that support per-key model filtering honour it).
+
+    ``vendor_ids`` / ``key_ids`` are currently **promoted to a full reconcile**
+    for safety (see ``backends.normalize_push_scope``): honouring them would let
+    most adapters delete other vendors' entries from the engine config files.
+    When that happens the response carries ``scope_promoted: true``.
     """
     try:
         body = request.get_json(silent=True) or {}
@@ -2086,6 +2638,9 @@ def api_sync_push():
             model_ids = [str(m) for m in model_ids if str(m).strip()] or None
         else:
             model_ids = None
+        # Remember whether the caller asked for a scope: reconcile_all() promotes
+        # scoped pushes to a full reconcile for safety, so report it back.
+        scope_requested = bool(vendor_ids or key_ids)
         wait = bool(body.get("wait")) or request.args.get("wait") in ("1", "true", "yes")
         # Single-key pushes use wait mode to
         # guarantee the backend config file is written before the frontend
@@ -2102,6 +2657,7 @@ def api_sync_push():
                 "ok": 0,
                 "fail": 0,
                 "skipped": 0,
+                "scope_promoted": bool(scope_requested),
             })
         results = reconcile_all(vendor_ids=vendor_ids, key_ids=key_ids, model_ids=model_ids)
         log_event("sync.push", backends=len(results or {}), mode="wait", vendors=len(vendor_ids) if vendor_ids else "all")
@@ -2116,6 +2672,10 @@ def api_sync_push():
             "ok": ok,
             "fail": fail,
             "skipped": skipped,
+            # Scoped pushes are promoted to a full reconcile (see
+            # backends.normalize_push_scope) so no other vendor's entries are
+            # deleted. Tell the caller its scope was widened.
+            "scope_promoted": bool(scope_requested),
         })
     except Exception as e:
         log.exception("push failed")
@@ -2536,6 +3096,7 @@ def api_create_downstream():
         auto_update=bool(data.get("auto_update", True)),
         notes=str(data.get("notes") or ""),
         enabled=bool(data.get("enabled", True)),
+        model_prices=data.get("model_prices"),
     )
     log_event("downstream.create", id=entry.get("id"), name=entry.get("name"))
     # return secret once on create
@@ -2571,6 +3132,7 @@ def api_update_downstream(key_id):
         notes=data.get("notes") if "notes" in data else None,
         endpoint_types=data.get("endpoint_types") if "endpoint_types" in data else None,
         selected_models=data.get("selected_models") if "selected_models" in data else None,
+        model_prices=data.get("model_prices") if "model_prices" in data else None,
         rotate_secret=bool(data.get("rotate_secret")),
         rebuild=bool(data.get("rebuild", True)),
     )
@@ -3244,6 +3806,30 @@ def api_update_settings():
         if bk in data:
             try: data[bk] = max(0, int(float(data[bk])))
             except Exception: data[bk] = 0
+    # ── Outbound notifications ──
+    if "notify_enabled" in data:
+        data["notify_enabled"] = bool(data["notify_enabled"])
+    for nk in ("notify_channel_feishu", "notify_channel_slack", "notify_channel_webhook"):
+        if nk in data:
+            data[nk] = str(data.get(nk) or "").strip()
+    if "notify_quiet_hours" in data:
+        from core.notify import parse_quiet_hours
+        raw = str(data.get("notify_quiet_hours") or "").strip()
+        # Keep only a well-formed window; anything else means "off".
+        data["notify_quiet_hours"] = raw if (not raw or parse_quiet_hours(raw)) else ""
+    if "notify_min_interval_minutes" in data:
+        try:
+            data["notify_min_interval_minutes"] = max(0, min(10080, int(float(data["notify_min_interval_minutes"]))))
+        except Exception:
+            data["notify_min_interval_minutes"] = 60
+    if "notify_events" in data:
+        from core.notify import EVENT_CATALOG
+        raw = data.get("notify_events")
+        if isinstance(raw, str):
+            raw = [x.strip() for x in raw.split(",") if x.strip()]
+        if not isinstance(raw, list):
+            raw = list(EVENT_CATALOG)
+        data["notify_events"] = [str(e) for e in raw if str(e) in EVENT_CATALOG]
     s = update_settings(**data)
     log_event("settings.update", keys=list(data.keys()))
     out = dict(s)
@@ -3332,6 +3918,7 @@ def api_dashboard_overview():
     """Today/month usage + budget status for dashboard."""
     from datetime import datetime, timezone, timedelta
     from core.data import get_usage_records, get_settings
+    from core import budget as _budget
 
     now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
@@ -3361,41 +3948,15 @@ def api_dashboard_overview():
     month_s = _agg(month_start + "T00:00:00", tomorrow + "T23:59:59")
 
     s = get_settings() or {}
-    def _f(key):
-        try:
-            return float(s.get(key) or 0)
-        except Exception:
-            return 0.0
-    def _i(key):
-        try:
-            return int(float(s.get(key) or 0))
-        except Exception:
-            return 0
 
-    budgets = {
-        "daily_cost": _f("budget_daily_cost"),
-        "monthly_cost": _f("budget_monthly_cost"),
-        "daily_tokens": _i("budget_daily_tokens"),
-        "monthly_tokens": _i("budget_monthly_tokens"),
-        "action": str(s.get("budget_action") or "alert").strip() or "alert",
-    }
-    alerts = []
-    if budgets["daily_cost"] > 0 and today_s["total_cost"] >= budgets["daily_cost"]:
-        alerts.append({"type": "daily_cost", "limit": budgets["daily_cost"], "used": today_s["total_cost"], "level": "crit" if today_s["total_cost"] >= budgets["daily_cost"] else "warn"})
-    elif budgets["daily_cost"] > 0 and today_s["total_cost"] >= budgets["daily_cost"] * 0.8:
-        alerts.append({"type": "daily_cost", "limit": budgets["daily_cost"], "used": today_s["total_cost"], "level": "warn"})
-    if budgets["monthly_cost"] > 0 and month_s["total_cost"] >= budgets["monthly_cost"]:
-        alerts.append({"type": "monthly_cost", "limit": budgets["monthly_cost"], "used": month_s["total_cost"], "level": "crit"})
-    elif budgets["monthly_cost"] > 0 and month_s["total_cost"] >= budgets["monthly_cost"] * 0.8:
-        alerts.append({"type": "monthly_cost", "limit": budgets["monthly_cost"], "used": month_s["total_cost"], "level": "warn"})
-    if budgets["daily_tokens"] > 0 and today_s["total_tokens"] >= budgets["daily_tokens"]:
-        alerts.append({"type": "daily_tokens", "limit": budgets["daily_tokens"], "used": today_s["total_tokens"], "level": "crit"})
-    elif budgets["daily_tokens"] > 0 and today_s["total_tokens"] >= budgets["daily_tokens"] * 0.8:
-        alerts.append({"type": "daily_tokens", "limit": budgets["daily_tokens"], "used": today_s["total_tokens"], "level": "warn"})
-    if budgets["monthly_tokens"] > 0 and month_s["total_tokens"] >= budgets["monthly_tokens"]:
-        alerts.append({"type": "monthly_tokens", "limit": budgets["monthly_tokens"], "used": month_s["total_tokens"], "level": "crit"})
-    elif budgets["monthly_tokens"] > 0 and month_s["total_tokens"] >= budgets["monthly_tokens"] * 0.8:
-        alerts.append({"type": "monthly_tokens", "limit": budgets["monthly_tokens"], "used": month_s["total_tokens"], "level": "warn"})
+    budgets = _budget.limits(s)
+    alerts = _budget.evaluate_alerts(today_s, month_s, budgets)
+    # Share the same evaluation with the notification engine; the per-day dedup
+    # key keeps this from repeating while the dashboard is open.
+    try:
+        _budget.notify_alerts(alerts, now=now)
+    except Exception:
+        log.debug("budget notify skipped", exc_info=True)
 
     # Enforce budget action once when any critical alert is present
     enforcement = {"applied": False, "action": budgets["action"], "disabled_keys": 0, "read_only": False}
@@ -3831,16 +4392,36 @@ if __name__ == "__main__":
     import webbrowser
 
     default_port = int(os.environ.get("AI_SWITCH_PORT", "8787"))
+    # Honour AI_SWITCH_HOST so container/non-loopback binds can work; the
+    # default stays loopback-only.
+    host = os.environ.get("AI_SWITCH_HOST", "127.0.0.1")
     port = default_port
     last_err = None
+
+    from core.access import format_access_notice, resolve_access_token
+
+    _access = resolve_access_token(host)
 
     for _ in range(20):
         try:
             url = f"http://127.0.0.1:{port}"
             print(f" AI Switch running at {url}")
+            _notice = format_access_notice(host, port, _access)
+            if _notice:
+                print(_notice)
             threading.Timer(1.5, lambda: webbrowser.open(url)).start()
-            reconcile_all()
-            app.run(host="127.0.0.1", port=port, debug=False, threaded=True, use_reloader=False)
+            # Run the initial backend reconcile in the background so the HTTP
+            # listener is available immediately. Before this change the server
+            # blocked ~1-2 minutes here (syncing 100+ backend providers), which
+            # made every page look "stuck loading".
+            def _startup_reconcile():
+                try:
+                    reconcile_all()
+                    log.info("Startup reconcile finished")
+                except Exception:
+                    log.exception("Startup reconcile failed")
+            threading.Thread(target=_startup_reconcile, name="startup-reconcile", daemon=True).start()
+            app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
             break
         except OSError as e:
             last_err = e

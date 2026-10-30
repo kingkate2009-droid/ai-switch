@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title data-i18n="app.title">{{ t('app.title') }}</title>
-<link rel="stylesheet" href="/static/style.css?v=dashboard-pad-2">
+<link rel="stylesheet" href="/static/style.css?v=modern-2026e">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -12,6 +12,7 @@
 <svg style="display:none">
 <symbol id="ico-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
 <symbol id="ico-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><line x1="10.85" y1="12.15" x2="19" y2="4"/><line x1="18" y1="5" x2="20" y2="7"/><line x1="15" y1="8" x2="17" y2="10"/></symbol>
+<symbol id="ico-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
 <symbol id="ico-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/></symbol>
 <symbol id="ico-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
 <symbol id="ico-sync" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
@@ -36,6 +37,9 @@
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M8 10l4 2 4-2"/></svg>
       <h1 data-i18n="app.title">{{ t('app.title') }}</h1>
       <div class="app-version" id="appVersionLabel">v-</div>
+      <button type="button" class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" title="{{ t('nav.toggleSidebar') }}" aria-label="{{ t('nav.toggleSidebar') }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
     </div>
 
     <nav>
@@ -51,6 +55,10 @@
         <a href="#" class="nav-item" data-view="vendors" onclick="switchView('vendors');return false">
           <svg width="18" height="18"><use href="#ico-key"/></svg>
           <span data-i18n="nav.vendors">{{ t('nav.vendors') }}</span>
+        </a>
+        <a href="#" class="nav-item" data-view="accounts" onclick="switchView('accounts');return false">
+          <svg width="18" height="18"><use href="#ico-users"/></svg>
+          <span data-i18n="nav.accounts">账号管理</span>
         </a>
         <a href="#" class="nav-item" data-view="backends" onclick="switchView('backends');return false">
           <svg width="18" height="18"><use href="#ico-box"/></svg>
@@ -212,6 +220,43 @@
       </div>
     </div>
 
+    <!-- ═══ Accounts ═══ -->
+    <div class="view" id="view-accounts">
+      <div class="page-head">
+        <div class="page-head-main">
+          <h2 data-i18n="nav.accounts">账号管理</h2>
+          <p class="page-desc" data-i18n="accounts.pageDesc">管理 OAuth / 登录态账号（Codex auth.json、Claude Code、Gemini、Grok），支持导入凭据、浏览器授权登录与官方额度查询。</p>
+        </div>
+        <div class="page-actions">
+          <input type="search" id="accountsSearch" class="page-search" data-i18n-placeholder="accounts.searchPh" placeholder="搜索账号、邮箱或类型" oninput="renderAccounts()">
+          <button class="btn" onclick="detectLocalLogins()"><svg width="14" height="14"><use href="#ico-eye"/></svg><span data-i18n="accounts.detectLocal">检测本机登录</span></button>
+          <button class="btn" onclick="showAccountImportModal()"><svg width="14" height="14"><use href="#ico-upload"/></svg><span data-i18n="accounts.importBatch">导入凭据</span></button>
+          <button class="btn" onclick="showAccountLoginModal()"><svg width="14" height="14"><use href="#ico-key"/></svg><span data-i18n="accounts.login">OAuth 登录</span></button>
+          <button class="btn btn-primary" onclick="refreshAllAccountQuota()"><svg width="14" height="14"><use href="#ico-refresh"/></svg><span data-i18n="accounts.refreshQuota">刷新额度</span></button>
+        </div>
+      </div>
+      <div class="page-body">
+        <div class="account-tabs" id="accountsTypeBar" role="tablist" aria-label="{{ t('accounts.colType') }}"></div>
+        <div class="stats-row stats-row-rich" id="accountsStats"></div>
+        <div class="dash-section">
+          <div class="table-wrap">
+            <table class="models-catalog-table accounts-table">
+              <thead><tr>
+                <th data-i18n="accounts.colAccount">账号</th>
+                <th data-i18n="accounts.colType">类型</th>
+                <th data-i18n="accounts.colPlan">计划</th>
+                <th data-i18n="accounts.colQuota">额度（5h / 7d）</th>
+                <th data-i18n="accounts.colToken">令牌</th>
+                <th data-i18n="accounts.colStatus">状态</th>
+                <th data-i18n="accounts.colActions">操作</th>
+              </tr></thead>
+              <tbody id="accountsBody"><tr><td colspan="7" class="todo-empty" data-i18n="common.loading">加载中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ Vendors ═══ -->
     <div class="view" id="view-vendors">
       <div class="page-head">
@@ -348,6 +393,7 @@
                       <th data-i18n="table.status">{{ t('table.status') }}</th>
                       <th data-i18n="table.latency">{{ t('table.latency') }}</th>
                       <th data-i18n="table.models">{{ t('table.models') }}</th>
+                      <th data-i18n="table.balance">{{ t('table.balance') }}</th>
                       <th data-i18n="table.notes">{{ t('table.notes') }}</th>
                       <th data-i18n="table.actions">{{ t('table.actions') }}</th>
                     </tr>
@@ -629,6 +675,7 @@
           <table id="modelsCatalogTable" class="models-catalog-table">
             <colgroup>
               <col class="col-model-name">
+              <col class="col-model-price">
               <col class="col-model-endpoint">
               <col class="col-model-keys">
               <col class="col-model-vendors">
@@ -638,6 +685,7 @@
             <thead>
               <tr>
                 <th data-i18n="models.colModel">{{ t('models.colModel') }}</th>
+                <th data-i18n="models.colPrice">{{ t('models.colPrice') }}</th>
                 <th data-i18n="models.colEndpoint">{{ t('models.colEndpoint') }}</th>
                 <th data-i18n="models.colKeys">{{ t('models.colKeys') }}</th>
                 <th data-i18n="models.colVendors">{{ t('models.colVendors') }}</th>
@@ -646,7 +694,7 @@
               </tr>
             </thead>
             <tbody id="modelsCatalogBody">
-              <tr><td colspan="6" class="todo-empty" data-i18n="common.loading">{{ t('common.loading') }}</td></tr>
+              <tr><td colspan="7" class="todo-empty" data-i18n="common.loading">{{ t('common.loading') }}</td></tr>
             </tbody>
           </table>
         </div>
@@ -675,6 +723,12 @@
             <option value="unchecked" data-i18n="quality.filterUnchecked">{{ t('quality.filterUnchecked') }}</option>
           </select>
           <select id="qualityInspectionVendor" onchange="renderQualityInspection()"><option value="" data-i18n="quality.allVendors">{{ t('quality.allVendors') }}</option></select>
+          <select id="qualityInspectionSort" onchange="renderQualityInspection()">
+            <option value="name" data-i18n="quality.sortName">{{ t('quality.sortName') }}</option>
+            <option value="price_asc" data-i18n="quality.sortPriceAsc">{{ t('quality.sortPriceAsc') }}</option>
+            <option value="price_desc" data-i18n="quality.sortPriceDesc">{{ t('quality.sortPriceDesc') }}</option>
+            <option value="score_desc" data-i18n="quality.sortScoreDesc">{{ t('quality.sortScoreDesc') }}</option>
+          </select>
         </div>
         <div class="quality-inspection-summary" id="qualityInspectionSummary"></div>
         <div class="dash-section">
@@ -793,6 +847,14 @@
             <svg width="14" height="14"><use href="#ico-refresh"/></svg>
             <span data-i18n="gatewayPanel.refresh">{{ t('gatewayPanel.refresh') }}</span>
           </button>
+          <button class="btn" onclick="checkAllVendorAvailability()" id="checkinAvailBtn">
+            <svg width="14" height="14"><use href="#ico-refresh"/></svg>
+            <span data-i18n="checkin.checkAvailability">{{ t('checkin.checkAvailability') }}</span>
+          </button>
+          <button class="btn btn-primary" onclick="checkinAllRelay()" id="checkinAllBtn" style="display:none">
+            <svg width="14" height="14"><use href="#ico-check"/></svg>
+            <span data-i18n="checkin.checkinAll">{{ t('checkin.checkinAll') }}</span>
+          </button>
         </div>
       </div>
       <div class="page-body">
@@ -804,7 +866,8 @@
             </select>
             <select id="checkinSupportFilter" onchange="renderCheckinTable()">
               <option value="all" data-i18n="checkin.filterSupportAll">{{ t('checkin.filterSupportAll') }}</option>
-              <option value="yes" data-i18n="checkin.filterSupportYes">{{ t('checkin.filterSupportYes') }}</option>
+              <option value="token" data-i18n="checkin.filterSupportToken">{{ t('checkin.filterSupportToken') }}</option>
+              <option value="url" data-i18n="checkin.filterSupportUrl">{{ t('checkin.filterSupportUrl') }}</option>
               <option value="no" data-i18n="checkin.filterSupportNo">{{ t('checkin.filterSupportNo') }}</option>
             </select>
             <select id="checkinTypeFilter" onchange="renderCheckinTable()">
@@ -812,6 +875,22 @@
               <option value="public" data-i18n="vendorType.public">{{ t('vendorType.public') }}</option>
               <option value="relay" data-i18n="vendorType.relay">{{ t('vendorType.relay') }}</option>
               <option value="key" data-i18n="vendorType.key">{{ t('vendorType.key') }}</option>
+            </select>
+            <label class="checkin-hide-done" title="{{ t('checkin.hideDoneHint') }}">
+              <input type="checkbox" id="checkinHideDone" onchange="renderCheckinTable()">
+              <span data-i18n="checkin.hideDone">{{ t('checkin.hideDone') }}</span>
+            </label>
+            <select id="checkinAvailFilter" onchange="renderCheckinTable()">
+              <option value="all" data-i18n="checkin.filterAvailAll">{{ t('checkin.filterAvailAll') }}</option>
+              <option value="yes" data-i18n="checkin.filterAvailYes">{{ t('checkin.filterAvailYes') }}</option>
+              <option value="no" data-i18n="checkin.filterAvailNo">{{ t('checkin.filterAvailNo') }}</option>
+            </select>
+            <select id="checkinStatusFilter" onchange="renderCheckinTable()">
+              <option value="" data-i18n="checkin.filterStatusAll">{{ t('checkin.filterStatusAll') }}</option>
+              <option value="normal" data-i18n="vendorStatus.normal">{{ t('vendorStatus.normal') }}</option>
+              <option value="registrable" data-i18n="vendorStatus.registrable">{{ t('vendorStatus.registrable') }}</option>
+              <option value="unreachable" data-i18n="vendorStatus.unreachable">{{ t('vendorStatus.unreachable') }}</option>
+              <option value="banned" data-i18n="vendorStatus.banned">{{ t('vendorStatus.banned') }}</option>
             </select>
           </div>
           <div class="key-toolbar-right">
@@ -823,8 +902,8 @@
             <thead>
               <tr>
                 <th data-i18n="checkin.colVendor">{{ t('checkin.colVendor') }}</th>
-                <th data-i18n="checkin.colSupport">{{ t('checkin.colSupport') }}</th>
-                <th data-i18n="checkin.colUrl">{{ t('checkin.colUrl') }}</th>
+                <th data-i18n="table.balance">{{ t('table.balance') }}</th>
+                <th data-i18n="checkin.colStatus">{{ t('checkin.colStatus') }}</th>
                 <th data-i18n="table.actions">{{ t('table.actions') }}</th>
               </tr>
             </thead>
@@ -1155,6 +1234,49 @@
           </div>
         </div>
         <div class="settings-card">
+          <h3 data-i18n="settings.notifyTitle">{{ t('settings.notifyTitle') }}</h3>
+          <p class="form-hint" data-i18n="settings.notifyHint">{{ t('settings.notifyHint') }}</p>
+          <label class="checkbox-label" style="margin:0 0 12px;display:flex">
+            <input type="checkbox" id="setNotifyEnabled" onchange="onSettingsDirty()">
+            <span data-i18n="settings.notifyEnable">{{ t('settings.notifyEnable') }}</span>
+          </label>
+          <div class="form-group">
+            <label data-i18n="settings.notifyFeishu">{{ t('settings.notifyFeishu') }}</label>
+            <input type="text" id="setNotifyFeishu" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" autocomplete="off" oninput="onSettingsDirty()">
+          </div>
+          <div class="form-group">
+            <label data-i18n="settings.notifySlack">{{ t('settings.notifySlack') }}</label>
+            <input type="text" id="setNotifySlack" placeholder="https://hooks.slack.com/services/…" autocomplete="off" oninput="onSettingsDirty()">
+          </div>
+          <div class="form-group">
+            <label data-i18n="settings.notifyWebhook">{{ t('settings.notifyWebhook') }}</label>
+            <input type="text" id="setNotifyWebhook" placeholder="https://example.com/hook" autocomplete="off" oninput="onSettingsDirty()">
+            <p class="form-hint" data-i18n="settings.notifyWebhookHint">{{ t('settings.notifyWebhookHint') }}</p>
+          </div>
+          <div class="form-group">
+            <label data-i18n="settings.notifyEvents">{{ t('settings.notifyEvents') }}</label>
+            <div id="notifyEventsList" class="checkbox-list"></div>
+          </div>
+          <div class="settings-grid-2">
+            <div class="form-group">
+              <label data-i18n="settings.notifyQuietHours">{{ t('settings.notifyQuietHours') }}</label>
+              <input type="text" id="setNotifyQuietHours" placeholder="23:00-08:00" oninput="onSettingsDirty()">
+              <p class="form-hint" data-i18n="settings.notifyQuietHoursHint">{{ t('settings.notifyQuietHoursHint') }}</p>
+            </div>
+            <div class="form-group">
+              <label data-i18n="settings.notifyInterval">{{ t('settings.notifyInterval') }}</label>
+              <input type="number" id="setNotifyInterval" min="0" step="5" value="60" oninput="onSettingsDirty()">
+              <p class="form-hint" data-i18n="settings.notifyIntervalHint">{{ t('settings.notifyIntervalHint') }}</p>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="btn btn-sm" onclick="sendNotifyTest()" data-i18n="settings.notifyTest">{{ t('settings.notifyTest') }}</button>
+            <span class="form-hint" id="notifyTestStatus"></span>
+          </div>
+          <h4 class="settings-subtitle" data-i18n="settings.notifyHistory">{{ t('settings.notifyHistory') }}</h4>
+          <div id="notifyHistoryList" class="todo-empty">—</div>
+        </div>
+        <div class="settings-card">
           <h3 data-i18n="settings.pricingTitle">{{ t('settings.pricingTitle') }}</h3>
           <p class="form-hint" data-i18n="settings.pricingHint">{{ t('settings.pricingHint') }}</p>
           <div class="form-group">
@@ -1287,6 +1409,15 @@
         </select>
       </div>
       <div class="form-group">
+        <label for="vendorStatus" data-i18n="vendorModal.status">{{ t('vendorModal.status') }}</label>
+        <select id="vendorStatus">
+          <option value="normal" data-i18n="vendorStatus.normal">{{ t('vendorStatus.normal') }}</option>
+          <option value="registrable" data-i18n="vendorStatus.registrable">{{ t('vendorStatus.registrable') }}</option>
+          <option value="unreachable" data-i18n="vendorStatus.unreachable">{{ t('vendorStatus.unreachable') }}</option>
+          <option value="banned" data-i18n="vendorStatus.banned">{{ t('vendorStatus.banned') }}</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label for="vendorProviderSelect" data-i18n="vendorModal.provider">{{ t('vendorModal.provider') }}</label>
         <select id="vendorProviderSelect" onchange="onProviderSelectChange()">
           <option value="" data-i18n="vendorModal.selectProvider">{{ t('vendorModal.selectProvider') }}</option>
@@ -1331,6 +1462,15 @@
         <input type="text" id="vendorCheckinUrl" class="input-url-wide" data-i18n-placeholder="vendorModal.checkinUrlPh" placeholder="{{ t('vendorModal.checkinUrlPh') }}">
         <p class="form-hint" data-i18n="vendorModal.checkinUrlHint">{{ t('vendorModal.checkinUrlHint') }}</p>
       </div>
+      <div class="form-group form-group-wide" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+        <label data-i18n="vendorModal.accountSection">{{ t('vendorModal.accountSection') }}</label>
+        <p class="form-hint" data-i18n="vendorModal.accountSectionHint">{{ t('vendorModal.accountSectionHint') }}</p>
+      </div>
+      <div class="form-group">
+        <label for="vendorAccessUserId" data-i18n="keyModal.balanceUserId">{{ t('keyModal.balanceUserId') }}</label>
+        <input type="text" id="vendorAccessUserId" data-i18n-placeholder="keyModal.balanceUserIdPh" placeholder="{{ t('keyModal.balanceUserIdPh') }}">
+        <p class="form-hint" data-i18n="keyModal.balanceUserIdHint">{{ t('keyModal.balanceUserIdHint') }}</p>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeVendorModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
@@ -1363,6 +1503,17 @@
       <div class="form-group">
         <label for="keyNotes" data-i18n="keyModal.notes">{{ t('keyModal.notes') }}</label>
         <input type="text" id="keyNotes" data-i18n-placeholder="keyModal.notesPh" placeholder="{{ t('keyModal.notesPh') }}">
+      </div>
+      <div class="form-group">
+        <label for="keyBalanceToken" data-i18n="keyModal.balanceToken">{{ t('keyModal.balanceToken') }}</label>
+        <div class="input-group">
+          <input type="password" id="keyBalanceToken" data-i18n-placeholder="keyModal.balanceTokenPh" placeholder="{{ t('keyModal.balanceTokenPh') }}">
+          <button class="btn-toggle" id="toggleBalanceTokenBtn" onclick="toggleBalanceTokenVisibility()">
+            <svg width="14" height="14"><use href="#ico-eye"/></svg>
+          </button>
+        </div>
+        <p class="form-hint" data-i18n="keyModal.balanceTokenHint">{{ t('keyModal.balanceTokenHint') }}</p>
+        <span id="keyBalanceTokenStatus" class="form-hint" style="display:none"></span>
       </div>
       <div class="form-group">
         <label for="keyRole" data-i18n="keyModal.role">{{ t('keyModal.role') }}</label>
@@ -1686,6 +1837,43 @@ async function loadQualityInspection() {
     if (names[old]) vendorSelect.value = old;
   }
   renderQualityInspection();
+  // Lazily enrich visible vendors with ratio data (group ratio + model ratio)
+  var seen = {};
+  _qualityInspectionRows.forEach(function(row) {
+    if (seen[row.vendor_id] || _vendorRatiosCache[row.vendor_id]) return;
+    seen[row.vendor_id] = true;
+    loadVendorRatios(row.vendor_id, row.key_id);
+  });
+}
+
+var _vendorRatiosCache = {};
+var _vendorRatiosPending = {};
+
+async function loadVendorRatios(vendorId, keyId) {
+  if (!vendorId || !keyId || _vendorRatiosPending[vendorId] || _vendorRatiosCache[vendorId]) return;
+  _vendorRatiosPending[vendorId] = true;
+  try {
+    var res = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/ratios');
+    if (!res.error && res.group_ratio) {
+      _vendorRatiosCache[vendorId] = res;
+      renderQualityInspection();
+    }
+  } catch (e) {}
+  _vendorRatiosPending[vendorId] = false;
+}
+
+function _ratioBadge(vendorId, model) {
+  var cache = _vendorRatiosCache[vendorId];
+  if (!cache) return '';
+  var out = [];
+  var g = String(cache.user_group || 'default');
+  if (cache.group_ratio && cache.group_ratio[g] != null) {
+    out.push('<span class="ratio-badge ratio-group" title="' + esc(_('quality.groupRatioHint') || 'Group ratio') + ': ' + esc(g) + '">×' + Number(cache.group_ratio[g]).toFixed(2) + '<small>' + esc(g) + '</small></span>');
+  }
+  if (model && cache.model_ratio && cache.model_ratio[model] != null) {
+    out.push('<span class="ratio-badge ratio-model" title="' + esc(_('quality.modelRatioHint') || 'Model ratio') + '">⇄' + Number(cache.model_ratio[model]).toFixed(2) + '</span>');
+  }
+  return out.join(' ');
 }
 
 function renderQualityInspection() {
@@ -1694,6 +1882,21 @@ function renderQualityInspection() {
   var q = String(($('qualityInspectionSearch') || {}).value || '').trim().toLowerCase();
   var state = String(($('qualityInspectionStatus') || {}).value || 'all');
   var vendorId = String(($('qualityInspectionVendor') || {}).value || '');
+  var sortMode = String(($('qualityInspectionSort') || {}).value || 'name');
+  function sortModels(list) {
+    var arr = list.slice();
+    if (sortMode === 'price_asc') arr.sort(function(a, b) { return (Number((a.price || {}).blended) || 1e9) - (Number((b.price || {}).blended) || 1e9); });
+    else if (sortMode === 'price_desc') arr.sort(function(a, b) { return (Number((b.price || {}).blended) || -1) - (Number((a.price || {}).blended) || -1); });
+    else if (sortMode === 'score_desc') arr.sort(function(a, b) { return (Number(b.quality && b.quality.score) || -1) - (Number(a.quality && a.quality.score) || -1); });
+    else arr.sort(function(a, b) { return String(a.model).localeCompare(String(b.model)); });
+    return arr;
+  }
+  function priceLabel(row) {
+    var p = row.price || {};
+    if (!p.blended) return '';
+    var cls = p.blended >= 8 ? 'price-high' : (p.blended >= 3 ? 'price-mid' : 'price-low');
+    return '<span class="model-price-tag ' + cls + '" title="input $' + (p.input||0) + ' / output $' + (p.output||0) + ' per 1M' + (p.known ? '' : ' (estimated)') + '">$' + (p.blended < 0.01 ? p.blended.toFixed(4) : p.blended.toFixed(2)) + '/M</span>';
+  }
   var locations = (_qualityInspectionRows || []).filter(function(row) {
     if (state === 'checked' && !row.quality_checked) return false;
     if (state === 'unchecked' && row.quality_checked) return false;
@@ -1712,19 +1915,22 @@ function renderQualityInspection() {
   body.innerHTML = Object.keys(byVendor).sort(function(a, b) {
     return String(byVendor[a][0].vendor_name).localeCompare(String(byVendor[b][0].vendor_name));
   }).map(function(vendorKey) {
-    var rows = byVendor[vendorKey].slice().sort(function(a, b) { return String(a.model).localeCompare(String(b.model)); });
+    var rows = sortModels(byVendor[vendorKey]);
     var vendor = rows[0];
     var checkedRows = rows.filter(function(row) { return row.quality_checked; });
     var scores = checkedRows.map(function(row) { return Number(row.quality && row.quality.score); }).filter(Number.isFinite);
     var average = scores.length ? Math.round(scores.reduce(function(total, score) { return total + score; }, 0) / scores.length) : null;
+    // Price range across this vendor's models
+    var blends = rows.map(function(row) { return Number((row.price || {}).blended); }).filter(function(v) { return Number.isFinite(v) && v > 0; });
+    var priceRange = blends.length ? ('$' + Math.min.apply(null, blends).toFixed(2) + '~$' + Math.max.apply(null, blends).toFixed(2) + '/M') : '';
     var statusClass = !checkedRows.length ? 'quality-status-unchecked' : (average >= 75 ? 'quality-status-good' : 'quality-status-poor');
     var statusText = !checkedRows.length ? (_('quality.unchecked') || 'Not checked') : (checkedRows.length + '/' + rows.length + ' · ' + (_('quality.checked') || 'Checked'));
     var expanded = !!_qualityExpandedVendors[vendorKey];
     var vendorTargetIndex = _qualityInspectionRows.indexOf(vendor);
     var html = '<tr class="quality-vendor-row' + (expanded ? ' expanded' : '') + '" onclick="toggleQualityVendor(' + vendorTargetIndex + ')">' +
       '<td><span class="quality-vendor-toggle" aria-hidden="true">›</span><strong>' + esc(vendor.vendor_name) + '</strong>' + (vendor.official ? ' <span class="official-badge">' + esc(_('vendor.official') || 'Official') + '</span>' : '') + '</td>' +
-      '<td><span class="quality-status-pill ' + statusClass + '">' + esc(statusText) + '</span>' + (average == null ? '' : '<span class="quality-model-average">' + average + '</span>') + '</td>' +
-      '<td class="quality-model-count">' + rows.length + ' ' + esc(_('quality.models') || 'models') + '</td>' +
+      '<td><span class="quality-status-pill ' + statusClass + '">' + esc(statusText) + '</span>' + (average == null ? '' : '<span class="quality-model-average">' + average + '</span>') + ' ' + _ratioBadge(vendorKey, null) + '</td>' +
+      '<td class="quality-model-count">' + rows.length + ' ' + esc(_('quality.models') || 'models') + (priceRange ? '<div class="model-price-range" title="' + esc(_('quality.priceRange') || 'Price range') + '">' + priceRange + '</div>' : '') + '</td>' +
       '<td><button class="btn btn-sm" type="button" onclick="event.stopPropagation();runVendorQualityInspection(' + vendorTargetIndex + ')">' + esc(checkedRows.length === rows.length ? (_('quality.rerunVendor') || 'Rerun vendor') : (_('quality.runVendor') || 'Check vendor')) + '</button></td>' +
     '</tr>';
     if (!expanded) return html;
@@ -1733,10 +1939,18 @@ function renderQualityInspection() {
       var targetIndex = _qualityInspectionRows.indexOf(row);
       var modelStatusClass = !row.quality_checked ? 'quality-status-unchecked' : (score >= 75 ? 'quality-status-good' : 'quality-status-poor');
       var modelStatusText = !row.quality_checked ? (_('quality.unchecked') || 'Not checked') : (score >= 75 ? (_('quality.checked') || 'Checked') : (_('quality.lowQuality') || 'Low quality'));
+      var q = row.quality || {};
+      var breakdown = row.quality_checked
+        ? ((_('quality.scBreakdown') || 'Accuracy {acc}/60 · Latency {lat}/15 · Identity {idn}/10 · Price {prc}/15')
+            .replace('{acc}', q.accuracy_score != null ? q.accuracy_score : '-')
+            .replace('{lat}', q.latency_score != null ? q.latency_score : '-')
+            .replace('{idn}', q.identity_score != null ? q.identity_score : '-')
+            .replace('{prc}', q.price_score != null ? q.price_score : '-'))
+        : '';
       return '<tr class="quality-model-row">' +
-        '<td><span class="quality-model-branch">└</span><code title="' + esc(row.model) + '">' + esc(row.model) + '</code></td>' +
+        '<td><span class="quality-model-branch">└</span><code title="' + esc(row.model) + '">' + esc(row.model) + '</code>' + priceLabel(row) + ' ' + _ratioBadge(row.vendor_id, row.model) + '</td>' +
         '<td><span class="quality-status-pill ' + modelStatusClass + '">' + esc(modelStatusText) + '</span></td>' +
-        '<td>' + (score == null ? '—' : '<strong class="quality-table-score">' + score + '</strong>') + (row.model_syncable ? '' : ' <span class="model-sync-state">' + esc(_('models.notSyncable') || 'Endpoint not verified') + '</span>') + '</td>' +
+        '<td>' + (score == null ? '—' : '<strong class="quality-table-score" title="' + esc(breakdown) + '">' + score + '</strong>') + (row.model_syncable ? '' : ' <span class="model-sync-state">' + esc(_('models.notSyncable') || 'Endpoint not verified') + '</span>') + '</td>' +
         '<td><button class="btn btn-sm" type="button" onclick="runQualityInspectionTarget(' + targetIndex + ')">' + esc(row.quality_checked ? (_('quality.rerun') || 'Rerun') : (_('quality.runOne') || 'Evaluate')) + '</button></td>' +
       '</tr>';
     }).join('');
@@ -1838,7 +2052,7 @@ function filterModelsCatalog() {
     });
   }
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6" class="todo-empty">' + esc(_('models.empty') || 'No models yet') + '</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="todo-empty">' + esc(_('models.empty') || 'No models yet') + '</td></tr>';
     return;
   }
   body.innerHTML = '';
@@ -1861,8 +2075,15 @@ function filterModelsCatalog() {
       if (!seenEp[lab]) { seenEp[lab] = 1; epLabels.push(lab); }
     });
     if (!epLabels.length && m.modality) epLabels = [(_('models.modality.' + m.modality) || m.modality)];
+    var priceCell = (function() {
+      var p = m.price;
+      if (!p || !p.blended) return '<span class="muted">—</span>';
+      var cls = p.blended >= 8 ? 'price-high' : (p.blended >= 3 ? 'price-mid' : 'price-low');
+      return '<span class="model-price-tag ' + cls + '" title="input $' + (p.input||0) + ' / output $' + (p.output||0) + ' per 1M' + (p.known ? '' : ' (estimated)') + '">$' + (p.blended < 0.01 ? p.blended.toFixed(4) : p.blended.toFixed(2)) + '/M</span>';
+    })();
     tr.innerHTML =
       '<td class="models-name-cell"><code title="' + esc(m.model) + '">' + esc(m.model) + '</code></td>' +
+      '<td class="models-price-cell">' + priceCell + '</td>' +
       '<td class="models-ep-cell"><span class="form-hint" title="' + esc((m.endpoints || []).join(', ')) + '">' + esc(epLabels.join(', ') || '—') + '</span></td>' +
       '<td class="num-cell">' + (m.key_count || 0) + '</td>' +
       '<td class="num-cell">' + (m.vendor_count || 0) + '</td>' +
@@ -1882,6 +2103,312 @@ function openModelLocation(vendorId, keyId) {
       } catch (e) {}
     }
   });
+}
+
+var _accountsData = [];
+var _accountsMeta = [];
+var _accountsType = '';
+var _accountLoginPoll = null;
+
+async function refreshAccounts() {
+  var body = document.getElementById('accountsBody');
+  if (!body) return;
+  body.innerHTML = '<tr><td colspan="7" class="todo-empty">' + esc(_('common.loading') || 'Loading...') + '</td></tr>';
+  var data = await api('/api/accounts');
+  if (data.error) {
+    body.innerHTML = '<tr><td colspan="7" class="todo-empty">' + esc(data.error) + '</td></tr>';
+    return;
+  }
+  _accountsData = data.accounts || [];
+  _accountsMeta = data.providers || [];
+  var stats = data.stats || {};
+  renderAccountTabs();
+  updateAccountsTabs(stats);
+  var statsEl = document.getElementById('accountsStats');
+  if (statsEl) {
+    statsEl.innerHTML =
+      '<div class="stat-card success"><div class="stat-value">' + (stats.active || 0) + '</div><div class="stat-label">' + esc(_('accounts.active') || '启用') + '</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + (stats.total || 0) + '</div><div class="stat-label">' + esc(_('accounts.total') || '全部账号') + '</div></div>';
+  }
+  renderAccounts();
+}
+
+// Type tabs are built from the adapter registry, so a newly supported tool
+// shows up without touching this file.
+function renderAccountTabs() {
+  var bar = document.getElementById('accountsTypeBar');
+  if (!bar) return;
+  var html = '<button type="button" class="account-tab' + (_accountsType ? '' : ' active') +
+    '" data-account-type="" onclick="setAccountsType(\'\')"><span>' + esc(_('accounts.allTypes') || '全部类型') +
+    '</span><span class="account-tab-count" data-count="all">0</span></button>';
+  _accountsMeta.forEach(function(m) {
+    var p = m.provider || '';
+    if (!p) return;
+    html += '<button type="button" class="account-tab' + (_accountsType === p ? ' active' : '') +
+      '" data-account-type="' + esc(p) + '" onclick="setAccountsType(\'' + esc(p) + '\')"><span>' +
+      esc(m.label || p) + '</span><span class="account-tab-count" data-count="' + esc(p) + '">0</span></button>';
+  });
+  bar.innerHTML = html;
+}
+
+// Category filter shown as horizontal tabs. Counts mirror the per-type totals.
+function updateAccountsTabs(stats) {
+  var bar = document.getElementById('accountsTypeBar');
+  if (!bar) return;
+  var by = (stats && stats.by_provider) || {};
+  bar.querySelectorAll('.account-tab').forEach(function(btn) {
+    var type = btn.getAttribute('data-account-type') || '';
+    var count = type ? (by[type] || 0) : (stats && stats.total) || 0;
+    var badge = btn.querySelector('.account-tab-count');
+    if (badge) badge.textContent = count;
+    btn.classList.toggle('empty', !count);
+  });
+}
+
+function setAccountsType(type) {
+  _accountsType = (type || '').trim();
+  var bar = document.getElementById('accountsTypeBar');
+  if (bar) {
+    bar.querySelectorAll('.account-tab').forEach(function(btn) {
+      btn.classList.toggle('active', (btn.getAttribute('data-account-type') || '') === _accountsType);
+    });
+  }
+  renderAccounts();
+}
+
+function _quotaCell(q) {
+  if (!q) return '<span class="muted">' + esc(_('accounts.unchecked') || '未查询') + '</span>';
+  if (q.status === 'unsupported') return '<span class="muted">' + esc(_('accounts.quotaUnsupported') || '无官方额度') + '</span>';
+  if (q.status === 'error') return '<span class="status-bad" title="' + esc(q.lastError || '') + '">' + esc(_('accounts.quotaError') || '查询失败') + '</span>';
+  var w = q.windows || {};
+  function one(node) {
+    if (!node || node.supported === false) return '—';
+    if (node.remaining == null) return '—';
+    return Number(node.remaining).toFixed(0) + '%';
+  }
+  return '<strong>' + one(w.fiveHour) + ' / ' + one(w.sevenDay) + '</strong>' +
+    (q.lastSyncAt ? '<div class="account-provider">' + esc(String(q.lastSyncAt).slice(5, 16).replace('T', ' ')) + '</div>' : '');
+}
+
+function renderAccounts() {
+  var body = document.getElementById('accountsBody');
+  if (!body) return;
+  var query = ((document.getElementById('accountsSearch') || {}).value || '').trim().toLowerCase();
+  var type = _accountsType;
+  var rows = _accountsData.filter(function(item) {
+    var haystack = [item.label, item.email, item.provider, item.provider_label, item.account_id, item.project_id].join(' ').toLowerCase();
+    return (!query || haystack.indexOf(query) >= 0) && (!type || item.provider === type);
+  });
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="7" class="todo-empty">' + esc(_('accounts.empty') || '暂无账号，点击「导入凭据」或「OAuth 登录」添加') + '</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(function(item) {
+    var id = esc(String(item.id));
+    var tokenState = item.expiry_state === 'expired' ? '<span class="status-bad">' + esc(_('accounts.expired') || '已过期') + '</span>'
+      : item.expiry_state === 'expiring' ? '<span class="muted">' + esc(_('accounts.expiring') || '即将过期') + '</span>'
+      : item.expiry_state === 'valid' ? '<span class="status-ok">' + esc(_('accounts.valid') || '有效') + '</span>'
+      : '<span class="muted">—</span>';
+    var status = (item.status === 'disabled') ? '<span class="status-bad">' + esc(_('badge.disabled')) + '</span>'
+      : '<span class="status-ok">' + esc(_('accounts.enabled') || '启用') + '</span>';
+    var meta = _accountsMeta.filter(function(m) { return m.provider === item.provider; })[0] || {};
+    var switchBtn = meta.supports_switch
+      ? '<button class="btn btn-sm btn-primary" onclick="activateAccount(\'' + id + '\')">' + esc(_('accounts.activate') || '切换') + '</button>'
+      : '<button class="btn btn-sm" disabled title="' + esc(meta.install_hint || _('accounts.noSwitch') || '该类型暂不支持写入切换') + '">' + esc(_('accounts.activate') || '切换') + '</button>';
+    return '<tr>' +
+      '<td><strong>' + esc(item.label || item.email || item.provider) + '</strong>' +
+        (item.email && item.email !== item.label ? '<div class="account-provider">' + esc(item.email) + '</div>' : '') +
+        '<div class="account-key-mask">' + esc(item.token_preview || '') + '</div></td>' +
+      '<td><span class="account-type account-type-' + esc(item.provider) + '">' + esc(item.provider_label || item.provider) + '</span></td>' +
+      '<td>' + esc(item.plan_type || '—') + '</td>' +
+      '<td>' + _quotaCell(item.quota) + '</td>' +
+      '<td>' + tokenState + (item.can_refresh ? '' : '<div class="account-provider">' + esc(_('accounts.noRefresh') || '不可刷新') + '</div>') + '</td>' +
+      '<td>' + status + '</td>' +
+      '<td class="accounts-actions">' +
+        switchBtn +
+        '<button class="btn btn-sm" onclick="refreshAccountQuota(\'' + id + '\')">' + esc(_('accounts.refresh') || '刷新') + '</button>' +
+        '<button class="btn btn-sm btn-danger" onclick="deleteAccount(\'' + id + '\')">' + esc(_('action.delete') || '删除') + '</button>' +
+      '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function refreshAccountQuota(id) {
+  var res = await api('/api/accounts/' + encodeURIComponent(id) + '/quota', { method: 'POST' });
+  if (res.error) showToast(res.error, 'error');
+  else { showToast(_('accounts.refreshDone') || '额度已刷新', 'success'); refreshAccounts(); }
+}
+
+async function activateAccount(id) {
+  var item = _accountsData.filter(function(a) { return String(a.id) === String(id); })[0] || {};
+  var label = item.label || item.email || item.provider || '';
+  if (!confirm((_('accounts.confirmActivate') || '切换后，本机工具将改用该账号登录（原凭据会先备份）。继续？') + '\n\n' + label)) return;
+  var res = await api('/api/accounts/' + encodeURIComponent(id) + '/activate', { method: 'POST' });
+  if (res.error) return showToast(res.error, 'error');
+  var where = (res.result && res.result.target) ? res.result.target : '';
+  showToast((_('accounts.activated') || '已切换') + (where ? ': ' + where : ''), 'success');
+  refreshAccounts();
+}
+
+async function detectLocalLogins() {
+  showToast(_('accounts.detecting') || '正在检测本机登录...', 'info');
+  var res = await api('/api/accounts/detect', { method: 'POST', body: JSON.stringify({}) });
+  if (res.error) return showToast(res.error, 'error');
+  var found = [];
+  Object.keys(res.detected || {}).forEach(function(k) {
+    var d = res.detected[k];
+    if (d && d.logged_in) found.push((d.label || k) + (d.email ? ' · ' + d.email : ''));
+  });
+  if (!found.length) return showToast(_('accounts.detectNone') || '未检测到本机已登录的账号', 'info');
+  showToast((_('accounts.detected') || '本机已登录') + ': ' + found.join(' | '), 'success');
+}
+
+async function refreshAllAccountQuota() {
+  if (!_accountsData.length) return showToast(_('accounts.empty') || '暂无账号', 'error');
+  showToast(_('accounts.refreshing') || '正在刷新额度...', 'info');
+  var res = await api('/api/accounts/quota/refresh', { method: 'POST' });
+  if (res.error) showToast(res.error, 'error');
+  else { showToast(_('accounts.refreshDone') || '额度刷新完成', 'success'); refreshAccounts(); }
+}
+
+async function deleteAccount(id) {
+  if (!confirm(_('accounts.confirmDelete') || '确定删除该账号？')) return;
+  var res = await api('/api/accounts/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (res.error) showToast(res.error, 'error');
+  else { showToast(_('accounts.deleted') || '已删除', 'success'); refreshAccounts(); }
+}
+
+function _accountProviderOptions() {
+  var html = '<option value="">' + esc(_('accounts.autoDetect') || '自动识别') + '</option>';
+  var seen = {};
+  (_accountsMeta || []).forEach(function(m) {
+    if (!m.provider || seen[m.provider]) return;
+    seen[m.provider] = 1;
+    html += '<option value="' + esc(m.provider) + '">' + esc(m.label || m.provider) + '</option>';
+  });
+  if (!Object.keys(seen).length) {
+    html += '<option value="codex">Codex</option><option value="claude">Claude</option>' +
+      '<option value="gemini">Gemini</option><option value="grok">Grok</option>';
+  }
+  return html;
+}
+
+// ── import modal ──
+function showAccountImportModal() {
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay open';
+  overlay.id = 'accountImportModal';
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML =
+    '<div class="modal" onclick="event.stopPropagation()">' +
+    '<div class="modal-header"><h3>' + esc(_('accounts.importTitle') || '导入账号凭据') + '</h3>' +
+    '<button class="btn-close" onclick="document.getElementById(\'accountImportModal\').remove()">&times;</button></div>' +
+    '<div class="modal-body">' +
+    '<p class="form-hint">' + esc(_('accounts.importHint') || '粘贴 Codex auth.json、Claude 凭据、Gemini oauth_creds.json、Grok SSO 或裸 token，可一次多条。') + '</p>' +
+    '<div class="form-group"><label>' + esc(_('accounts.provider') || '类型') + '</label>' +
+    '<select id="accountImportProvider">' + _accountProviderOptions() + '</select></div>' +
+    '<div class="form-group"><textarea id="accountImportText" rows="10" style="width:100%;font-family:monospace" placeholder="{&quot;tokens&quot;: { ... }}"></textarea></div>' +
+    '<div id="accountImportPreview" class="account-import-preview"></div>' +
+    '</div>' +
+    '<div class="modal-footer">' +
+    '<button class="btn" onclick="previewAccountImport()">' + esc(_('accounts.preview') || '预览') + '</button>' +
+    '<button class="btn btn-primary" onclick="submitAccountImport()">' + esc(_('accounts.doImport') || '导入') + '</button>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+}
+
+function _accountImportPayload() {
+  return {
+    text: (document.getElementById('accountImportText') || {}).value || '',
+    provider: (document.getElementById('accountImportProvider') || {}).value || '',
+  };
+}
+
+async function previewAccountImport() {
+  var box = document.getElementById('accountImportPreview');
+  var res = await api('/api/accounts/parse', { method: 'POST', body: JSON.stringify(_accountImportPayload()) });
+  if (res.error) { box.innerHTML = '<div class="status-bad">' + esc(res.error) + '</div>'; return; }
+  var html = '<div class="form-hint">' + esc((_('accounts.detected') || '识别到') + ' ' + (res.count || 0) + ' ' + (_('accounts.items') || '条')) + '</div>';
+  (res.items || []).forEach(function(it) {
+    html += '<div class="account-import-item"><span class="account-type account-type-' + esc(it.provider) + '">' + esc(it.provider) + '</span> ' +
+      esc(it.label || it.email || '') + (it.has_refresh_token ? ' <span class="status-ok">↻</span>' : '') + '</div>';
+  });
+  (res.errors || []).forEach(function(e) {
+    html += '<div class="account-import-item status-bad">' + esc(e.source_name || '') + ': ' + esc(e.error || '') + '</div>';
+  });
+  box.innerHTML = html;
+}
+
+async function submitAccountImport() {
+  var res = await api('/api/accounts/import', { method: 'POST', body: JSON.stringify(_accountImportPayload()) });
+  if (res.error) return showToast(res.error, 'error');
+  var el = document.getElementById('accountImportModal');
+  if (el) el.remove();
+  showToast((_('accounts.importDone') || '导入完成') + ': +' + (res.created || 0) + ' / ↻' + (res.updated || 0), 'success');
+  refreshAccounts();
+}
+
+// ── oauth login modal ──
+function showAccountLoginModal() {
+  var loginable = _accountsMeta.filter(function(m) { return m.supports_login; });
+  if (!loginable.length) {
+    loginable = [
+      { provider: 'codex', label: 'Codex / ChatGPT', supports_login: true },
+      { provider: 'claude', label: 'Claude', supports_login: true },
+      { provider: 'gemini', label: 'Gemini', supports_login: true },
+    ];
+  }
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay open';
+  overlay.id = 'accountLoginModal';
+  overlay.onclick = function(e) { if (e.target === overlay) { overlay.remove(); stopAccountLoginPoll(); } };
+  overlay.innerHTML =
+    '<div class="modal" onclick="event.stopPropagation()">' +
+    '<div class="modal-header"><h3>' + esc(_('accounts.loginTitle') || 'OAuth 授权登录') + '</h3>' +
+    '<button class="btn-close" onclick="document.getElementById(\'accountLoginModal\').remove(); stopAccountLoginPoll()">&times;</button></div>' +
+    '<div class="modal-body">' +
+    '<div class="form-group"><label>' + esc(_('accounts.provider') || '类型') + '</label>' +
+    '<select id="accountLoginProvider">' + loginable.map(function(m) {
+      return '<option value="' + esc(m.provider) + '">' + esc(m.label) + '</option>';
+    }).join('') + '</select></div>' +
+    '<button class="btn btn-primary" onclick="startAccountLogin()">' + esc(_('accounts.startLogin') || '开始授权') + '</button>' +
+    '<div id="accountLoginStatus" class="account-login-status"></div>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+}
+
+async function startAccountLogin() {
+  var provider = (document.getElementById('accountLoginProvider') || {}).value || '';
+  var status = document.getElementById('accountLoginStatus');
+  status.innerHTML = esc(_('common.loading') || 'Loading...');
+  var res = await api('/api/accounts/oauth/start', { method: 'POST', body: JSON.stringify({ provider: provider }) });
+  if (res.error) { status.innerHTML = '<span class="status-bad">' + esc(res.error) + '</span>'; return; }
+  status.innerHTML = '<p>' + esc(_('accounts.loginHint') || '请在新窗口完成授权：') + '</p>' +
+    '<p><a href="' + esc(res.authorization_url) + '" target="_blank" rel="noopener" class="btn">' + esc(_('accounts.openAuth') || '打开授权页面') + '</a></p>' +
+    '<div class="muted">' + esc(res.redirect_uri) + '</div>';
+  startAccountLoginPoll(res.state);
+}
+
+function startAccountLoginPoll(state) {
+  stopAccountLoginPoll();
+  var status = document.getElementById('accountLoginStatus');
+  _accountLoginPoll = setInterval(async function() {
+    var res = await api('/api/accounts/oauth/status?state=' + encodeURIComponent(state));
+    if (res.status === 'success') {
+      stopAccountLoginPoll();
+      status.innerHTML = '<span class="status-ok">' + esc(_('accounts.loginSuccess') || '登录成功') + '</span>';
+      showToast(_('accounts.loginSuccess') || '登录成功', 'success');
+      refreshAccounts();
+      setTimeout(function() { var el = document.getElementById('accountLoginModal'); if (el) el.remove(); }, 1200);
+    } else if (res.status === 'error') {
+      stopAccountLoginPoll();
+      status.innerHTML = '<span class="status-bad">' + esc(res.error || '登录失败') + '</span>';
+    }
+  }, 1500);
+}
+
+function stopAccountLoginPoll() {
+  if (_accountLoginPoll) { clearInterval(_accountLoginPoll); _accountLoginPoll = null; }
 }
 
 async function api(path, opts) {
@@ -1963,16 +2490,91 @@ async function copyKeyOpenCodeConfig(vendorId, keyId) {
   }
 }
 
+// The row "more" menu is portaled to <body> while open. Table rows and their
+// sticky .actions-cell create stacking contexts (opacity < 1, position: sticky
+// + z-index: 1), which would otherwise make this fixed menu translucent and let
+// sibling rows paint over it and steal its clicks. Moving it under <body>
+// escapes every ancestor stacking context, so the panel is fully opaque, sits
+// above all rows and receives clicks normally.
+function _closeActionsMore(wrap) {
+  if (!wrap) return;
+  wrap.classList.remove('open');
+  var menu = wrap._moreMenu;
+  if (menu) {
+    menu.classList.remove('open');
+    menu.style.position = '';
+    menu.style.zIndex = '';
+    menu.style.top = '';
+    menu.style.left = '';
+    menu.style.right = '';
+    menu.style.visibility = '';
+    menu.style.marginTop = '';
+    if (menu._moreHome && menu.parentElement !== menu._moreHome) {
+      menu._moreHome.appendChild(menu);
+    }
+    wrap._moreMenu = null;
+  }
+}
+
+function _closeAllActionsMore() {
+  document.querySelectorAll('.actions-more.open').forEach(_closeActionsMore);
+}
+
 function toggleActionsMore(id) {
   var el = document.getElementById(id);
   if (!el) return;
-  el.classList.toggle('open');
+  var willOpen = !el.classList.contains('open');
+  document.querySelectorAll('.actions-more.open').forEach(function(x) {
+    if (x !== el) _closeActionsMore(x);
+  });
+  if (!willOpen) { _closeActionsMore(el); return; }
+
+  var menu = el.querySelector('.actions-more-menu');
+  var btn = el.querySelector('button');
+  if (!menu || !btn) return;
+  var r = btn.getBoundingClientRect();
+
+  if (menu.parentElement !== document.body) {
+    menu._moreHome = menu.parentElement;
+    el._moreMenu = menu;
+    document.body.appendChild(menu);
+  }
+  el.classList.add('open');
+  menu.classList.add('open');
+  menu.style.position = 'fixed';
+  menu.style.zIndex = '9999';
+  menu.style.right = 'auto';
+  menu.style.marginTop = '0';
+  menu.style.visibility = 'hidden';
+  menu.style.top = '0px';
+  menu.style.left = '0px';
+  requestAnimationFrame(function() {
+    var mw = menu.offsetWidth || 170;
+    var mh = menu.offsetHeight || 120;
+    var top = r.bottom + 4;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+    var left = r.right - mw;
+    if (left < 8) left = 8;
+    if (left + mw > window.innerWidth - 8) left = window.innerWidth - mw - 8;
+    menu.style.top = top + 'px';
+    menu.style.left = left + 'px';
+    menu.style.visibility = '';
+  });
 }
 
+window.addEventListener('scroll', function() {
+  _closeAllActionsMore();
+}, true);
+window.addEventListener('resize', function() {
+  _closeAllActionsMore();
+});
+
 document.addEventListener('click', function(e) {
-  var more = e.target.closest('.actions-more');
   document.querySelectorAll('.actions-more.open').forEach(function(el) {
-    if (el !== more) el.classList.remove('open');
+    if (el.contains(e.target)) return;
+    var menu = el._moreMenu;
+    if (menu && menu.contains(e.target)) return;
+    _closeActionsMore(el);
   });
 });
 
@@ -2249,7 +2851,7 @@ function renderTaskCenter() {
 
 function switchView(name, opts) {
   opts = opts || {};
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, checkin: 1, archived: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, accounts: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, checkin: 1, archived: 1, diagnostics: 1, settings: 1 };
   if (!allowed[name]) name = 'dashboard';
 
   document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
@@ -2272,6 +2874,7 @@ function switchView(name, opts) {
     return;
   }
   if (name === 'dashboard') loadDashboard();
+  if (name === 'accounts') refreshAccounts();
   if (name === 'vendors') loadVendors(opts);
   if (name === 'backends') loadBackends();
   if (name === 'stats') loadStats();
@@ -2286,6 +2889,26 @@ function switchView(name, opts) {
   applyReadOnlyUI();
 }
 
+function toggleSidebar() {
+  var sb = document.querySelector('.sidebar');
+  if (!sb) return;
+  var collapsed = sb.classList.toggle('collapsed');
+  try { localStorage.setItem('aiswitch_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+  var btn = document.getElementById('sidebarToggle');
+  if (btn) btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+}
+
+function _restoreSidebar() {
+  try {
+    if (localStorage.getItem('aiswitch_sidebar_collapsed') === '1') {
+      var sb = document.querySelector('.sidebar');
+      if (sb) sb.classList.add('collapsed');
+      var btn = document.getElementById('sidebarToggle');
+      if (btn) btn.title = 'Expand sidebar';
+    }
+  } catch (e) {}
+}
+
 function getInitialView() {
   var fromHash = '';
   try {
@@ -2294,7 +2917,7 @@ function getInitialView() {
   var fromStore = '';
   try { fromStore = localStorage.getItem('aiswitch_view') || ''; } catch (e) {}
   var name = fromHash || fromStore || 'dashboard';
-  var allowed = { dashboard: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, checkin: 1, archived: 1, diagnostics: 1, settings: 1 };
+  var allowed = { dashboard: 1, accounts: 1, vendors: 1, backends: 1, stats: 1, models: 1, quality: 1, routes: 1, health: 1, checkin: 1, archived: 1, diagnostics: 1, settings: 1 };
   return allowed[name] ? name : 'dashboard';
 }
 
@@ -3921,12 +4544,16 @@ async function selectVendor(id, opts) {
   $('selectAllCheck').checked = false;
   $('batchActions').style.display = 'none';
   filterKeys();
+  refreshKeyBalances();
 }
 
 function filterKeys() {
   const q = $('keySearch').value.toLowerCase().trim();
   const f = $('keyFilter').value;
   const tbody = $('keysBody');
+  // Portaled row menus live under <body>; close them before their home rows
+  // are destroyed so no orphaned dropdown is left floating.
+  _closeAllActionsMore();
   tbody.innerHTML = '';
   const fragment = document.createDocumentFragment();
 
@@ -3984,9 +4611,15 @@ function filterKeys() {
     const modelLabel = modelCount > 0 ? (enabledCount + '/' + modelCount) : '0';
     const modelStr = '<a href="#" class="models-link" onclick="showKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\');return false" title="' + esc(_('table.viewModels') || 'View models') + '">' + modelLabel + '</a>';
 
+    var balanceStr = '<span class="balance-cell" data-balance-key="' + _currentVendor.id + ':' + k.id + '" onclick="onBalanceCellClick(\'' + _currentVendor.id + '\',\'' + k.id + '\',this)" title="' + esc(_('table.balanceClick') || 'Click to refresh balance') + '">⏳</span>';
+
     const tr = document.createElement('tr');
     tr.dataset.keyId = k.id;
-    if (!enabled) tr.style.opacity = '0.5';
+    // Dim disabled rows via a class rather than opacity on the <tr>: an
+    // elemental opacity < 1 creates a stacking context, which makes this row's
+    // fixed-position "more" menu translucent and lets sibling rows paint over
+    // it and steal its clicks.
+    if (!enabled) tr.classList.add('row-muted');
     var notesCell = notes
       ? '<span class="key-notes" title="' + esc(notes) + '">' + esc(notes.length > 28 ? notes.slice(0, 28) + '…' : notes) + '</span>'
       : '<span class="muted">—</span>';
@@ -4017,12 +4650,14 @@ function filterKeys() {
         + '</div></td>',
       '<td>' + latency + '</td>',
       '<td class="models-cell">' + modelStr + '</td>',
+      '<td class="balance-cell-wrap">' + balanceStr + '</td>',
       '<td class="notes-cell">' + notesCell + '</td>',
       '<td class="actions-cell">',
         '<button class="btn-icon" onclick="' + (enabled ? 'disableKey' : 'enableKey') + '(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(enabled ? (_('action.disable') || 'Disable') : (_('action.enable') || 'Enable')) + '">'
         + '<svg width="15" height="15"><use href="#' + (enabled ? 'ico-check' : 'ico-x') + '"/></svg></button>',
         '<button class="btn-icon" onclick="checkKeyHealth(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('action.check') || 'Check') + '"><svg width="15" height="15"><use href="#ico-play"/></svg></button>',
-         '<button class="btn-icon" onclick="syncKey(\'' + _currentVendor.id + '\',\'' + k.id + '\');event.stopPropagation()" title="' + esc(_('action.sync') || 'Sync') + '"><svg width="15" height="15"><use href="#ico-refresh"/></svg></button>',
+         '<button class="btn-icon" onclick="doKeyCheckin(\'' + _currentVendor.id + '\',\'' + k.id + '\',document.querySelector(\'.balance-cell[data-balance-key=\'' + _currentVendor.id + ':' + k.id + '\'\]\'))" title="' + esc((_('balance.checkin') || 'Sign in')) + '" style="display:' + (k.access_token_set ? '' : 'none') + '">' + esc((_('balance.checkinShort') || '✓')) + '</button>',
+        ' <button class="btn-icon" onclick="syncKey(\'' + _currentVendor.id + '\',\'' + k.id + '\');event.stopPropagation()" title="' + esc(_('action.sync') || 'Sync') + '"><svg width="15" height="15"><use href="#ico-refresh"/></svg></button>',
          '<button class="btn-icon" onclick="editKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('action.edit') || 'Edit') + '"><svg width="15" height="15"><use href="#ico-edit"/></svg></button>',
         '<button class="btn-icon btn-danger" onclick="deleteKey(\'' + _currentVendor.id + '\',\'' + k.id + '\')" title="' + esc(_('action.delete') || 'Delete') + '"><svg width="15" height="15"><use href="#ico-trash"/></svg></button>',
         '<div class="actions-more" id="' + moreId + '">'
@@ -4031,6 +4666,7 @@ function filterKeys() {
             + promoteBtn
             + '<button onclick="copyKeyOpenCodeConfig(\'' + _currentVendor.id + '\',\'' + k.id + '\');event.stopPropagation()">' + esc(_('action.copyOpenCode') || 'OpenCode') + '</button>'
             + '<button onclick="checkKeyModels(\'' + _currentVendor.id + '\',\'' + k.id + '\');event.stopPropagation()" title="' + esc(_('modelsModal.checkModels')) + '">' + _('modelsModal.checkModels') + '</button>'
+            + '<button onclick="showKeyConsumption(\'' + _currentVendor.id + '\',\'' + k.id + '\');event.stopPropagation()">' + esc(_('balance.costAnalysis') || 'Cost') + '</button>'
            + archiveBtn
           + '</div>'
         + '</div>',
@@ -4051,6 +4687,341 @@ function onCheckChange() {
     batch.style.display = 'none';
   }
   $('selectAllCheck').checked = checks.length === document.querySelectorAll('.key-check').length;
+}
+
+var _balanceCache = {};
+
+function _renderBalanceCell(cell, bal) {
+  if (!bal) return;
+  cell.style.fontWeight = '';
+  cell.classList.remove('balance-needs-token', 'balance-low', 'balance-warn', 'balance-ok');
+  if (bal.needs_access_token) {
+    cell.textContent = '🔑';
+    cell.title = bal.error || 'Add a system access token to read balance';
+    cell.classList.add('balance-needs-token');
+    return;
+  }
+  if (bal.needs_user_id) {
+    cell.textContent = '\uD83C\uDD94';
+    cell.title = bal.error || 'This site needs your user ID';
+    cell.classList.add('balance-needs-token');
+    return;
+  }
+  if (bal.error) {
+    cell.textContent = '—';
+    cell.title = bal.error;
+    return;
+  }
+  if (bal.available !== null && bal.available !== undefined) {
+    var cur = bal.currency || 'USD';
+    cell.textContent = formatCurrency(bal.available, cur);
+    cell.style.fontWeight = '600';
+    var amt = parseFloat(bal.available) || 0;
+    if (amt < 1) cell.classList.add('balance-low');
+    else if (amt < 10) cell.classList.add('balance-warn');
+    else cell.classList.add('balance-ok');
+    var tip = '';
+    if (bal.total) tip += 'Total: ' + formatCurrency(bal.total, cur) + '\n';
+    if (bal.used) tip += 'Used: ' + formatCurrency(bal.used, cur);
+    if (bal.raw && bal.raw.username) tip += '\nUser: ' + bal.raw.username;
+    cell.title = tip.replace(/^\n/, '') || 'Available balance';
+  } else {
+    cell.style.fontWeight = '';
+    cell.textContent = '—';
+    cell.title = bal.error || 'No balance available';
+  }
+}
+
+async function refreshKeyBalances() {
+  var cells = document.querySelectorAll('.balance-cell[data-balance-key]');
+  if (!cells.length) return;
+  try {
+    var resp = await api('/api/balances?vendor_id=' + encodeURIComponent(selectedVendorId || ''));
+    if (resp && resp.balances) {
+      _balanceCache = Object.assign(_balanceCache, resp.balances);
+    }
+  } catch(e) {}
+  cells.forEach(function(cell) {
+    var key = cell.getAttribute('data-balance-key');
+    var bal = _balanceCache[key];
+    if (bal) {
+      _renderBalanceCell(cell, bal);
+    } else if (key && key.indexOf(':') > 0) {
+      if (cell.textContent === '⏳') {
+        cell.textContent = '—';
+        cell.title = 'No balance data';
+      }
+    }
+  });
+}
+
+async function fetchKeyBalance(vendorId, keyId, cell) {
+  try {
+    var resp = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/balance');
+    var key = vendorId + ':' + keyId;
+    _balanceCache[key] = resp;
+    _renderBalanceCell(cell, resp);
+  } catch(e) {
+    cell.textContent = '!';
+    cell.title = 'Failed to fetch balance';
+  }
+}
+
+async function onBalanceCellClick(vendorId, keyId, cell) {
+  if (!cell) return;
+  if (cell.classList.contains('balance-needs-token')) {
+    // Has token already? Offer sign-in; otherwise open edit modal to add token.
+    if (_balanceCache[vendorId + ':' + keyId] && !_balanceCache[vendorId + ':' + keyId].needs_access_token) {
+      // already has data, just refresh
+      cell.textContent = '⏳';
+      try {
+        var resp = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/balance?force=1');
+        _balanceCache[vendorId + ':' + keyId] = resp;
+        _renderBalanceCell(cell, resp);
+      } catch(e) {
+        cell.textContent = '!';
+      }
+      return;
+    }
+    editVendorById(vendorId);
+    return;
+  }
+  cell.textContent = '⏳';
+  try {
+    var resp = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/balance?force=1');
+    _balanceCache[vendorId + ':' + keyId] = resp;
+    _renderBalanceCell(cell, resp);
+  } catch(e) {
+    cell.textContent = '!';
+    cell.title = 'Failed to fetch balance';
+  }
+}
+
+function canCheckin(key) {
+  // Heuristic: relays (New API etc.) support check-in. We attempt it lazily.
+  return !!(key && key.access_token_set);
+}
+
+async function doKeyCheckin(vendorId, keyId, cell) {
+    if (!canCheckin((_currentVendor && _allKeysData.find(function(k){return String(k.id)===String(keyId);})) || {})) {
+    showToast((_('balance.tokenRequired') || 'Add a balance access token first.'), 'warning');
+    editKey(vendorId, keyId);
+    return;
+  }
+  try {
+    var resp = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/checkin', { method: 'POST', body: JSON.stringify({}) });
+    if (resp && resp.claimed) {
+      showToast((_('checkin.success') || 'Signed in!') + (resp.quota_awarded ? ' · +' + resp.quota_awarded + ' quota' : ''), 'success');
+    } else if (resp && resp.checkin_date) {
+      showToast(_('checkin.done') || 'Already signed in today', 'info');
+    } else {
+      showToast(resp && (resp.error || 'Check-in not available'), 'error');
+    }
+    // refresh balance
+  } catch(e) {
+    showToast('Check-in failed', 'error');
+  }
+  // refresh balance
+  try {
+    var fresh = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/balance?force=1');
+    _balanceCache[vendorId + ':' + keyId] = fresh;
+    var cells = document.querySelectorAll('.balance-cell[data-balance-key="' + vendorId + ':' + keyId + '"]');
+    cells.forEach(function(c) { _renderBalanceCell(c, fresh); });
+  } catch(e2) {}
+}
+
+function formatCurrency(amount, currency) {
+  if (amount === null || amount === undefined) return '—';
+  try {
+    return new Intl.NumberFormat(navigator.language || 'en-US', {
+      style: 'currency',
+      currency: currency || 'USD',
+      minimumFractionDigits: amount < 10 ? 4 : 2,
+      maximumFractionDigits: 4
+    }).format(amount);
+  } catch(e) {
+    return (currency || 'USD') + ' ' + Number(amount).toFixed(4);
+  }
+}
+
+function formatAmount(amount) {
+  if (amount === null || amount === undefined) return '—';
+  return Number(amount).toLocaleString(navigator.language || 'en-US', {maximumFractionDigits: 0});
+}
+
+async function showKeyConsumption(vendorId, keyId) {
+  var v = (_allVendorsData || []).find(function(x) { return x.id === vendorId; });
+  if (!v) { showToast('Vendor not found', 'error'); return; }
+  var k = (v.keys || []).find(function(x) { return x.id === keyId; });
+  if (!k) { showToast('Key not found', 'error'); return; }
+
+  if (!k.access_token_set) {
+    showToast(_('balance.tokenRequired') || 'Need a balance access token', 'warning');
+    editKey(vendorId, keyId);
+    return;
+  }
+
+  var taskId = createTask({
+    type: 'consumption',
+    title: (_('balance.loadingConsumption') || 'Loading consumption...') + ' ' + k.name,
+    cur: 0, total: 1
+  });
+
+  try {
+    var resp = await api('/api/vendors/' + vendorId + '/keys/' + keyId + '/consumption?days=7&max=500');
+    completeTask(taskId, 1);
+
+    if (resp.error) {
+      showToast(resp.error, 'error');
+      return;
+    }
+
+    var summary = resp.summary || {};
+    var byKey = resp.by_key || {};
+    var models = Object.keys(summary);
+    if (!models.length) {
+      showToast((_('balance.noConsumption') || 'No usage data found'), 'info');
+      return;
+    }
+
+    var html = '<div class="modal-scroll" style="max-height:70vh;overflow-y:auto">';
+
+    // Key summary header
+    html += '<div style="margin-bottom:16px;padding:12px;background:var(--bg2);border-radius:var(--radius-sm)">';
+    html += '<strong>' + esc(v.name + ' / ' + k.name) + '</strong> — ' + (_('balance.last7days') || 'Last 7 days');
+    html += '</div>';
+
+    // Model table
+    html += '<table class="cost-table" style="width:100%;border-collapse:collapse">';
+    html += '<thead><tr>';
+    html += '<th>' + (_('balance.colModel') || 'Model') + '</th>';
+    html += '<th>' + (_('balance.colCost') || 'Cost') + '</th>';
+    html += '<th>' + (_('balance.colCalls') || 'Calls') + '</th>';
+    html += '<th>' + (_('balance.colTokens') || 'Tokens') + '</th>';
+    html += '<th>' + (_('balance.colSuccess') || 'Success') + '</th>';
+    html += '</tr></thead><tbody>';
+
+    var totalCost = 0, totalCalls = 0, totalTokens = 0;
+    models.forEach(function(m) {
+      var d = summary[m];
+      totalCost += d.cost_usd || 0;
+      totalCalls += d.calls || 0;
+      totalTokens += d.total_tokens || 0;
+      var costStr = formatCurrency(d.cost_usd, 'USD');
+      var cls = (d.cost_usd || 0) >= 1 ? 'cost-high' : (d.cost_usd || 0) >= 0.1 ? 'cost-mid' : '';
+      html += '<tr class="' + cls + '">'
+        + '<td><code>' + esc(m) + '</code></td>'
+        + '<td class="cost-val">' + costStr + '</td>'
+        + '<td>' + formatAmount(d.calls) + '</td>'
+        + '<td>' + formatAmount(d.total_tokens) + '</td>'
+        + '<td>' + (d.success_rate != null ? d.success_rate + '%' : '-') + '</td>'
+        + '</tr>';
+    });
+
+    html += '</tbody><tfoot><tr>';
+    html += '<td><strong>' + (_('balance.total') || 'Total') + '</strong></td>';
+    html += '<td><strong>' + formatCurrency(totalCost, 'USD') + '</strong></td>';
+    html += '<td>' + formatAmount(totalCalls) + '</td>';
+    html += '<td>' + formatAmount(totalTokens) + '</td>';
+    html += '<td></td>';
+    html += '</tr></tfoot></table>';
+
+    html += '</div>';
+
+    _showCostTable(v.name, k.name, (_('balance.costAnalysis') || 'Cost Analysis'), html);
+
+  } catch(e) {
+    completeTask(taskId, 1);
+    showToast('Failed to load consumption: ' + (e.message || e), 'error');
+  }
+}
+
+function _costModalClose() {
+  var el = $('costModal');
+  if (el) el.classList.remove('open');
+}
+
+function _showCostTable(vendorName, keyName, title, html) {
+  var existing = $('costModal');
+  if (existing) existing.remove();
+
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'costModal';
+  overlay.onclick = function() { _costModalClose(); };
+
+  overlay.innerHTML = '<div class="modal" onclick="event.stopPropagation()" style="width:80%;max-width:800px">'
+    + '<div class="modal-header">'
+    + '<h3>' + esc(title) + '</h3>'
+    + '<button class="btn-close" onclick="' + '_costModalClose()' + '">&times;</button>'
+    + '</div>'
+    + '<div class="modal-body">'
+    + '<p style="margin-bottom:12px;padding:8px 12px;background:var(--bg2);border-radius:var(--radius-sm)">'
+    + '<strong>' + esc(vendorName) + ' / ' + esc(keyName) + '</strong></p>'
+    + html
+    + '</div>'
+    + '<div class="modal-footer">'
+    + '<button class="btn" onclick="' + '_costModalClose()' + '">' + (_('modal.close') || 'Close') + '</button>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+  requestAnimationFrame(function() { overlay.classList.add('open'); });
+}
+
+function showCheckinHistory(vendorId) {
+  var v = (_checkinVendors || []).find(function(x) { return String(x.id) === String(vendorId); });
+  if (!v) return;
+  var log = v.checkin_log || {};
+  var info = _checkinData[String(vendorId)] || {};
+  var qpu = (info.balance && info.balance.raw && info.balance.raw.quota_per_unit) || 0;
+
+  // Merge: the site's own records (authoritative) + our local log
+  var byDate = {};
+  (info.siteRecords || []).forEach(function(r) {
+    if (r && r.date) byDate[r.date] = {status: 'success', reward: r.reward, error: '', ts: '', _site: true};
+  });
+  Object.keys(log).forEach(function(d) {
+    var r = log[d] || {};
+    if (!byDate[d]) byDate[d] = r;
+    else if (byDate[d].reward == null) byDate[d].reward = r.reward;
+  });
+  var dates = Object.keys(byDate).sort().reverse();
+  if (!dates.length) { showToast(_('checkin.noHistory') || 'No check-in records yet', 'info'); return; }
+
+  var html = '<table class="cost-table" style="width:100%;border-collapse:collapse">';
+  html += '<thead><tr>'
+    + '<th>' + esc(_('checkin.hDate') || 'Date') + '</th>'
+    + '<th>' + esc(_('checkin.hStatus') || 'Result') + '</th>'
+    + '<th style="text-align:right">' + esc(_('checkin.hReward') || 'Reward') + '</th>'
+    + '<th>' + esc(_('checkin.hReason') || 'Detail') + '</th>'
+    + '</tr></thead><tbody>';
+  dates.forEach(function(d) {
+    var r = byDate[d] || {};
+    var st = r.status || '';
+    var badge, label;
+    if (st === 'success') { badge = 'badge-ok'; label = _('checkin.hSuccess') || 'Success'; }
+    else if (st === 'done') { badge = 'badge-ok'; label = _('checkin.hDone') || 'Already signed'; }
+    else if (st === 'failed') { badge = 'badge-fail'; label = _('checkin.hFailed') || 'Failed'; }
+    else if (st === 'no_token') { badge = 'badge-muted'; label = _('checkin.noToken') || 'No token'; }
+    else { badge = 'badge-muted'; label = _('checkin.hUnsupported') || 'Not supported'; }
+    var reward = '\u2014';
+    if (r.reward != null && r.reward > 0) {
+      reward = (qpu > 0) ? ('+' + formatCurrency(r.reward / qpu, 'USD')) : ('+' + formatAmount(r.reward) + ' quota');
+    }
+    var reason = r.error || (r.ts ? _fmtTs(r.ts) : (r._site ? (_('checkin.fromSite') || 'from site') : ''));
+    html += '<tr>'
+      + '<td>' + esc(d) + '</td>'
+      + '<td><span class="badge ' + badge + '">' + esc(label) + '</span></td>'
+      + '<td style="text-align:right;font-family:var(--mono)">' + esc(reward) + '</td>'
+      + '<td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.error || '') + '">' + esc(reason ? reason.slice(0, 90) : '\u2014') + '</td>'
+      + '</tr>';
+  });
+  html += '</tbody></table>';
+  if (info.checkinCount != null) {
+    html += '<p class="form-hint" style="margin-top:10px">' + esc((_('checkin.totalCount') || 'Total check-ins: {n}').replace('{n}', String(info.checkinCount))) + '</p>';
+  }
+  _showCostTable(v.name || '', '', (_('checkin.history') || 'Records') + ' \u2014 ' + (v.name || ''), html);
 }
 
 function toggleSelectAll() {
@@ -4133,7 +5104,9 @@ async function showAddVendorModal() {
   $('proxyTargetGroup').style.display = 'none';
   if ($('vendorTags')) $('vendorTags').value = '';
   if ($('vendorCheckinUrl')) $('vendorCheckinUrl').value = '';
+  if ($('vendorAccessUserId')) $('vendorAccessUserId').value = '';
   if ($('vendorTypeSelect')) $('vendorTypeSelect').value = 'public';
+  if ($('vendorStatus')) $('vendorStatus').value = 'normal';
   await loadProviderSelect();
   $('vendorModal').classList.add('open');
 }
@@ -4164,7 +5137,9 @@ async function editVendor() {
   $('proxyTargetGroup').style.display = v.proxy_target ? '' : 'none';
   if ($('vendorTags')) $('vendorTags').value = formatTags(v.tags || []);
   if ($('vendorCheckinUrl')) $('vendorCheckinUrl').value = v.checkin_url || '';
+  if ($('vendorAccessUserId')) $('vendorAccessUserId').value = v.access_token_user_id || '';
   if ($('vendorTypeSelect')) $('vendorTypeSelect').value = v.vtype || 'public';
+  if ($('vendorStatus')) $('vendorStatus').value = v.status || 'normal';
   await loadProviderSelect();
   const match = _knownProviders.find(function(x) { return x.id === v.provider; });
   if (match) {
@@ -4211,6 +5186,8 @@ async function saveVendor() {
     tags: parseTagsInput(($('vendorTags') && $('vendorTags').value) || ''),
     checkin_url: ($('vendorCheckinUrl') && $('vendorCheckinUrl').value.trim()) || '',
     type: $('vendorTypeSelect') ? $('vendorTypeSelect').value : '',
+    status: $('vendorStatus') ? $('vendorStatus').value : 'normal',
+    access_token_user_id: ($('vendorAccessUserId') && $('vendorAccessUserId').value.trim()) || '',
   };
   if (!data.name) { alert(_('validation.nameRequired') || 'Name is required'); return; }
   setButtonLoading(btn, true, _('common.saving') || 'Saving...');
@@ -4306,8 +5283,30 @@ function showAddKeyModal() {
   $('keyApiKey').value = '';
   if ($('keyNotes')) $('keyNotes').value = '';
   if ($('keyRole')) $('keyRole').value = '';
+  if ($('keyBalanceToken')) $('keyBalanceToken').value = '';
+  _setBalanceTokenStatus('');
   _fillKeyCheckModelSelect(null);
   $('keyModal').classList.add('open');
+}
+
+function _setBalanceTokenStatus(text) {
+  var el = $('keyBalanceTokenStatus');
+  if (!el) return;
+  if (text) { el.textContent = text; el.style.display = ''; }
+  else { el.textContent = ''; el.style.display = 'none'; }
+}
+
+function toggleBalanceTokenVisibility() {
+  var inp = $('keyBalanceToken');
+  var btn = $('toggleBalanceTokenBtn');
+  if (!inp || !btn) return;
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    btn.innerHTML = '<svg width="14" height="14"><use href="#ico-eye-off"/></svg>';
+  } else {
+    inp.type = 'password';
+    btn.innerHTML = '<svg width="14" height="14"><use href="#ico-eye"/></svg>';
+  }
 }
 
 function closeKeyModal() { $('keyModal').classList.remove('open'); }
@@ -4333,6 +5332,9 @@ async function saveKey() {
     role: ($('keyRole') && $('keyRole').value) || '',
     check_model: _readKeyCheckModel(),
   };
+  // Only send the balance access token when the user typed one (avoid wiping it)
+  var balTok = ($('keyBalanceToken') && $('keyBalanceToken').value.trim()) || '';
+  if (balTok) data.access_token = balTok;
   if (!data.name || !data.api_key) { alert(_('validation.nameAndKeyRequired') || 'Name and API Key are required'); return; }
   var keyIdToCheck = null;
   var vendorIdToCheck = selectedVendorId;
@@ -4377,6 +5379,8 @@ async function editKey(vendorId, keyId) {
   $('keyApiKey').value = k.api_key;
   if ($('keyNotes')) $('keyNotes').value = k.notes || '';
   if ($('keyRole')) $('keyRole').value = k.role || '';
+  if ($('keyBalanceToken')) $('keyBalanceToken').value = '';
+  _setBalanceTokenStatus(k.access_token_set ? (_('keyModal.balanceTokenSet') || 'A balance access token is already saved (leave blank to keep it).') : '');
   _fillKeyCheckModelSelect(k);
   $('keyModal').classList.add('open');
 }
@@ -4430,22 +5434,19 @@ async function checkKeyHealth(vendorId, keyId) {
 }
 
 async function syncKey(vendorId, keyId) {
-  return _syncWithStreamProgress({
-    key_ids: [String(vendorId) + ':' + String(keyId)],
-  }, _('sync.syncingKey') || 'Syncing key…');
+  // Sends a full push. The server now promotes any scoped push to a full
+  // reconcile (backends.normalize_push_scope) because honouring a scope would
+  // let most adapters delete every other vendor's entries from the engine
+  // files. Sending an unscoped push here keeps the two paths identical.
+  return _syncWithStreamProgress({}, _('sync.syncingKey') || 'Syncing key…');
 }
 
 async function syncModel(vendorId, keyId, modelId) {
-  return _syncWithStreamProgress({
-    key_ids: [String(vendorId) + ':' + String(keyId)],
-    model_ids: [String(modelId)],
-  }, _('sync.syncingModel') || 'Syncing model…');
+  return _syncWithStreamProgress({}, _('sync.syncingModel') || 'Syncing model…');
 }
 
 async function syncVendor(vendorId) {
-  return _syncWithStreamProgress({
-    vendor_ids: [String(vendorId)],
-  }, _('sync.syncingVendor') || 'Syncing vendor…');
+  return _syncWithStreamProgress({}, _('sync.syncingVendor') || 'Syncing vendor…');
 }
 
 async function _syncWithStreamProgress(body, title) {
@@ -4700,23 +5701,10 @@ async function checkHealthTargets(targets, opts) {
           });
         }
         if (blocking) updateGlobalLoading(_('sync.pushing') || 'Syncing backends…');
-        var vendorIds = [];
-        var keyIdList = [];
-        (targets || []).forEach(function(t) {
-          if (!t || !t.vendor_id) return;
-          if (vendorIds.indexOf(String(t.vendor_id)) < 0) vendorIds.push(String(t.vendor_id));
-          if (t.key_id) {
-            var kid = String(t.vendor_id) + ':' + String(t.key_id);
-            if (keyIdList.indexOf(kid) < 0) keyIdList.push(kid);
-          }
-        });
         var pushBody = {};
-        // Scoped push for single-key / single-vendor checks; keep all-vendors full push.
-        if (targets.length <= 1 && keyIdList.length <= 1 && keyIdList.length) {
-          pushBody.key_ids = keyIdList;
-        } else if ((opts.scopePush === 'vendor' || (targets.length <= 1 && vendorIds.length <= 1)) && vendorIds.length) {
-          pushBody.vendor_ids = vendorIds;
-        }
+        // Always send an unscoped push. The server promotes scoped pushes to a
+        // full reconcile anyway (backends.normalize_push_scope), and a full
+        // push is declarative + fast, so engines end up in the correct state.
         var syncRes = await api('/api/sync/push', { method: 'POST', body: JSON.stringify(pushBody) });
         if (syncRes.error) throw new Error(syncRes.error);
         if (syncTaskId) {
@@ -5175,14 +6163,22 @@ list.innerHTML = '';
     var latency = mh.latency_ms ? mh.latency_ms + 'ms' : '';
     var row = document.createElement('div');
     row.className = 'model-row' + (enabled ? '' : ' model-disabled') + (isPrimary ? ' model-check-primary-row' : '');
+    var pricing = (k.pricing && k.pricing[mid]) ? k.pricing[mid] : null;
+    var priceLabel = '';
+    if (pricing) {
+      var inp = (pricing.input > 0 ? '$' + (pricing.input < 0.01 ? pricing.input.toFixed(4) : pricing.input.toFixed(2)) + '/M' : '');
+      var out = (pricing.output > 0 ? '$' + (pricing.output < 0.01 ? pricing.output.toFixed(4) : pricing.output.toFixed(2)) + '/M' : '');
+      priceLabel = (inp || out) ? (' <span class="model-price" title="Est. USD per 1M tokens">' + (inp ? '<span class="price-in">' + inp + '</span>' : '') + (out ? ' / <span class="price-out">' + out + '</span>' : '') + '</span>') : '';
+    }
     row.innerHTML = [
       '<div class="model-row-main">',
         '<span class="dot ' + (mh.healthy === true ? 'healthy' : mh.healthy === false ? 'unhealthy' : 'unknown') + '"></span>',
         '<code class="model-id" title="' + esc(mid) + '">' + esc(mid) + '</code>',
         (isPrimary ? '<span class="badge badge-ok" style="margin-left:6px">' + esc(_('keyModal.checkModelBadge') || 'Check') + '</span>' : ''),
         (quality.score != null ? '<span class="quality-inline-score" title="' + esc(_('quality.score') || 'Quality score') + '">' + Number(quality.score) + '</span>' : ''),
-         '<span class="model-health ' + hClass + '" title="' + esc(hText) + '">' + esc(hText) + (latency ? ' · ' + latency : '') + '</span>',
-         (rawDetail ? '<button class="btn-icon" title="' + esc(rawDetail) + '" onclick="event.stopPropagation();showToast(' + JSON.stringify(rawDetail) + ', \'info\')">ⓘ</button>' : ''),
+        priceLabel,
+        '<span class="model-health ' + hClass + '" title="' + esc(hText) + '">' + esc(hText) + (latency ? ' · ' + latency : '') + '</span>',
+        (rawDetail ? '<button class="btn-icon" title="' + esc(rawDetail) + '" onclick="event.stopPropagation();showToast(' + JSON.stringify(rawDetail) + ', \'info\')">ⓘ</button>' : ''),
       '</div>',
       '<div class="model-row-actions">',
         '<label class="model-toggle" title="' + (isPrimary ? (_('keyModal.unsetCheckModel') || 'Remove from check models') : (_('keyModal.setCheckModel') || 'Set as check model')) + '">',
@@ -5284,6 +6280,12 @@ async function onModelsModalCheckChange() {
 }
 
 async function showKeyModels(vendorId, keyId) {
+  // Primary check-model selection is per KEY. The in-memory toggle cache is a
+  // module global, so reset it on every open — otherwise the previous key's
+  // checked models leak into this key's modal (and are even saved back to it),
+  // which made a primary model "appear on other vendors". renderModelsModalList
+  // re-initializes it from the freshly loaded key when it is empty.
+  _modelsModalCheckModels = [];
   // Prefer live selection cache, then vendor list; refresh from API if models empty
   var v = (_currentVendor && _currentVendor.id === vendorId) ? _currentVendor : null;
   if (!v) v = (_allVendorsData || []).find(function(x) { return x.id === vendorId; });
@@ -6438,11 +7440,27 @@ async function onBackupFileSelected(ev) {
 
 // ── Backends Page ────────────────────────
 
+function _sortBackends(list) {
+  // running first, then installed, then the rest — stable within groups
+  return (list || []).slice().sort(function(a, b) {
+    var sa = a.status || {}, sb = b.status || {};
+    function rank(s) {
+      if (s.running) return 0;
+      if (s.installed) return 1;
+      return 2;
+    }
+    var ra = rank(sa), rb = rank(sb);
+    if (ra !== rb) return ra - rb;
+    return String(a.display_name || a.name || '').localeCompare(String(b.display_name || b.name || ''));
+  });
+}
+
 async function loadBackends() {
   const data = await api('/api/backends');
   if (data.error) return;
-  renderBackendSummary(data.backends || []);
-  renderBackendCards((data.backends || []), 'backendGrid');
+  var list = _sortBackends(data.backends || []);
+  renderBackendSummary(list);
+  renderBackendCards(list, 'backendGrid');
   loadGatewayStatus();
   loadLastPushPanel();
   loadRemoteGatewayForm();
@@ -6486,9 +7504,10 @@ async function loadLastPushPanel() {
 async function refreshBackendStatus() {
   const data = await api('/api/backends');
   if (data.error) return;
-  renderBackendSummary(data.backends || []);
-  renderBackendCards((data.backends || []), 'dashBackendCards');
-  renderBackendCards((data.backends || []), 'backendGrid');
+  var list = _sortBackends(data.backends || []);
+  renderBackendSummary(list);
+  renderBackendCards(list, 'dashBackendCards');
+  renderBackendCards(list, 'backendGrid');
   showToast(_('toast.saved'), 'success');
 }
 
@@ -7516,6 +8535,15 @@ async function loadSettingsPage() {
   if ($('setBudgetDailyTokens')) $('setBudgetDailyTokens').value = s.budget_daily_tokens || 0;
   if ($('setBudgetMonthlyTokens')) $('setBudgetMonthlyTokens').value = s.budget_monthly_tokens || 0;
   if ($('setBudgetAction')) $('setBudgetAction').value = s.budget_action || 'alert';
+  if ($('setNotifyEnabled')) $('setNotifyEnabled').checked = !!s.notify_enabled;
+  if ($('setNotifyFeishu')) $('setNotifyFeishu').value = s.notify_channel_feishu || '';
+  if ($('setNotifySlack')) $('setNotifySlack').value = s.notify_channel_slack || '';
+  if ($('setNotifyWebhook')) $('setNotifyWebhook').value = s.notify_channel_webhook || '';
+  if ($('setNotifyQuietHours')) $('setNotifyQuietHours').value = s.notify_quiet_hours || '';
+  if ($('setNotifyInterval')) {
+    var nmin = parseInt(s.notify_min_interval_minutes, 10);
+    $('setNotifyInterval').value = (nmin >= 0) ? nmin : 60;
+  }
   if ($('setReadOnly')) $('setReadOnly').checked = !!s.read_only;
   _readOnlyMode = !!s.read_only;
   if (tok) tok.value = '';
@@ -7534,6 +8562,7 @@ async function loadSettingsPage() {
   applyReadOnlyUI();
   loadProfilesList();
   loadPoliciesList();
+  loadNotifyStatus();
 }
 
 async function loadPoliciesList() {
@@ -7644,6 +8673,13 @@ async function saveSettingsPage() {
     budget_daily_tokens: parseInt(($('setBudgetDailyTokens') && $('setBudgetDailyTokens').value) || '0', 10) || 0,
     budget_monthly_tokens: parseInt(($('setBudgetMonthlyTokens') && $('setBudgetMonthlyTokens').value) || '0', 10) || 0,
     budget_action: (($('setBudgetAction') && $('setBudgetAction').value) || 'alert'),
+    notify_enabled: !!( $('setNotifyEnabled') && $('setNotifyEnabled').checked ),
+    notify_channel_feishu: (($('setNotifyFeishu') && $('setNotifyFeishu').value) || '').trim(),
+    notify_channel_slack: (($('setNotifySlack') && $('setNotifySlack').value) || '').trim(),
+    notify_channel_webhook: (($('setNotifyWebhook') && $('setNotifyWebhook').value) || '').trim(),
+    notify_quiet_hours: (($('setNotifyQuietHours') && $('setNotifyQuietHours').value) || '').trim(),
+    notify_min_interval_minutes: Math.max(0, parseInt(($('setNotifyInterval') && $('setNotifyInterval').value) || '60', 10) || 0),
+    notify_events: collectNotifyEvents(),
     read_only: !!( $('setReadOnly') && $('setReadOnly').checked ),
   };
   var tokEl = $('setAccessToken');
@@ -7673,6 +8709,74 @@ async function saveSettingsPage() {
   showToast(_('toast.saved') || 'Saved', 'success');
   if (tokEl) tokEl.value = '';
   await loadSettingsPage();
+}
+
+// ── Notifications (Settings → Notifications) ──────────────
+function renderNotifyEvents(catalog, selected) {
+  var box = $('notifyEventsList');
+  if (!box) return;
+  var sel = selected || [];
+  if (!catalog || !catalog.length) {
+    box.innerHTML = '<div class="form-hint">—</div>';
+    return;
+  }
+  box.innerHTML = catalog.map(function(ev) {
+    var label = _('notify.event.' + ev.id) || ev.label || ev.id;
+    return '<label class="checkbox-label" style="display:flex;margin:4px 0">' +
+      '<input type="checkbox" id="notifyEv_' + esc(ev.id) + '" data-event="' + esc(ev.id) + '"' +
+      (sel.indexOf(ev.id) >= 0 ? ' checked' : '') +
+      ' onchange="onSettingsDirty()">' +
+      '<span>' + esc(label) + '</span></label>';
+  }).join('');
+}
+
+function collectNotifyEvents() {
+  var box = $('notifyEventsList');
+  if (!box) return [];
+  return Array.prototype.slice.call(box.querySelectorAll('input[data-event]'))
+    .filter(function(i) { return i.checked; })
+    .map(function(i) { return i.getAttribute('data-event'); });
+}
+
+async function loadNotifyStatus() {
+  var res = await api('/api/notify/status');
+  if (!res || res.error) return;
+  renderNotifyEvents(res.event_catalog || [], res.events || []);
+  var list = $('notifyHistoryList');
+  if (!list) return;
+  var items = res.history || [];
+  if (!items.length) {
+    list.innerHTML = '<div class="todo-empty">' + esc(_('notify.noHistory') || 'No notifications sent yet') + '</div>';
+    return;
+  }
+  list.innerHTML = items.map(function(it) {
+    var when = String(it.at || '').replace('T', ' ').replace(/\..*$/, '');
+    var tail = it.channel + ' · ' + when + (it.ok ? '' : ' · ' + (it.error || ''));
+    return '<div class="profile-row"><div class="profile-meta">' +
+      '<strong>' + (it.ok ? '✅ ' : '⚠️ ') + esc(it.title || it.event || '') + '</strong>' +
+      '<div class="form-hint">' + esc(tail) + '</div>' +
+      '</div></div>';
+  }).join('');
+}
+
+async function sendNotifyTest() {
+  var el = $('notifyTestStatus');
+  if (el) el.textContent = _('notify.testing') || 'Sending…';
+  var res = await api('/api/notify/test', { method: 'POST', body: '{}' });
+  var results = (res && res.results) || [];
+  if (el) {
+    if (!results.length) {
+      el.textContent = (res && res.error) || (_('notify.noChannel') || 'No channel configured');
+    } else {
+      el.textContent = results.map(function(r) {
+        return r.channel + ': ' + (r.ok ? (_('notify.testOk') || 'delivered') : (r.error || 'failed'));
+      }).join(' | ');
+    }
+  }
+  showToast(res && res.ok
+    ? (_('notify.testSent') || 'Test notification sent')
+    : (_('notify.testFailed') || 'Test notification failed'), res && res.ok ? 'success' : 'error');
+  loadNotifyStatus();
 }
 
 async function clearAccessToken() {
@@ -7712,6 +8816,7 @@ function _hmStateLabel(state) {
 // ── Downstream routes page ────────────────
 var _dsModelCatalog = [];
 var _dsSelectedModels = {};
+var _dsModelPrices = {};
 
 async function loadRoutesPage() {
   var list = $('routesList');
@@ -7764,6 +8869,7 @@ async function showCreateDownstream() {
   $('dsNotes').value = '';
   $('dsSecretBox').style.display = 'none';
   _dsSelectedModels = {};
+  _dsModelPrices = {};
   await loadDsModelCatalog();
   $('downstreamModal').classList.add('open');
 }
@@ -7785,7 +8891,10 @@ async function editDownstream(id) {
   $('dsNotes').value = res.notes || '';
   $('dsSecretBox').style.display = 'none';
   _dsSelectedModels = {};
+  _dsModelPrices = {};
   (res.selected_models || []).forEach(function(m) { _dsSelectedModels[m] = true; });
+  var mp = res.model_prices || {};
+  Object.keys(mp).forEach(function(m) { _dsModelPrices[m] = mp[m]; });
   await loadDsModelCatalog();
   $('downstreamModal').classList.add('open');
 }
@@ -7819,17 +8928,37 @@ function filterDsModels() {
     var mid = String(m.model || '');
     var checked = !!_dsSelectedModels[mid];
     var src = (m.source_count || 0) + ' ' + (_('routes.sources') || 'sources');
+    var p = m.price || {};
+    var maxP = Number(p.max) || 0;
+    var minP = Number(p.min) || 0;
+    var priceTxt = (p.known === false || !maxP)
+      ? '<span class="form-hint">' + esc(_('routes.noPrice') || 'no price') + '</span>'
+      : ('<span class="ds-price-range" title="' + esc(_('routes.priceRangeHint') || 'min~max USD per 1M tokens') + '">$' + minP.toFixed(2) + '~$' + maxP.toFixed(2) + '/M</span>');
+    var current = _dsModelPrices[mid];
+    var usageVal = (current != null && current !== '') ? current : (maxP ? maxP.toFixed(2) : '');
+    var priceInput = checked
+      ? '<span class="ds-price-edit" title="' + esc(_('routes.usagePriceHint') || 'Usage price (default = max)') + '">$' +
+        '<input type="number" step="0.01" min="0" class="ds-usage-price" value="' + esc(usageVal) + '" onchange="setDsModelPrice(\'' + esc(mid).replace(/'/g, "\\'") + '\', this.value)">/M</span>'
+      : '';
     return '<label class="ds-model-item">' +
       '<input type="checkbox" ' + (checked ? 'checked' : '') + ' onchange="toggleDsModel(\'' + esc(mid).replace(/'/g, "\\'") + '\', this.checked)">' +
       '<span class="ds-model-name"><code>' + esc(mid) + '</code></span>' +
+      priceTxt + priceInput +
       '<span class="form-hint">' + esc(src) + '</span>' +
       '</label>';
   }).join('');
 }
 
+function setDsModelPrice(mid, value) {
+  var v = parseFloat(value);
+  if (isFinite(v) && v > 0) _dsModelPrices[mid] = v;
+  else delete _dsModelPrices[mid];
+}
+
 function toggleDsModel(mid, on) {
   if (on) _dsSelectedModels[mid] = true;
   else delete _dsSelectedModels[mid];
+  filterDsModels();
 }
 
 function dsSelectAllModels(on) {
@@ -7859,6 +8988,7 @@ async function saveDownstream() {
     name: name,
     endpoint_types: endpoint_types,
     selected_models: selected_models,
+    model_prices: _dsModelPrices,
     auto_update: !!( $('dsAutoUpdate') && $('dsAutoUpdate').checked ),
     notes: ($('dsNotes') && $('dsNotes').value) || '',
   };
@@ -7968,26 +9098,256 @@ async function loadHealthMonitor() {
 
 var _checkinVendors = [];
 var _archivedVendors = [];
+var _checkinData = {};   // vendor_id => {balance, checkin, token_key_id}
 
 async function loadCheckinPage() {
   try {
-    var res = await api('/api/checkin/vendors?support=all');
-    _checkinVendors = (res && res.vendors) || [];
+    var vres = await api('/api/vendors');
+    _checkinVendors = (vres && vres.vendors) || [];
   } catch (e) {
     _checkinVendors = [];
-    showToast((e && e.message) || 'load failed', 'error');
+    showToast((e && e.message) || 'load vendors failed', 'error');
   }
-  // fill vendor filter
   var sel = $('checkinVendorFilter');
   if (sel) {
     var cur = sel.value || '';
-    var opts = '<option value="">' + esc(_('checkin.filterAllVendors') || 'All vendors') + '</option>';
+    sel.innerHTML = '<option value="">' + esc(_('checkin.filterAllVendors') || 'All vendors') + '</option>';
     _checkinVendors.forEach(function(v) {
-      opts += '<option value="' + esc(String(v.id)) + '">' + esc(v.name || v.provider || v.id) + '</option>';
+      sel.innerHTML += '<option value="' + esc(String(v.id)) + '">' + esc(v.name || v.provider || v.id) + '</option>';
     });
-    sel.innerHTML = opts;
     if (cur) sel.value = cur;
   }
+  _checkinData = {};
+  renderCheckinTable();
+  // Auto-load balances for vendors that have a token-bearing key
+  var withToken = (_checkinVendors || []).filter(function(v) { return _vendorTokenKey(v); });
+  for (var i = 0; i < withToken.length; i++) {
+    loadVendorCheckinInfo(String(withToken[i].id));
+  }
+  var btn = $('checkinAllBtn');
+  if (btn) btn.style.display = withToken.length ? '' : 'none';
+}
+
+// Returns a key to use for the relay API path when the vendor has an account
+// token (either vendor-level or on any key). Null when no token is configured.
+function _vendorTokenKey(v) {
+  if (!v) return null;
+  var keys = v.keys || [];
+  var keyToken = null;
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i] && keys[i].access_token_set) { keyToken = keys[i]; break; }
+  }
+  if (!v.access_token_set && !keyToken) return null;
+  if (keyToken) return keyToken;
+  var live = keys.filter(function(k) { return k && !k.archived; });
+  return live[0] || keys[0] || null;
+}
+
+async function loadVendorCheckinInfo(vendorId) {
+  var v = (_checkinVendors || []).find(function(x) { return String(x.id) === String(vendorId); });
+  if (!v) return;
+  var tk = _vendorTokenKey(v);
+  if (!tk) { renderCheckinTable(); return; }
+  var info = {balance: null, checkin: {__status: 'unknown'}, keyId: String(tk.id)};
+  try {
+    info.balance = await api('/api/vendors/' + vendorId + '/keys/' + tk.id + '/balance');
+  } catch (e) {}
+  try {
+    var ci = await api('/api/vendors/' + vendorId + '/keys/' + tk.id + '/checkin-status');
+    ci.__status = 'ready';
+    if (ci.unsupported || ci.enabled === false) ci.__status = 'unsupported';
+    else if (ci.needs_access_token) ci.__status = 'no_token';
+    else if (ci.needs_user_id) ci.__status = 'needs_user_id';
+    else if (ci.needs_turnstile) ci.__status = 'needs_turnstile';
+    else if (ci.checked_in_today) ci.__status = 'done';
+    else if (ci.error) ci.__status = 'failed';
+    info.checkin = ci;
+    if (ci.checkin_count != null) info.checkinCount = ci.checkin_count;
+    if (Array.isArray(ci.records)) info.siteRecords = ci.records;
+  } catch (e) {
+    info.checkin = {__status: 'unsupported', error: String(e && e.message || e)};
+  }
+  _checkinData[String(vendorId)] = info;
+  renderCheckinTable();
+}
+
+async function doVendorCheckin(vendorId, cell) {
+  var v = (_checkinVendors || []).find(function(x) { return String(x.id) === String(vendorId); });
+  if (!v) return;
+  var tk = _vendorTokenKey(v);
+  if (!tk) {
+    if (v.checkin_url) {
+      window.open(v.checkin_url, '_blank', 'noopener,noreferrer');
+      showToast(_('checkin.openedLink') || 'Opened check-in link', 'info');
+    } else {
+      showToast(_('checkin.needsToken') || 'This vendor has no access token', 'warning');
+      if (!_checkinData[String(vendorId)]) _checkinData[String(vendorId)] = {};
+      _checkinData[String(vendorId)].checkin = {__status: 'unsupported'};
+      renderCheckinTable();
+    }
+    return;
+  }
+  if (cell) { cell.disabled = true; cell.textContent = '\u23F3'; }
+  var newStatus = {__status: 'failed', error: ''};
+  try {
+    var resp = await api('/api/vendors/' + vendorId + '/keys/' + tk.id + '/checkin', { method: 'POST', body: JSON.stringify({}) });
+    if (resp && resp.claimed) {
+      newStatus = {__status: 'done', claimed: true, quota_awarded: resp.quota_awarded};
+      showToast((_('checkin.success') || 'Check-in success!') + (resp.quota_awarded ? ' \u00b7 +' + resp.quota_awarded : ''), 'success');
+    } else if (resp && resp.checkin_date) {
+      newStatus = {__status: 'done', checkin_date: resp.checkin_date};
+      showToast(_('checkin.done') || 'Already checked in today', 'info');
+    } else if (resp && resp.needs_access_token) {
+      newStatus = {__status: 'no_token'};
+      showToast(_('checkin.needsToken') || 'Needs system access token', 'warning');
+    } else if (resp && resp.needs_turnstile) {
+      newStatus = {__status: 'needs_turnstile', error: resp.error || ''};
+      showToast(_('checkin.needsTurnstile') || 'This site requires a captcha to check in', 'warning');
+    } else if (resp && resp.error) {
+      newStatus = {__status: 'failed', error: resp.error};
+      showToast(resp.error, 'error');
+    } else {
+      newStatus = {__status: 'unsupported'};
+      showToast(_('checkin.notAvailable') || 'Check-in not available', 'info');
+    }
+  } catch (e) {
+    newStatus = {__status: 'failed', error: String(e && e.message || e)};
+    showToast('Check-in failed', 'error');
+  }
+  // Update status immediately + refresh from the site for authoritative state
+  if (!_checkinData[String(vendorId)]) _checkinData[String(vendorId)] = {};
+  _checkinData[String(vendorId)].checkin = newStatus;
+  // Patch the local persisted record so the UI + Records count update at once
+  try {
+    var _d = new Date().toISOString().slice(0, 10);
+    if (!v.checkin_log) v.checkin_log = {};
+    v.checkin_log[_d] = {
+      status: (newStatus.__status === 'done' ? (newStatus.claimed ? 'success' : 'done') : newStatus.__status),
+      reward: newStatus.quota_awarded != null ? newStatus.quota_awarded : null,
+      error: newStatus.error || '',
+      ts: new Date().toISOString(),
+    };
+    if (newStatus.__status === 'done') v.checkin_last = _d;
+  } catch (e) {}
+  renderCheckinTable();
+  // Re-pull the site's own check-in status + records (authoritative)
+  try { await loadVendorCheckinInfo(vendorId); } catch (e) {}
+}
+
+async function checkinAllRelay() {
+  var btn = $('checkinAllBtn');
+  var btnLabel = btn ? (btn.textContent || '') : '';
+  if (btn) { btn.disabled = true; btn.textContent = '\u23F3 ' + (btnLabel || '...'); }
+  var list = (_checkinVendors || []).filter(function(v) { return _vendorTokenKey(v); });
+  var done = 0, failed = 0;
+  for (var i = 0; i < list.length; i++) {
+    var v = list[i];
+    var vid = String(v.id);
+    var tk = _vendorTokenKey(v);
+    if (!_checkinData[vid]) _checkinData[vid] = {};
+    _checkinData[vid].checkin = {__status: 'running'};
+    renderCheckinTable();
+    try {
+      var resp = await api('/api/vendors/' + vid + '/keys/' + tk.id + '/checkin', { method: 'POST', body: JSON.stringify({}) });
+      if (resp && resp.claimed) {
+        _checkinData[vid].checkin = {__status: 'done', claimed: true, quota_awarded: resp.quota_awarded};
+        done++;
+      } else if (resp && resp.checkin_date) {
+        _checkinData[vid].checkin = {__status: 'done', checkin_date: resp.checkin_date};
+        done++;
+      } else if (resp && resp.needs_access_token) {
+        _checkinData[vid].checkin = {__status: 'no_token'};
+        failed++;
+      } else if (resp && resp.needs_turnstile) {
+        _checkinData[vid].checkin = {__status: 'needs_turnstile', error: resp.error || ''};
+        failed++;
+      } else if (resp && resp.error) {
+        _checkinData[vid].checkin = {__status: 'failed', error: resp.error};
+        failed++;
+      } else {
+        _checkinData[vid].checkin = {__status: 'unsupported'};
+        failed++;
+      }
+    } catch (e) {
+      _checkinData[vid].checkin = {__status: 'failed', error: String(e && e.message || e)};
+      failed++;
+    }
+    renderCheckinTable();
+    await new Promise(function(r) { setTimeout(r, 400); });
+  }
+  if (btn) { btn.disabled = false; btn.textContent = btnLabel; }
+  // Refresh balances in background
+  for (var j = 0; j < list.length; j++) {
+    try {
+      var bal = await api('/api/vendors/' + list[j].id + '/keys/' + _vendorTokenKey(list[j]).id + '/balance?force=1');
+      _checkinData[String(list[j].id)].balance = bal;
+    } catch (e) {}
+  }
+  renderCheckinTable();
+  showToast((_('checkin.allResult') || 'Check-in: {ok} success, {fail} failed')
+    .replace('{ok}', String(done)).replace('{fail}', String(failed)),
+    failed ? (done ? 'warning' : 'error') : 'success');
+}
+
+function _renderCheckinBalance(cell, bal) {
+  if (!cell) return;
+  if (!bal || bal.needs_access_token) { cell.textContent = '\uD83D\uDD11'; cell.style.color = ''; cell.style.fontWeight = ''; return; }
+  if (bal.error) { cell.textContent = '\u2014'; cell.title = bal.error; cell.style.color = ''; cell.style.fontWeight = ''; return; }
+  if (bal.available != null) {
+    cell.textContent = formatCurrency(bal.available, 'USD');
+    cell.style.fontWeight = '600';
+    var amt = parseFloat(bal.available) || 0;
+    cell.style.color = amt < 1 ? 'var(--danger, #ef4444)' : amt < 10 ? 'var(--warning, #f59e0b)' : 'var(--success, #22c55e)';
+  } else {
+    cell.textContent = '\u2014'; cell.style.fontWeight = ''; cell.style.color = '';
+  }
+}
+
+function _availBadge(v) {
+  var av = v && v.availability;
+  if (!av || av.reachable == null) return '';
+  if (av.reachable === true) {
+    var tip = (av.latency_ms != null ? av.latency_ms + 'ms' : '') + (av.status_code ? ' \u00b7 HTTP ' + av.status_code : '');
+    return ' <span class="badge badge-ok" title="' + esc(tip) + '">' + esc(_('checkin.availYes') || '\u53ef\u7528') + '</span>';
+  }
+  return ' <span class="badge badge-fail" title="' + esc(av.error || '') + '">' + esc(_('checkin.availNo') || '\u4e0d\u53ef\u7528') + '</span>';
+}
+
+function _statusBadge(v) {
+  var st = (v && v.status) || '';
+  if (!st) return '';
+  var map = {
+    normal: ['badge-ok', _('vendorStatus.normal') || '\u6b63\u5e38'],
+    registrable: ['badge', _('vendorStatus.registrable') || '\u53ef\u6ce8\u518c'],
+    unreachable: ['badge-fail', _('vendorStatus.unreachable') || '\u65e0\u6cd5\u8bbf\u95ee'],
+    banned: ['badge-fail', _('vendorStatus.banned') || '\u5df2\u5c01\u7981']
+  };
+  var m = map[st];
+  if (!m) return '';
+  return ' <span class="badge ' + m[0] + '">' + esc(m[1]) + '</span>';
+}
+
+async function checkAllVendorAvailability() {
+  var btn = $('checkinAvailBtn');
+  if (btn) btn.disabled = true;
+  try { showGlobalLoading(_('checkin.checkingAvailability') || 'Checking vendor availability\u2026'); } catch (e) {}
+  try {
+    var res = await api('/api/vendors/availability', { method: 'POST', body: JSON.stringify({}) });
+    if (res && res.error) {
+      showToast(res.error, 'error');
+    } else if (res) {
+      var results = res.results || {};
+      (_checkinVendors || []).forEach(function(v) {
+        if (results[String(v.id)]) v.availability = results[String(v.id)];
+      });
+      showToast((_('checkin.availResult') || '{ok} reachable / {fail} unreachable')
+        .replace('{ok}', String(res.reachable || 0)).replace('{fail}', String(res.unreachable || 0)), 'success');
+    }
+  } catch (e) {
+    showToast('Availability check failed: ' + (e && e.message || e), 'error');
+  }
+  try { hideGlobalLoading(); } catch (e) {}
+  if (btn) btn.disabled = false;
   renderCheckinTable();
 }
 
@@ -7997,49 +9357,158 @@ function renderCheckinTable() {
   var vid = ($('checkinVendorFilter') && $('checkinVendorFilter').value) || '';
   var support = ($('checkinSupportFilter') && $('checkinSupportFilter').value) || 'all';
   var vtype = ($('checkinTypeFilter') && $('checkinTypeFilter').value) || '';
+  var hideDone = !!($('checkinHideDone') && $('checkinHideDone').checked);
+  var availF = ($('checkinAvailFilter') && $('checkinAvailFilter').value) || 'all';
+  var statusF = ($('checkinStatusFilter') && $('checkinStatusFilter').value) || '';
+
   var rows = (_checkinVendors || []).filter(function(v) {
     if (vid && String(v.id) !== String(vid)) return false;
-    if (support === 'yes' && !v.supports_checkin) return false;
-    if (support === 'no' && v.supports_checkin) return false;
     if (vtype && (v.vtype || '') !== vtype) return false;
+    var tk = _vendorTokenKey(v);
+    if (support === 'token' && !tk) return false;
+    if (support === 'url' && !v.checkin_url) return false;
+    if (support === 'no' && tk) return false;
+    // Availability filter
+    if (availF !== 'all') {
+      var av = v.availability || {};
+      if (availF === 'yes' && av.reachable !== true) return false;
+      if (availF === 'no' && av.reachable !== false) return false;
+    }
+    // Status filter
+    if (statusF && (v.status || 'normal') !== statusF) return false;
+    // Hide vendors already checked in today
+    if (hideDone && tk) {
+      var _d = new Date().toISOString().slice(0, 10);
+      var info = _checkinData[String(v.id)];
+      var _st = info && info.checkin && info.checkin.__status;
+      if (v.checkin_last === _d || _st === 'done') return false;
+    }
     return true;
   });
-  var yes = rows.filter(function(v) { return v.supports_checkin; }).length;
-  var no = rows.length - yes;
+
+  var tokenCount = rows.filter(function(v) { return _vendorTokenKey(v); }).length;
   var sum = $('checkinSummary');
   if (sum) {
-    sum.textContent = (_('checkin.summary') || '{total} total · {yes} supported · {no} not')
-      .replace('{total}', String(rows.length))
-      .replace('{yes}', String(yes))
-      .replace('{no}', String(no));
+    sum.textContent = (_('checkin.summary') || '{total} vendors \u00b7 {token} can check in')
+      .replace('{total}', String(rows.length)).replace('{token}', String(tokenCount));
   }
+
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="4" class="todo-empty">' + esc(_('checkin.none') || 'No matching vendors') + '</td></tr>';
     return;
   }
+
   body.innerHTML = rows.map(function(v) {
-    var id = String(v.id || '');
-    var idSafe = esc(id).replace(/'/g, "\\'");
-    var url = v.checkin_url || '';
-    var supportBadge = url
-      ? '<span class="badge badge-ok">' + esc(_('checkin.yes') || 'Yes') + '</span>'
-      : '<span class="badge">' + esc(_('checkin.no') || 'No') + '</span>';
-    var urlCell = url
-      ? '<span class="checkin-url-cell" title="' + esc(url) + '">' + esc(url) + '</span>'
-      : '<span class="form-hint">—</span>';
-    var actions = [];
-    if (url) {
-      actions.push('<button class="btn btn-sm btn-primary" onclick="runCheckin(\'' + idSafe + '\')">' + esc(_('checkin.run') || 'Check in') + '</button>');
-      actions.push('<button class="btn btn-sm btn-warning" onclick="disableCheckin(\'' + idSafe + '\')">' + esc(_('checkin.disable') || 'Disable check-in') + '</button>');
+    var vid = String(v.id || '');
+    var vidSafe = esc(vid).replace(/'/g, "\\'");
+    var tk = _vendorTokenKey(v);
+    var keyCount = (v.keys || []).filter(function(k) { return !k.archived; }).length;
+
+    // Balance cell (account-level)
+    var info = _checkinData[vid];
+    var balHtml;
+    if (!tk) {
+      balHtml = '<span class="muted">\u2014</span>';
+    } else if (info && info.balance) {
+      balHtml = '<span class="checkin-balance"></span>';
+    } else {
+      balHtml = '<span class="checkin-balance">\u23F3</span>';
     }
-    actions.push('<button class="btn btn-sm" onclick="checkinEditVendor(\'' + idSafe + '\')">' + esc(_('checkin.editVendor') || 'Edit vendor') + '</button>');
-    return '<tr data-checkin-vendor="' + esc(id) + '">' +
-      '<td><strong>' + esc(v.name || '') + '</strong><div class="form-hint">' + esc(v.provider || '') + ' · ' + esc(String(v.enabled_key_count || 0)) + '/' + esc(String(v.key_count || 0)) + ' keys</div></td>' +
-      '<td>' + supportBadge + '</td>' +
-      '<td>' + urlCell + '</td>' +
-      '<td class="actions-cell">' + actions.join('') + '</td>' +
-      '</tr>';
+
+    // Check-in status cell — live status is authoritative
+    var statusHtml;
+    var _today = new Date().toISOString().slice(0, 10);
+    var todayRec = (v.checkin_log && v.checkin_log[_today]) || null;   // local persisted today
+    var st = (info && info.checkin && info.checkin.__status) || (tk ? 'ready' : 'unsupported');
+    var rewardVal = (info && info.checkin && info.checkin.quota_awarded != null)
+      ? info.checkin.quota_awarded
+      : (todayRec ? todayRec.reward : null);
+    // Fall back to the site's own record for today
+    if (rewardVal == null && info && Array.isArray(info.siteRecords)) {
+      var _tr = info.siteRecords.filter(function(r) { return r.date === _today; })[0];
+      if (_tr) rewardVal = _tr.reward;
+    }
+    // Convert quota -> USD when we know the site rate
+    var qpu = (info && info.balance && info.balance.raw && info.balance.raw.quota_per_unit) || 0;
+    var rewardUsd = (rewardVal != null && qpu > 0) ? (rewardVal / qpu) : null;
+    var failReason = (info && info.checkin && info.checkin.error) || (todayRec ? todayRec.error : '') || '';
+
+    if (st === 'running') {
+      statusHtml = '<span class="badge">\u23F3 ' + esc(_('checkin.running') || 'Signing in...') + '</span>';
+    } else if (!tk) {
+      statusHtml = '<span class="badge badge-muted">' + esc(_('checkin.unsupported') || 'Not supported') + '</span>';
+    } else if (st === 'done') {
+      var rewardTxt = '';
+      if (rewardVal != null && rewardVal > 0) {
+        var rShow = (rewardUsd != null) ? formatCurrency(rewardUsd, 'USD') : (formatAmount(rewardVal) + ' quota');
+        rewardTxt = ' <span class="checkin-reward">+' + rShow + '</span>';
+      }
+      statusHtml = '<span class="badge badge-ok">' + esc(_('checkin.statusDone') || 'Checked in') + rewardTxt + '</span>';
+    } else if (st === 'failed') {
+      statusHtml = '<span class="badge badge-fail">' + esc(_('checkin.statusFailed') || 'Check-in failed') + '</span>'
+        + (failReason ? '<div class="checkin-fail-reason">' + esc(failReason) + '</div>' : '');
+    } else if (st === 'unsupported') {
+      statusHtml = '<span class="badge badge-muted">' + esc(_('checkin.unsupported') || 'Not supported') + '</span>'
+        + (failReason ? '<div class="form-hint" style="margin-top:4px;white-space:normal;overflow-wrap:anywhere">' + esc(failReason) + '</div>' : '');
+    } else if (st === 'no_token') {
+      statusHtml = '<span class="badge badge-muted">' + esc(_('checkin.noToken') || 'No token') + '</span>';
+    } else if (st === 'needs_user_id') {
+      statusHtml = '<span class="badge badge-warn" style="cursor:pointer" onclick="editVendorById(\'' + vidSafe + '\')">' + esc(_('checkin.needsUserId') || 'User ID required') + '</span>'
+        + '<div class="form-hint" style="margin-top:4px;white-space:normal;overflow-wrap:anywhere">' + esc(failReason || (_('checkin.needsUserIdHint') || 'Add the numeric user ID on this key')) + '</div>';
+    } else if (st === 'needs_turnstile') {
+      var checkinUrl = v.checkin_url || (v.api_url || '').replace(/\/v\d*\/?$/, '') + '/checkin';
+      statusHtml = '<span class="badge badge-warn">' + esc(_('checkin.needsTurnstile') || 'Captcha required') + '</span>'
+        + '<div class="form-hint" style="margin-top:4px;white-space:normal;overflow-wrap:anywhere">' + esc(failReason || (_('checkin.needsTurnstileHint') || 'Open the site\u2019s check-in page to complete the captcha manually')) + '</div>'
+        + '<button class="btn btn-sm" style="margin-top:4px" onclick="window.open(\'' + esc(checkinUrl).replace(/'/g, "\\'") + '\', \'_blank\', \'noopener,noreferrer\')">' + esc(_('checkin.openPage') || 'Open check-in page') + '</button>';
+    } else if (st === 'ready') {
+      statusHtml = '<span class="badge">' + esc(_('checkin.ready') || 'Ready') + '</span>';
+    } else {
+      statusHtml = '<span class="muted">\u2014</span>';
+    }
+
+    // Actions
+    var actions = [];
+    // Manual check-in (access_token based)
+    if (tk) {
+      actions.push('<button class="btn btn-sm btn-primary" onclick="doVendorCheckin(\'' + vidSafe + '\', this)">' + esc(_('checkin.run') || 'Check in') + '</button>');
+    }
+    // External check-in URL link (legacy)
+    if (v.checkin_url) {
+      var urlSafe = esc(v.checkin_url).replace(/'/g, "\\'");
+      actions.push('<button class="btn btn-sm" onclick="window.open(\'' + urlSafe + '\', \'_blank\', \'noopener,noreferrer\')">' + esc(_('checkin.openUrl') || 'Open link') + '</button>');
+    }
+    // History
+    if (v.checkin_log && Object.keys(v.checkin_log).length) {
+      var hasRec = Object.keys(v.checkin_log).length;
+      actions.push('<button class="btn btn-sm" onclick="showCheckinHistory(\'' + vidSafe + '\')">' + esc(_('checkin.history') || 'Records') + ' (' + hasRec + ')</button>');
+    }
+    actions.push('<button class="btn btn-sm" onclick="editVendorById(\'' + vidSafe + '\')">' + esc(_('checkin.editVendor') || 'Edit vendor') + '</button>');
+
+    // Token indicator in vendor cell (just show presence, not the key name)
+    var tokenBadge = tk
+      ? '<span class="badge badge-ok" title="' + esc(_('checkin.tokenPresent') || 'Access token set') + '">' + esc(_('checkin.tokenOn') || 'Token') + '</span>'
+      : '<span class="badge" title="' + esc(_('checkin.noToken') || 'No access token') + '">' + esc(_('checkin.tokenOff') || 'No token') + '</span>';
+
+    return '<tr data-vendor-id="' + esc(vid) + '">'
+      + '<td><strong>' + esc(v.name || '') + '</strong> ' + tokenBadge + _availBadge(v) + _statusBadge(v) + '<div class="form-hint">' + esc(v.provider || '') + ' \u00b7 ' + keyCount + ' keys</div></td>'
+      + '<td class="balance-cell-wrap">' + balHtml + '</td>'
+      + '<td>' + statusHtml + '</td>'
+      + '<td class="actions-cell">' + actions.join('') + '</td>'
+      + '</tr>';
   }).join('');
+
+  // Fill balance values now that cells exist
+  rows.forEach(function(v) {
+    var vid = String(v.id);
+    var info = _checkinData[vid];
+    if (!info || !info.balance) return;
+    var cell = document.querySelector('tr[data-vendor-id="' + vid + '"] .checkin-balance');
+    if (cell) _renderCheckinBalance(cell, info.balance);
+  });
+}
+
+function editVendorById(vendorId) {
+  selectVendor(vendorId).then(function() { editVendor(); });
 }
 
 // ── Archived (归档) ──────────────────────
@@ -9016,6 +10485,7 @@ async function maybeShowDataRecovery() {
 
 (async function boot() {
   await checkAuthOnBoot();
+  _restoreSidebar();
   loadAppVersion();
   switchView(getInitialView(), { skipHash: false });
   maybeShowOnboarding();

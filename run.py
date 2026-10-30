@@ -47,6 +47,16 @@ if __name__ == "__main__":
     url = f"http://{host}:{port}"
     print(f"AI Switch v{version}")
     print(f"Running at {url}")
+
+    # A routable bind address exposes the key database to the network, so a
+    # token is generated and printed. A loopback bind keeps working as before.
+    from core.access import format_access_notice, resolve_access_token
+
+    _access = resolve_access_token(host)
+    _notice = format_access_notice(host, port, _access)
+    if _notice:
+        print(_notice)
+
     if os.environ.get("AI_SWITCH_OPEN_BROWSER", "1").lower() in ("1", "true", "yes"):
         threading.Timer(0.8, _open_browser, args=(url,)).start()
     try:
