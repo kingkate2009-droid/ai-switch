@@ -901,6 +901,8 @@
   "keyModal.balanceTokenPh": "System access token from the site's Personal Settings",
   "keyModal.balanceTokenHint": "Only needed to show remaining balance on New API / One API / sub2api relays. The sk- inference key cannot read balance.",
   "keyModal.balanceTokenSet": "A balance access token is already saved (leave blank to keep it).",
+  "keyModal.balanceTokenClear": "Remove saved token",
+  "keyModal.balanceTokenWillClear": "The saved balance access token will be removed when you save.",
   "table.balanceClick": "Click to refresh balance",
   "balance.tokenRequired": "A balance access token is required on this key.",
   "balance.checkin": "Sign in (daily)",

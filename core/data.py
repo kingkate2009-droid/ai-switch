@@ -1000,6 +1000,7 @@ _KEY_FIELDS = (
     "disabled_models", "sync_models", "model_health", "endpoint_capabilities", "quality_scores", "notes", "role",
     "archived",
     "access_token",  # optional system token used only for relay balance lookups (New API / One API)
+    "access_token_user_id",  # New-Api-User header for sites that scope the token to a user
 )
 
 # role: "" | "primary" | "backup"
@@ -1177,6 +1178,8 @@ def _apply_key_fields(k: dict, kwargs: dict) -> None:
         val = kwargs[key]
         if key == "notes":
             val = str(val or "")[:500]
+        elif key in ("access_token", "access_token_user_id"):
+            val = str(val or "").strip()
         elif key == "sync_models":
             if val is not None and not isinstance(val, list):
                 val = []

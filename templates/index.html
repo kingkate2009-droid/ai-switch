@@ -1514,6 +1514,7 @@
         </div>
         <p class="form-hint" data-i18n="keyModal.balanceTokenHint">{{ t('keyModal.balanceTokenHint') }}</p>
         <span id="keyBalanceTokenStatus" class="form-hint" style="display:none"></span>
+        <button type="button" class="btn-link" id="keyBalanceTokenClearBtn" onclick="clearBalanceToken()" style="display:none" data-i18n="keyModal.balanceTokenClear">{{ t('keyModal.balanceTokenClear') }}</button>
       </div>
       <div class="form-group">
         <label for="keyRole" data-i18n="keyModal.role">{{ t('keyModal.role') }}</label>
@@ -5284,9 +5285,29 @@ function showAddKeyModal() {
   if ($('keyNotes')) $('keyNotes').value = '';
   if ($('keyRole')) $('keyRole').value = '';
   if ($('keyBalanceToken')) $('keyBalanceToken').value = '';
+  _balanceTokenCleared = false;
+  _setBalanceTokenClearable(false);
   _setBalanceTokenStatus('');
   _fillKeyCheckModelSelect(null);
   $('keyModal').classList.add('open');
+}
+
+// A saved balance token could previously only be replaced, never removed, which
+// also kept the vendor in the check-in flow forever. Saving an empty value is
+// now an explicit action instead of "leave blank to keep it".
+var _balanceTokenCleared = false;
+
+function _setBalanceTokenClearable(show) {
+  var btn = $('keyBalanceTokenClearBtn');
+  if (btn) btn.style.display = show ? '' : 'none';
+}
+
+function clearBalanceToken() {
+  _balanceTokenCleared = true;
+  var inp = $('keyBalanceToken');
+  if (inp) inp.value = '';
+  _setBalanceTokenClearable(false);
+  _setBalanceTokenStatus(_('keyModal.balanceTokenWillClear') || 'The saved balance access token will be removed when you save.');
 }
 
 function _setBalanceTokenStatus(text) {
@@ -5309,7 +5330,11 @@ function toggleBalanceTokenVisibility() {
   }
 }
 
-function closeKeyModal() { $('keyModal').classList.remove('open'); }
+function closeKeyModal() {
+  $('keyModal').classList.remove('open');
+  _balanceTokenCleared = false;
+  _setBalanceTokenClearable(false);
+}
 
 function toggleKeyVisibility() {
   const inp = $('keyApiKey');
@@ -5332,9 +5357,11 @@ async function saveKey() {
     role: ($('keyRole') && $('keyRole').value) || '',
     check_model: _readKeyCheckModel(),
   };
-  // Only send the balance access token when the user typed one (avoid wiping it)
+  // Send the balance token only when the user typed one (so editing a key does
+  // not wipe it), or when they explicitly asked to clear it.
   var balTok = ($('keyBalanceToken') && $('keyBalanceToken').value.trim()) || '';
   if (balTok) data.access_token = balTok;
+  else if (_balanceTokenCleared) data.access_token = '';
   if (!data.name || !data.api_key) { alert(_('validation.nameAndKeyRequired') || 'Name and API Key are required'); return; }
   var keyIdToCheck = null;
   var vendorIdToCheck = selectedVendorId;
@@ -5380,6 +5407,8 @@ async function editKey(vendorId, keyId) {
   if ($('keyNotes')) $('keyNotes').value = k.notes || '';
   if ($('keyRole')) $('keyRole').value = k.role || '';
   if ($('keyBalanceToken')) $('keyBalanceToken').value = '';
+  _balanceTokenCleared = false;
+  _setBalanceTokenClearable(!!k.access_token_set);
   _setBalanceTokenStatus(k.access_token_set ? (_('keyModal.balanceTokenSet') || 'A balance access token is already saved (leave blank to keep it).') : '');
   _fillKeyCheckModelSelect(k);
   $('keyModal').classList.add('open');

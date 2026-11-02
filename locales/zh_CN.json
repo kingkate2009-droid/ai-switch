@@ -900,6 +900,8 @@
   "keyModal.balanceTokenPh": "站点「个人设置」里生成的系统访问令牌",
   "keyModal.balanceTokenHint": "仅用于在 New API / One API / sub2api 转发站显示剩余额度；sk- 推理密钥无法查询余额。",
   "keyModal.balanceTokenSet": "已保存余额查询令牌（留空则保持不变）。",
+  "keyModal.balanceTokenClear": "清除已保存的令牌",
+  "keyModal.balanceTokenWillClear": "保存后将清除已保存的余额查询令牌。",
   "table.balanceClick": "点击刷新余额",
   "balance.tokenRequired": "此 key 需要余额查询令牌",
   "balance.checkin": "每日签到",

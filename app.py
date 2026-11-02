@@ -1315,6 +1315,12 @@ def api_create_key(vendor_id):
         extra = {}
         if data.get("role"):
             extra["role"] = data.get("role")
+        # The balance system token is often filled in while adding the key; it
+        # used to be dropped here, so the value only existed after a later edit.
+        if "access_token" in data:
+            extra["access_token"] = str(data.get("access_token") or "").strip()
+        if "access_token_user_id" in data:
+            extra["access_token_user_id"] = str(data.get("access_token_user_id") or "").strip()
         if "check_model" in data:
             extra["check_model"] = str(data.get("check_model") or "").strip()
         if "check_models" in data:

@@ -900,6 +900,8 @@
   "keyModal.balanceTokenPh": "站點「個人設定」裡產生的系統存取權杖",
   "keyModal.balanceTokenHint": "僅用於在 New API / One API / sub2api 轉發站顯示剩餘額度；sk- 推理金鑰無法查詢餘額。",
   "keyModal.balanceTokenSet": "已儲存餘額查詢權杖（留空則維持不變）。",
+  "keyModal.balanceTokenClear": "清除已儲存的權杖",
+  "keyModal.balanceTokenWillClear": "儲存後將清除已儲存的餘額查詢權杖。",
   "table.balanceClick": "點擊重新整理餘額",
   "balance.tokenRequired": "此 key 需要餘額查詢權杖",
   "balance.checkin": "每日簽到",

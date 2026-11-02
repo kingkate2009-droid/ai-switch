@@ -1716,6 +1716,20 @@ td:last-child {
   line-height: 1.4;
 }
 
+/* Inline text-action used next to a form hint (e.g. clearing a saved secret) */
+.btn-link {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--danger, #ef4444);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.btn-link:hover { opacity: 0.8; }
+
 /* ── Key Toolbar ───────────────── */
 
 .key-toolbar {

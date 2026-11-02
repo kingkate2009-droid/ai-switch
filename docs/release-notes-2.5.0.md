@@ -53,6 +53,44 @@ never raises and never blocks. Gate order is `disabled → not subscribed →
 quiet hours (critical exempt) → no channel → rate limited`. Budget evaluation
 runs on its own 300 s tick so it works even with health checks off.
 
+## Volcengine Ark (火山方舟)
+
+The old single preset pointed at `…/api/coding/v3`, which is the **Coding Plan**
+endpoint. Anyone using a normal pay-as-you-go Ark key got model-not-found errors
+from it, so Volcengine "did not work".
+
+Ark is now four presets, because the two products differ in base URL, API key
+and model naming:
+
+| Preset | Base URL | Protocol |
+|---|---|---|
+| `volcengine` | `/api/coding/v3` | OpenAI |
+| `volcengine-coding-anthropic` | `/api/coding` | Anthropic |
+| `volcengine-ark` | `/api/v3` | OpenAI |
+| `volcengine-ark-anthropic` | `/api/compatible` | Anthropic |
+
+Probing now picks model candidates from the product the URL belongs to
+(`ark-code-latest` for Coding Plan, dated IDs such as `doubao-seed-2-1-pro-…`
+for pay-as-you-go) instead of sharing one wrong list. `recognize_provider()`
+also matches the **full base URL** rather than only the hostname, so
+`…/api/v3` is no longer mistaken for `…/api/coding/v3`.
+
+Note the asymmetric failure: a Coding Plan key on `/api/v3` does not error, it
+silently bills pay-as-you-go. See [volcengine.md](volcengine.md).
+
+## Balance token fixes
+
+- **A saved balance token can finally be removed.** The client only ever sent
+  `access_token` when the field was non-empty, so once set it could be replaced
+  but never cleared — which also kept that vendor inside the check-in flow
+  forever. There is now an explicit "remove saved token" action.
+- **Setting the token while adding a key works.** `POST /keys` ignored it and
+  only a later `PUT` stored it, so the value silently vanished.
+- **`access_token_user_id` is persisted.** The key endpoint accepted it but
+  `_KEY_FIELDS` did not, so the `New-Api-User` header value was dropped.
+- Check-in remains strictly manual: `GET /checkin-status` never claims, and the
+  only thing that does is `POST /checkin`.
+
 ## Fixes
 
 - **Targeted pushes no longer delete.** A push scoped to `vendor_ids` or
@@ -70,9 +108,10 @@ runs on its own 300 s tick so it works even with health checks off.
 
 ## Tests and CI
 
-A regression suite (76 checks) covering access policy, push safety, the
-notification engine, account adapters, end-to-end account switching, and app
-smoke tests — plus a template inline-script syntax check. `tests/conftest.py`
+A regression suite (88 checks) covering access policy, push safety, the
+notification engine, account adapters, end-to-end account switching, provider
+presets, the balance-token lifecycle, and app smoke tests — plus a template
+inline-script syntax check. `tests/conftest.py`
 redirects `HOME` before any app module loads, so the suite cannot touch real
 data. CI runs `compileall`, the suite, and the template check.
 
