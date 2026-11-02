@@ -307,7 +307,7 @@ def _chat_candidates_for_vendor(vendor: dict) -> list[str]:
     known_openai = {
         "openai", "deepseek", "openrouter", "groq", "together", "xai",
         "mistral", "cohere", "moonshot", "kimi-code", "zai", "minimax",
-        "alibaba", "volcengine", "fireworks", "stepfun", "deepinfra",
+        "alibaba", "volcengine", "volcengine-ark", "fireworks", "stepfun", "deepinfra",
         "cerebras", "novita", "venice", "zeroone", "ollama", "qianfan",
     }
     if provider in known_openai:

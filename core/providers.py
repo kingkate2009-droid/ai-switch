@@ -248,11 +248,34 @@ PROVIDERS = [
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "check_type": "openai_chat",
     },
+    # Volcengine Ark is two products behind one host with *different* base
+    # URLs, and picking the wrong one is expensive rather than merely broken:
+    # ``/api/v3`` bills pay-as-you-go, ``/api/coding`` draws down a Coding Plan
+    # subscription. They also use different model names, so each variant is its
+    # own preset.
     {
         "id": "volcengine",
-        "name": "Volcengine (Doubao)",
+        "name": "Volcengine Ark · Coding Plan",
         "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
         "check_type": "openai_chat",
+    },
+    {
+        "id": "volcengine-ark",
+        "name": "Volcengine Ark · Pay-as-you-go",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "check_type": "openai_chat",
+    },
+    {
+        "id": "volcengine-coding-anthropic",
+        "name": "Volcengine Ark · Coding Plan (Claude Code)",
+        "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+        "check_type": "anthropic",
+    },
+    {
+        "id": "volcengine-ark-anthropic",
+        "name": "Volcengine Ark · Pay-as-you-go (Claude Code)",
+        "base_url": "https://ark.cn-beijing.volces.com/api/compatible",
+        "check_type": "anthropic",
     },
     {
         "id": "fireworks",
@@ -355,6 +378,22 @@ def recognize_provider(text: str) -> Optional[dict]:
     if direct:
         return direct
 
+    # Several products share one host (Volcengine Ark serves both the Coding
+    # Plan and pay-as-you-go APIs from ark.cn-beijing.volces.com), so match the
+    # full base URL before falling back to host-only matching. Longest base URL
+    # wins, otherwise ``/api/v3`` would claim ``/api/coding/v3``.
+    if "://" in text:
+        best = None
+        for p in PROVIDERS:
+            base = str(p.get("base_url") or "").rstrip("/").lower()
+            if not base:
+                continue
+            if text == base or text.startswith(base + "/") or text.startswith(base + "?"):
+                if best is None or len(base) > len(str(best.get("base_url") or "")):
+                    best = p
+        if best:
+            return best
+
     host_match = re.search(r"https?://([^\s/\"'<>]+)", text)
     if host_match:
         host = _normalize_host(host_match.group(1))
@@ -384,8 +423,41 @@ PROBE_TIMEOUT_QUICK = 8
 
 _MODEL_CANDIDATES = ["gpt-3.5-turbo", "gpt-4o-mini", "deepseek-chat", "glm-4", "qwen-turbo", "mimo-v2.5-pro", ""]
 
-# Volcengine Coding Plan requires specific models
-_VOLCENGINE_MODELS = ["ark-code-latest", "Doubao-Seed-2.0-pro", "Doubao-Seed-2.0-Code", "GLM-4.7", "Kimi-K2.5"]
+# Volcengine Ark uses two unrelated model naming schemes:
+#   * Coding Plan     — short aliases; ``ark-code-latest`` is routed to whatever
+#                       model is selected in the console.
+#   * Pay-as-you-go   — dated model IDs (``doubao-seed-2-1-pro-260915``) or an
+#                       inference endpoint ID (``ep-...``) created in the console.
+# Probing the wrong family answers "model not found", so the candidate list is
+# picked from the base URL instead of being shared.
+_VOLCENGINE_CODING_MODELS = [
+    "ark-code-latest",
+    "doubao-seed-code",
+    "doubao-seed-2.1-pro",
+    "doubao-seed-2.0-pro",
+    "glm-5.3",
+    "glm-4.7",
+    "deepseek-v4.1-flash",
+    "deepseek-v3.2",
+    "kimi-k3",
+    "kimi-k2.5",
+]
+_VOLCENGINE_ARK_MODELS = [
+    "doubao-seed-2-1-pro-260915",
+    "doubao-seed-2-0-pro-260215",
+]
+
+
+def _is_volcengine_url(url: str) -> bool:
+    low = (url or "").lower()
+    return "volces.com" in low or "volcengine" in low
+
+
+def _volcengine_models(url: str) -> list[str]:
+    """Model candidates for a Volcengine Ark URL, matching its product."""
+    if "/coding" in (url or "").lower():
+        return list(_VOLCENGINE_CODING_MODELS)
+    return list(_VOLCENGINE_ARK_MODELS)
 
 
 def _is_model_error(body: str) -> bool:
@@ -534,8 +606,8 @@ def probe_openai_chat(url: str, api_key: str, models_to_try: Optional[list[str]]
     }
     if models_to_try is None:
         discovered = _scan_models_openai(url, headers)
-        if "volces.com" in url or "volcengine" in url.lower():
-            models_to_try = discovered + _VOLCENGINE_MODELS + [""]
+        if _is_volcengine_url(url):
+            models_to_try = discovered + _volcengine_models(url) + [""]
         else:
             models_to_try = discovered + [""] if discovered else _MODEL_CANDIDATES
     
@@ -702,6 +774,13 @@ def probe_anthropic(url: str, api_key: str, models_to_try: Optional[list[str]] =
             if m and m not in seen:
                 seen.add(m)
                 candidates.append(m)
+        # Volcengine Ark serves the Anthropic protocol too, but under different
+        # model names than the Claude defaults below would guess.
+        if _is_volcengine_url(url):
+            for m in _volcengine_models(url):
+                if m and m not in seen:
+                    seen.add(m)
+                    candidates.append(m)
         for m in list(_ANTHROPIC_MODELS) + ["mimo-v2.5-pro", "mimo-v2.5"] + [x for x in _MODEL_CANDIDATES if x]:
             if m and m not in seen:
                 seen.add(m)

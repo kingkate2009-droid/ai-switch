@@ -290,6 +290,7 @@ Also included when you need them: **vendor types (Public/Relay/Raw key)** with f
 | [3-minute quickstart](docs/quickstart.md) | First run |
 | [Codex won’t connect](docs/troubleshoot-codex.md) | Responses / env / models |
 | [Backends](docs/backends.md) | What each engine supports |
+| [Volcengine Ark](docs/volcengine.md) | 火山方舟: four presets, which one to pick |
 | [Account switching](docs/account-switching.md) | Manage logins & switch a tool's account |
 | [Adapter contribution](docs/adapter-contribution.md) | Add a backend |
 
