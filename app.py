@@ -11,7 +11,7 @@ import requests as py_requests
 from flask import Flask, Response, jsonify, render_template, request, make_response
 
 from core.batch_import import parse_batch_text
-from core.providers import get_providers, recognize_provider
+from core.providers import get_providers, recognize_provider, wire_path, wire_profile
 from core.data import (
     add_key,
     # dedupe/snapshot helpers used below
@@ -3228,11 +3228,30 @@ def _join_url(base: str, *parts: str) -> str:
     return url
 
 
+def _adapt_freeai_media(payload: bytes) -> bytes:
+    """Reshape free.ai's image answer into OpenAI's ``{data: [{url}]}``.
+
+    free.ai returns ``{job_id, url, image_url, share_url}``. Clients written
+    against ``/v1/images/generations`` read ``data[0].url``, so passing the
+    native body through would look like an empty result rather than an error.
+    """
+    try:
+        body = json.loads(payload or b"{}")
+    except Exception:
+        return payload
+    if not isinstance(body, dict):
+        return payload
+    url = str(body.get("image_url") or body.get("url") or "").strip()
+    if not url:
+        return payload
+    return json.dumps({"created": int(datetime.now().timestamp()), "data": [{"url": url}]}).encode()
+
+
 def _proxy_upstream(vendor: dict, key: dict, *, path: str, body: bytes, headers: dict, stream: bool):
     api_url = (vendor.get("proxy_target") or vendor.get("api_url") or "").rstrip("/")
     if not api_url:
         raise ValueError("upstream has no api_url")
-    url = _join_url(api_url, path)
+    url = _join_url(api_url, wire_path(api_url, path))
     hdrs = {k: v for k, v in headers.items() if k.lower() not in ("host", "content-length", "authorization", "x-api-key")}
     # inject upstream auth
     ep = (vendor.get("endpoint_type") or "openai").lower()
@@ -3429,12 +3448,18 @@ def _public_media_proxy(*, bucket: str, path: str, default_model: str = ""):
         )
         elapsed_ms = int((datetime.now() - t0).total_seconds() * 1000)
         ok = 200 <= r.status_code < 400
+        content = r.content
+        profile = wire_profile(
+            hit["vendor"].get("proxy_target") or hit["vendor"].get("api_url") or ""
+        )
+        if bucket == "image" and profile.get("media_shape") == "freeai":
+            content = _adapt_freeai_media(content)
         _record_proxy_usage(
-            hit["vendor"], hit["key"], r.content if r.headers.get("Content-Type", "").startswith("application/json") else b"{}",
+            hit["vendor"], hit["key"], content if r.headers.get("Content-Type", "").startswith("application/json") else b"{}",
             elapsed_ms, model=model, status_code=r.status_code, success=ok,
         )
         return Response(
-            r.content,
+            content,
             status=r.status_code,
             content_type=r.headers.get("Content-Type", "application/json"),
         )

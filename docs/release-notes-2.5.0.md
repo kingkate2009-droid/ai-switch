@@ -91,6 +91,30 @@ silently bills pay-as-you-go. See [volcengine.md](volcengine.md).
 - Check-in remains strictly manual: `GET /checkin-status` never claims, and the
   only thing that does is `POST /checkin`.
 
+## free.ai
+
+free.ai returns OpenAI-shaped payloads but does not serve OpenAI's paths, so it
+was previously unusable: chat lives at `/v1/chat/` rather than
+`/v1/chat/completions`, and `/v1/models` answers `{"models": […]}` instead of
+`{"data": […]}`.
+
+- **New `Free.ai` preset** (`https://api.free.ai/v1`). The probe, model scan and
+  downstream proxy all consult a small host-matched wire profile, so the
+  canonical paths are rewritten on the way out while clients keep speaking
+  OpenAI.
+- **Model discovery reads free.ai's own inventory shape.** Only routable types
+  are kept (`chat`, `image`), self-hosted models sort first, and because
+  `/v1/responses` and `/v1/messages` both answer 404 the endpoint candidate list
+  is narrowed to chat completions.
+- **Images are translated, not just forwarded.** free.ai answers
+  `{job_id, url, image_url, share_url}`; the proxy reshapes that into OpenAI's
+  `{created, data: [{url}]}` so existing clients work unchanged.
+- `/v1/image/generate/` and `/v1/chat/` both require their trailing slash, which
+  the probe and proxy preserve.
+- Video, TTS and translate are deliberately **not** routed through the
+  OpenAI-compatible endpoints — their contracts (job URLs, `text`/`target`
+  fields) do not map. See [docs/freeai.md](freeai.md).
+
 ## Fixes
 
 - **Targeted pushes no longer delete.** A push scoped to `vendor_ids` or
@@ -108,10 +132,10 @@ silently bills pay-as-you-go. See [volcengine.md](volcengine.md).
 
 ## Tests and CI
 
-A regression suite (88 checks) covering access policy, push safety, the
+A regression suite (99 checks) covering access policy, push safety, the
 notification engine, account adapters, end-to-end account switching, provider
-presets, the balance-token lifecycle, and app smoke tests — plus a template
-inline-script syntax check. `tests/conftest.py`
+presets, the balance-token lifecycle, free.ai's wire profile, and app smoke
+tests — plus a template inline-script syntax check. `tests/conftest.py`
 redirects `HOME` before any app module loads, so the suite cannot touch real
 data. CI runs `compileall`, the suite, and the template check.
 

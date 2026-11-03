@@ -278,6 +278,12 @@ PROVIDERS = [
         "check_type": "anthropic",
     },
     {
+        "id": "freeai",
+        "name": "Free.ai",
+        "base_url": "https://api.free.ai/v1",
+        "check_type": "openai_chat",
+    },
+    {
         "id": "fireworks",
         "name": "Fireworks AI",
         "base_url": "https://api.fireworks.ai/inference/v1",
@@ -340,6 +346,70 @@ PROVIDERS = [
 ]
 
 PROVIDER_MAP = {p["id"]: p for p in PROVIDERS}
+
+
+# ── Wire profiles ──────────────────────────────────────────
+#
+# A few upstreams return OpenAI-shaped payloads but do not live at OpenAI's
+# paths. free.ai is the worked example: ``/v1/chat/`` instead of
+# ``/v1/chat/completions``, ``{"models": [...]}`` instead of ``{"data": [...]}``,
+# and ``/v1/image/generate/`` instead of ``/v1/images/generations``.
+#
+# Rather than special-casing each call site, this table is matched by hostname
+# and consulted by the probe and the proxy. Entries are additive: anything not
+# listed keeps OpenAI's canonical paths.
+_WIRE_PROFILES = (
+    {
+        "id": "freeai",
+        "hosts": ("api.free.ai",),
+        # Keys are the canonical OpenAI path a caller asks for; values are what
+        # this upstream actually serves. Image responses are also reshaped (see
+        # ``_adapt_freeai_media``): free.ai answers ``{job_id, url}`` where
+        # OpenAI clients expect ``{data: [{url}]}``.
+        "paths": {
+            "chat/completions": "chat/",
+            "images/generations": "image/generate/",
+        },
+        # Video / TTS / translate are deliberately absent: they answer with job
+        # URLs or non-OpenAI fields (``text``/``target``), so passing them
+        # through the OpenAI-compatible routes would return shapes clients
+        # cannot read. Call them natively instead.
+        # Model list shape: {"models": [{"id", "type", "self_hosted"}]}
+        "models_shape": "freeai",
+        # Native media answers need reshaping into OpenAI's contract (see
+        # ``_adapt_freeai_media``).
+        "media_shape": "freeai",
+        # Keep chat + image: both are reachable through the hub (the image
+        # answer is reshaped into OpenAI's ``{data: [{url}]}``). Video/TTS/
+        # translate stay out — their native contracts do not map cleanly.
+        "models_types": ("chat", "image"),
+        # Health checks must not spend premium tokens, so probe the self-hosted
+        # models the daily allowance covers.
+        "probe_models": ["qwen7b", "qwen3-8b", "mistral", "deepseek-r1"],
+    },
+)
+
+
+def wire_profile(url: str) -> dict:
+    """Return the wire profile for a URL's host, or {} for canonical OpenAI."""
+    try:
+        host = (urlparse(str(url or "")).hostname or "").lower()
+    except Exception:
+        host = ""
+    if not host:
+        return {}
+    for profile in _WIRE_PROFILES:
+        for candidate in profile.get("hosts") or ():
+            if host == candidate or host.endswith("." + candidate):
+                return profile
+    return {}
+
+
+def wire_path(url: str, canonical: str) -> str:
+    """Map a canonical OpenAI path to the one this upstream serves."""
+    paths = wire_profile(url).get("paths") or {}
+    return str(paths.get(canonical) or canonical)
+
 
 
 def get_providers() -> list[dict]:
@@ -507,10 +577,11 @@ def _requires_agentic_request(body: str) -> bool:
 def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[list[str]] = None) -> tuple:
     # Use the URL as-is if it already contains a version path
     base = url.rstrip("/")
+    chat_path = wire_path(url, "chat/completions")
     if base.endswith(("/v1", "/v2", "/v3", "/v4")):
-        chat_url = base + "/chat/completions"
+        chat_url = base + "/" + chat_path
     else:
-        chat_url = base + "/v1/chat/completions"
+        chat_url = base + "/v1/" + chat_path
 
     base_payload = {
         "messages": [{"role": "user", "content": probe_prompt()}],
@@ -606,8 +677,14 @@ def probe_openai_chat(url: str, api_key: str, models_to_try: Optional[list[str]]
     }
     if models_to_try is None:
         discovered = _scan_models_openai(url, headers)
+        profile = wire_profile(url)
         if _is_volcengine_url(url):
             models_to_try = discovered + _volcengine_models(url) + [""]
+        elif profile.get("probe_models"):
+            # Probe the profile's free models first, then whatever the vendor
+            # advertises. Health checks must not spend premium tokens purely
+            # because inventory listed a paid model first.
+            models_to_try = list(profile["probe_models"]) + discovered + [""]
         else:
             models_to_try = discovered + [""] if discovered else _MODEL_CANDIDATES
     
@@ -1002,7 +1079,10 @@ def _probe_json_post(url: str, headers: dict, payload: dict, *, label: str) -> t
 def probe_openai_images(url: str, api_key: str, model: str = "") -> tuple:
     """Probe OpenAI Images generations API."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    endpoint_url = _openai_versioned_path(url, "images/generations")
+    mapped = wire_path(url, "images/generations")
+    endpoint_url = _openai_versioned_path(url, mapped)
+    if mapped.endswith("/") and not endpoint_url.endswith("/"):
+        endpoint_url += "/"
     payload = {
         "prompt": "a red circle on white background",
         "n": 1,
@@ -1130,6 +1210,39 @@ def _is_chat_model(model_id: str) -> bool:
     return _is_inventory_model(model_id)
 
 
+def _models_from_freeai_inventory(data, profile: dict):
+    """Parse free.ai's ``{"models": [{id, type, self_hosted}]}`` inventory.
+
+    The shape is not OpenAI's, so it would otherwise be reported as an invalid
+    response and leave the vendor without any models. ``type`` is authoritative
+    here — the same list carries image/video/tts/ocr entries, and only the types
+    the wire profile routes are kept. Self-hosted models sort first so health
+    checks stay inside the free daily allowance, and chat sorts before media so
+    the primary path is what a caller sees first.
+    """
+    if not isinstance(data, dict):
+        return None
+    items = data.get("models")
+    if not isinstance(items, list):
+        return None
+    wanted = tuple(profile.get("models_types") or ("chat",))
+    buckets = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        if not model_id:
+            continue
+        kind = str(item.get("type") or "").strip().lower()
+        if kind not in wanted:
+            continue
+        if not _is_inventory_model(model_id):
+            continue
+        buckets.append((wanted.index(kind), 0 if item.get("self_hosted") else 1, model_id))
+    buckets.sort(key=lambda row: (row[0], row[1]))
+    return [row[2] for row in buckets]
+
+
 def _scan_models_openai(url: str, headers: dict) -> list[str]:
     _set_scan_status(False)
     root = url.rstrip("/")
@@ -1142,6 +1255,12 @@ def _scan_models_openai(url: str, headers: dict) -> list[str]:
         r = _new_session().get(models_url, headers=headers, timeout=get_probe_timeout())
         if r.status_code == 200:
             data = r.json()
+            profile = wire_profile(url)
+            if profile.get("models_shape") == "freeai":
+                ids = _models_from_freeai_inventory(data, profile)
+                if ids is not None:
+                    _set_scan_status(True)
+                    return ids
             raw = data.get("data", []) if isinstance(data, dict) else data
             if isinstance(raw, list):
                 ids = [m.get("id", "") for m in raw if isinstance(m, dict) and m.get("id")]

@@ -282,6 +282,11 @@ def _chat_candidates_for_vendor(vendor: dict) -> list[str]:
     provider = str(vendor.get("provider") or "").strip().lower()
     endpoint_type = str(vendor.get("endpoint_type") or "").strip().lower()
     url = str(vendor.get("proxy_target") or vendor.get("api_url") or "").lower()
+    # Providers that implement *only* chat completions: free.ai answers 404 on
+    # /v1/responses and /v1/messages, so no other family may be advertised
+    # regardless of the endpoint_type the vendor happens to carry.
+    if provider in {"freeai"}:
+        return [OPENAI_CHAT]
     if (
         endpoint_type in {"anthropic", "claude", "anthropic_messages"}
         or
@@ -310,6 +315,7 @@ def _chat_candidates_for_vendor(vendor: dict) -> list[str]:
         "alibaba", "volcengine", "volcengine-ark", "fireworks", "stepfun", "deepinfra",
         "cerebras", "novita", "venice", "zeroone", "ollama", "qianfan",
     }
+    # free.ai was handled at the top of this function (chat-completions only).
     if provider in known_openai:
         return [OPENAI_CHAT, OPENAI_RESPONSES]
     return [OPENAI_CHAT, OPENAI_RESPONSES, ANTHROPIC_MESSAGES]
