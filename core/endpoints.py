@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from typing import Iterable
 
+from core.providers import wire_profile
+
 
 OPENAI_CHAT = "openai_chat"
 OPENAI_RESPONSES = "openai_responses"
@@ -284,8 +286,10 @@ def _chat_candidates_for_vendor(vendor: dict) -> list[str]:
     url = str(vendor.get("proxy_target") or vendor.get("api_url") or "").lower()
     # Providers that implement *only* chat completions: free.ai answers 404 on
     # /v1/responses and /v1/messages, so no other family may be advertised
-    # regardless of the endpoint_type the vendor happens to carry.
-    if provider in {"freeai"}:
+    # regardless of the endpoint_type the vendor happens to carry. Matched by
+    # host too, because a hand-made "custom" vendor pointed at the same API
+    # must behave the same way as the preset.
+    if provider in {"freeai"} or wire_profile(url).get("chat_only"):
         return [OPENAI_CHAT]
     if (
         endpoint_type in {"anthropic", "claude", "anthropic_messages"}

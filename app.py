@@ -11,7 +11,13 @@ import requests as py_requests
 from flask import Flask, Response, jsonify, render_template, request, make_response
 
 from core.batch_import import parse_batch_text
-from core.providers import get_providers, recognize_provider, wire_path, wire_profile
+from core.providers import (
+    get_providers,
+    normalize_api_url,
+    recognize_provider,
+    wire_path,
+    wire_profile,
+)
 from core.data import (
     add_key,
     # dedupe/snapshot helpers used below
@@ -3248,7 +3254,7 @@ def _adapt_freeai_media(payload: bytes) -> bytes:
 
 
 def _proxy_upstream(vendor: dict, key: dict, *, path: str, body: bytes, headers: dict, stream: bool):
-    api_url = (vendor.get("proxy_target") or vendor.get("api_url") or "").rstrip("/")
+    api_url = normalize_api_url(vendor.get("proxy_target") or vendor.get("api_url") or "")
     if not api_url:
         raise ValueError("upstream has no api_url")
     url = _join_url(api_url, wire_path(api_url, path))

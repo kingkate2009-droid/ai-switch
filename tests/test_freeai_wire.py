@@ -108,6 +108,45 @@ def test_paths_are_remapped():
     assert providers.wire_path("https://api.openai.com/v1", "chat/completions") == "chat/completions"
 
 
+def test_pasted_endpoint_urls_reduce_to_the_root():
+    root = "https://api.free.ai/v1"
+    assert providers.normalize_api_url("https://api.free.ai/v1/chat") == root
+    assert providers.normalize_api_url("https://api.free.ai/v1/chat/") == root
+    assert providers.normalize_api_url("https://api.free.ai/v1/chat/completions") == root
+    assert providers.normalize_api_url("https://api.anthropic.com/v1/messages") == "https://api.anthropic.com/v1"
+    # already a root: untouched
+    assert providers.normalize_api_url(root) == root
+    assert providers.normalize_api_url("https://api.openai.com/v1") == "https://api.openai.com/v1"
+    # a root that genuinely ends in /chat (no version segment) is left alone
+    assert providers.normalize_api_url("https://host/chat") == "https://host/chat"
+
+
+def test_pasted_chat_url_still_probes_and_scans():
+    """The reported bug: base …/v1/chat produced …/v1/chat/v1/models."""
+    pasted = "https://api.free.ai/v1/chat"
+
+    scan = _FakeSession(get_payload={"models": [{"id": "qwen7b", "type": "chat", "self_hosted": True}]})
+    ids = _with_session(scan, lambda: providers._scan_models_openai(pasted, {"Authorization": "Bearer x"}))
+    assert scan.calls[0][1] == "https://api.free.ai/v1/models", scan.calls
+    assert ids == ["qwen7b"], ids
+
+    chat = _FakeSession(post_payload={"choices": [{"message": {"content": "ok"}}]})
+    healthy, _ = _with_session(chat, lambda: providers._probe_chat_completions(
+        pasted, {"Authorization": "Bearer x"}, ["qwen7b"]))
+    assert healthy is True
+    assert chat.calls[0][1] == "https://api.free.ai/v1/chat/", chat.calls
+
+
+def test_vendor_api_url_is_stored_normalized():
+    from core.data import add_vendor, update_vendor
+    v = add_vendor(name="pasted", provider="freeai",
+                   api_url="https://api.free.ai/v1/chat", force_new=True)
+    assert v["api_url"] == "https://api.free.ai/v1", v["api_url"]
+    update_vendor(str(v["id"]), api_url="https://api.free.ai/v1/chat/completions")
+    from core.data import get_vendor
+    assert get_vendor(str(v["id"]))["api_url"] == "https://api.free.ai/v1"
+
+
 def test_probe_targets_chat_slash():
     session = _FakeSession(post_payload={"choices": [{"message": {"content": "ok"}}]})
     healthy, _ = _with_session(session, lambda: providers._probe_chat_completions(
@@ -179,6 +218,11 @@ def test_only_chat_endpoint_is_advertised():
     # /v1/responses and /v1/messages both 404 upstream, so they must not be probed
     assert "openai_responses" not in chat and "anthropic_messages" not in chat, chat
 
+    # a hand-made "custom" vendor on the same host behaves identically
+    custom = {"provider": "api-free-ai", "api_url": "https://api.free.ai/v1/chat",
+              "endpoint_type": "openai"}
+    assert _chat_candidates_for_vendor(custom) == ["openai_chat"]
+
 
 def test_proxy_upstream_rewrites_the_path():
     """The downstream proxy must forward to /chat/, not /chat/completions."""
@@ -201,6 +245,20 @@ def test_proxy_upstream_rewrites_the_path():
         app_module.py_requests.request = original
 
     assert url == "https://api.free.ai/v1/chat/", (url, calls)
+    assert calls[0][1] == "https://api.free.ai/v1/chat/", calls
+
+    # the same happens when the vendor was saved with a pasted endpoint URL
+    calls.clear()
+    app_module.py_requests.request = fake_request
+    try:
+        vendor = {"api_url": "https://api.free.ai/v1/chat", "endpoint_type": "openai"}
+        with app_module.app.test_request_context("/v1/chat/completions", method="POST", json={}):
+            app_module._proxy_upstream(
+                vendor, {"api_key": "sk-x"},
+                path="chat/completions", body=b"{}", headers={}, stream=False,
+            )
+    finally:
+        app_module.py_requests.request = original
     assert calls[0][1] == "https://api.free.ai/v1/chat/", calls
 
 
@@ -246,6 +304,9 @@ TESTS = (
     test_provider_preset_exists,
     test_profile_matches_by_host,
     test_paths_are_remapped,
+    test_pasted_endpoint_urls_reduce_to_the_root,
+    test_pasted_chat_url_still_probes_and_scans,
+    test_vendor_api_url_is_stored_normalized,
     test_probe_targets_chat_slash,
     test_model_inventory_shape_is_understood,
     test_image_models_are_routed_as_media,

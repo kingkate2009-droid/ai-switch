@@ -11,6 +11,11 @@ it, and route to it through the hub.
 2. Provider: **Free.ai** (base URL fills in as `https://api.free.ai/v1`)
 3. Paste the key (`sk-free-…`) and save.
 
+Use the **API root** (`https://api.free.ai/v1`), not the chat endpoint. If you
+paste `https://api.free.ai/v1/chat` or `…/v1/chat/completions`, the URL is
+reduced to the root on save — otherwise the probe would ask for
+`/v1/chat/v1/models`.
+
 Health check probes a self-hosted model, so it stays inside the free daily
 allowance instead of spending premium tokens.
 
@@ -79,6 +84,7 @@ are deliberately left out. Use them directly against `api.free.ai` if needed.
 
 | Symptom | Cause |
 | --- | --- |
+| `HTTP 404 on …/v1/chat/v1/models` | The base URL was the chat endpoint (`https://api.free.ai/v1/chat`) instead of the API root (`https://api.free.ai/v1`). Pasted endpoint URLs are now reduced to the root on save; re-save an existing vendor to clean it up. |
 | `404 … invalid response shape` on model scan | Vendor points at a proxy that rewrites `/v1/models` into another shape; use the native base URL. |
 | Chat 404 with no error body | The upstream base URL is missing `/v1`, so the rewrite produced `/chat/` at the root. |
 | Image 404 `No healthy upstream (image)` | The `sdxl`-style model was never discovered — re-run the health check. |

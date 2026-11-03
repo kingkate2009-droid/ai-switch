@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+from core.providers import normalize_api_url
+
 DATA_DIR = Path.home() / ".ai-switch"
 
 log = logging.getLogger(__name__)
@@ -551,7 +553,7 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
                thinking_disabled: bool = False, proxy_target: str = "", tags=None,
                checkin_url: str = "", vtype: str = "", *, force_new: bool = False) -> dict:
     """Create vendor. Same normalized API URL auto-merges into existing (unless force_new)."""
-    url = (api_url or "").rstrip("/")
+    url = normalize_api_url(api_url)
     vtype = _normalize_vendor_type(vtype)
     if not force_new and url:
         existing = find_vendor_by_url(url)
@@ -674,7 +676,7 @@ def update_vendor(vendor_id: str, **kwargs) -> Optional[dict]:
                     elif key == "archived":
                         v[key] = bool(kwargs[key])
                     elif key == "api_url":
-                        v[key] = str(kwargs[key] or "").rstrip("/")
+                        v[key] = normalize_api_url(kwargs[key])
                     else:
                         v[key] = kwargs[key]
             for key in ("availability", "availability_checked_at"):

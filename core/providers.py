@@ -386,6 +386,9 @@ _WIRE_PROFILES = (
         # Health checks must not spend premium tokens, so probe the self-hosted
         # models the daily allowance covers.
         "probe_models": ["qwen7b", "qwen3-8b", "mistral", "deepseek-r1"],
+        # Only chat completions exist: /v1/responses and /v1/messages answer 404,
+        # so advertising them would probe dead endpoints.
+        "chat_only": True,
     },
 )
 
@@ -409,6 +412,25 @@ def wire_path(url: str, canonical: str) -> str:
     """Map a canonical OpenAI path to the one this upstream serves."""
     paths = wire_profile(url).get("paths") or {}
     return str(paths.get(canonical) or canonical)
+
+
+# Users often paste the endpoint they were handed rather than the API root.
+# `…/v1/chat`, `…/v1/chat/completions` and `…/v1/messages` all have to reduce to
+# the version root, otherwise the probe appends its own path and asks for
+# `/v1/chat/v1/models`. Only a version-qualified suffix is stripped, so a
+# provider whose root really is `https://host/chat` is left alone.
+_PASTED_ENDPOINT_RE = re.compile(
+    r"(/v\d+)/(?:chat/completions|chat|completions|messages|responses)$",
+    re.IGNORECASE,
+)
+
+
+def normalize_api_url(url: str) -> str:
+    """Reduce a pasted endpoint URL to the API root the probes expect."""
+    base = str(url or "").strip().rstrip("/")
+    if not base:
+        return base
+    return _PASTED_ENDPOINT_RE.sub(r"\1", base)
 
 
 
@@ -576,7 +598,7 @@ def _requires_agentic_request(body: str) -> bool:
 
 def _probe_chat_completions(url: str, headers: dict, models_to_try: Optional[list[str]] = None) -> tuple:
     # Use the URL as-is if it already contains a version path
-    base = url.rstrip("/")
+    base = normalize_api_url(url)
     chat_path = wire_path(url, "chat/completions")
     if base.endswith(("/v1", "/v2", "/v3", "/v4")):
         chat_url = base + "/" + chat_path
@@ -1020,7 +1042,7 @@ def probe_single_model(check_type: str, url: str, api_key: str, model: str) -> t
 
 def _openai_versioned_path(url: str, *parts: str) -> str:
     """Join OpenAI-style path under a base that may already end with /vN."""
-    base = (url or "").rstrip("/")
+    base = normalize_api_url(url)
     suffix = "/".join(p.strip("/") for p in parts if p and str(p).strip("/"))
     if not suffix:
         return base
@@ -1245,7 +1267,7 @@ def _models_from_freeai_inventory(data, profile: dict):
 
 def _scan_models_openai(url: str, headers: dict) -> list[str]:
     _set_scan_status(False)
-    root = url.rstrip("/")
+    root = normalize_api_url(url)
     # If URL already ends with a version path (e.g., /v3), use it directly
     if root.endswith(("/v1", "/v2", "/v3", "/v4")):
         models_url = root + "/models"
@@ -1410,7 +1432,7 @@ def check_vendor_availability(vendor: dict) -> dict:
     import random as _random
     v = vendor or {}
     checkin_url = str(v.get("checkin_url") or "").strip()
-    api_url = str(v.get("proxy_target") or v.get("api_url") or "").strip()
+    api_url = normalize_api_url(v.get("proxy_target") or v.get("api_url") or "")
     url = checkin_url or api_url
     res = {
         "reachable": None,
