@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title data-i18n="app.title">{{ t('app.title') }}</title>
-<link rel="stylesheet" href="/static/style.css?v=modern-2026e">
+<link rel="stylesheet" href="/static/style.css?v=2026-11-calm2">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -194,7 +194,7 @@
           </div>
         </div>
 
-        <div class="dash-section dash-card">
+        <div class="dash-section dash-card dash-span-2">
           <div class="dash-section-head">
             <h3 data-i18n="dashboard.recentActivity">{{ t('dashboard.recentActivity') }}</h3>
             <button class="btn btn-sm btn-ghost" onclick="switchView('diagnostics')">
@@ -1233,7 +1233,7 @@
             <p class="form-hint" data-i18n="settings.budgetActionHint">{{ t('settings.budgetActionHint') }}</p>
           </div>
         </div>
-        <div class="settings-card">
+        <div class="settings-card span-2">
           <h3 data-i18n="settings.notifyTitle">{{ t('settings.notifyTitle') }}</h3>
           <p class="form-hint" data-i18n="settings.notifyHint">{{ t('settings.notifyHint') }}</p>
           <label class="checkbox-label" style="margin:0 0 12px;display:flex">
@@ -1309,7 +1309,7 @@
             </div>
           </div>
         </div>
-        <div class="settings-card">
+        <div class="settings-card span-2">
           <h3 data-i18n="profiles.title">{{ t('profiles.title') }}</h3>
           <p class="form-hint" data-i18n="profiles.hint">{{ t('profiles.hint') }}</p>
           <div class="form-group">
@@ -1346,7 +1346,7 @@
             </select>
           </div>
         </div>
-        <div class="settings-card">
+        <div class="settings-card span-2 settings-save-bar">
           <button class="btn btn-primary" id="settingsSaveBtn" onclick="saveSettingsPage()" data-i18n="settings.save">{{ t('settings.save') }}</button>
           <button class="btn" onclick="showOnboarding(true)" data-i18n="onboarding.replay">{{ t('onboarding.replay') }}</button>
         </div>
@@ -2059,15 +2059,23 @@ function filterModelsCatalog() {
   body.innerHTML = '';
   rows.forEach(function(m) {
     var tr = document.createElement('tr');
-    var chips = (m.locations || []).map(function(l) {
+    var locs = m.locations || [];
+    var MAX_LOC_CHIPS = 3;
+    var chips = locs.slice(0, MAX_LOC_CHIPS).map(function(l) {
       var name = String(l.vendor_name || '').trim() || ('#' + String(l.vendor_id || ''));
       var label = esc(name);
       var official = l.official ? ' <span class="official-badge">' + esc(_('vendor.official') || 'Official') + '</span>' : '';
       var off = l.vendor_healthy === false ? ' muted' : '';
-      var syncState = l.model_syncable ? '' : ' <span class="model-sync-state">' + esc(_('models.notSyncable') || 'Endpoint not verified') + '</span>';
+      var syncNote = l.model_syncable ? '' : (' · ' + (_('models.notSyncable') || 'Endpoint not verified'));
       var nkeys = l.key_count > 1 ? (' <span class="models-loc-count">×' + l.key_count + '</span>') : '';
-      return '<a href="#" class="models-loc-chip' + off + '" title="' + label + '" onclick="openModelLocation(\'' + esc(String(l.vendor_id)).replace(/'/g, "\\'") + '\',\'' + esc(String(l.key_id || '')).replace(/'/g, "\\'") + '\');return false"><span class="models-loc-name">' + label + '</span>' + official + syncState + nkeys + '</a>';
+      return '<a href="#" class="models-loc-chip' + off + '" title="' + label + syncNote + '" onclick="openModelLocation(\'' + esc(String(l.vendor_id)).replace(/'/g, "\\'") + '\',\'' + esc(String(l.key_id || '')).replace(/'/g, "\\'") + '\');return false"><span class="models-loc-name">' + label + '</span>' + official + nkeys + '</a>';
     }).join('');
+    if (locs.length > MAX_LOC_CHIPS) {
+      var rest = locs.slice(MAX_LOC_CHIPS).map(function(l) {
+        return String(l.vendor_name || '').trim() || ('#' + String(l.vendor_id || ''));
+      }).join('\n');
+      chips += '<span class="models-loc-more" title="' + esc(rest) + '">+' + (locs.length - MAX_LOC_CHIPS) + '</span>';
+    }
     var epSrc = (m.endpoints && m.endpoints.length) ? m.endpoints : (m.classified_endpoints || []);
     var epLabels = [];
     var seenEp = {};
@@ -9419,7 +9427,10 @@ function renderCheckinTable() {
   var sum = $('checkinSummary');
   if (sum) {
     sum.textContent = (_('checkin.summary') || '{total} vendors \u00b7 {token} can check in')
-      .replace('{total}', String(rows.length)).replace('{token}', String(tokenCount));
+      .replace('{total}', String(rows.length))
+      .replace('{yes}', String(tokenCount))
+      .replace('{no}', String(rows.length - tokenCount))
+      .replace('{token}', String(tokenCount));
   }
 
   if (!rows.length) {
