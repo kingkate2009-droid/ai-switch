@@ -1007,5 +1007,12 @@
   "notify.noChannel": "No channel configured",
   "notify.testOk": "delivered",
   "notify.testSent": "Test notification sent",
-  "notify.testFailed": "Test notification failed"
+  "notify.testFailed": "Test notification failed",
+  "pager.perPage": "per page",
+  "pager.prev": "Previous page",
+  "pager.next": "Next page",
+  "table.selectPage": "Select all on this page",
+  "settings.unsaved": "Unsaved changes",
+  "quality.avgShort": "avg",
+  "quality.averageScore": "Average quality score"
 }

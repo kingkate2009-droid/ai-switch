@@ -1006,5 +1006,12 @@
   "notify.noChannel": "未配置任何渠道",
   "notify.testOk": "已送達",
   "notify.testSent": "測試通知已發送",
-  "notify.testFailed": "測試通知發送失敗"
+  "notify.testFailed": "測試通知發送失敗",
+  "pager.perPage": "條/頁",
+  "pager.prev": "上一頁",
+  "pager.next": "下一頁",
+  "table.selectPage": "全選本頁",
+  "settings.unsaved": "有未儲存的修改",
+  "quality.avgShort": "均分",
+  "quality.averageScore": "平均品質分"
 }

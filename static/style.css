@@ -604,6 +604,13 @@ main {
   opacity: 0.25;
 }
 
+/* Empty states inside a settings card sit in a full-width row — keep them
+   compact instead of reserving 40px of air top and bottom. */
+.settings-card .empty-state,
+.settings-card .todo-empty {
+  padding: 24px 16px;
+}
+
 /* ── 4. Primitives ─────────────────────────────────────────────────────── */
 
 /* Buttons ---------------------------------------------------------------- */
@@ -1199,7 +1206,11 @@ input[type="radio"] {
   line-height: 1.1;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
+  /* Numbers must never break mid-digit: "100,248,57 / 3" is unreadable.
+     Long values are compacted by fmtCompact() instead. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stat-label {
@@ -1244,7 +1255,6 @@ input[type="radio"] {
 }
 
 /* Tables ----------------------------------------------------------------- */
-
 .table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1304,6 +1314,78 @@ tbody tr.row-fail:hover {
 tbody tr.disabled-row,
 tbody tr.row-disabled {
   opacity: 0.55;
+}
+
+/* Pagination ------------------------------------------------------------- */
+
+.table-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px 10px;
+  color: var(--text3);
+  font-size: var(--fs-sm);
+}
+
+.table-pager[hidden] {
+  display: none;
+}
+
+/* The top pager doubles as the table's header strip; the bottom one closes it. */
+.pager-top {
+  padding: 2px 8px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pager-bottom {
+  padding-top: 10px;
+}
+
+.pager-info {
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pager-controls .btn-sm {
+  min-width: 28px;
+  padding: 0 7px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.pager-page {
+  min-width: 56px;
+  color: var(--text2);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.pager-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text3);
+  font-size: var(--fs-xs);
+}
+
+.pager-size select {
+  height: 26px;
+  padding: 0 20px 0 6px;
+  font-size: var(--fs-xs);
+}
+
+.pager-size + .pager-info {
+  margin-left: 4px;
 }
 
 /* cell helpers that used to fight each other */
@@ -1372,6 +1454,9 @@ tbody tr.row-disabled {
   font-size: var(--fs-sm);
   line-height: 1.45;
   cursor: pointer;
+  /* Provider errors arrive as unbroken JSON; without this the column's
+     min-content width blows the whole table past the viewport. */
+  overflow-wrap: anywhere;
 }
 
 .status-text[data-status^="Healthy"] {
@@ -1607,7 +1692,9 @@ td.mono,
   align-items: center;
   gap: 6px 8px;
   min-width: 0;
-  flex: 1 1 320px;
+  /* Keep the title/URL row together; the action cluster wraps below it
+     rather than squeezing the name into a second line. */
+  flex: 1 1 440px;
 }
 
 .detail-head-left h3 {
@@ -1907,20 +1994,62 @@ td.mono,
 /* Last push -------------------------------------------------------------- */
 
 .last-push-panel {
-  padding: 14px 16px;
+  padding: 10px 16px;
+}
+
+.last-push > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.last-push > summary::-webkit-details-marker {
+  display: none;
+}
+
+.last-push > summary::before {
+  content: "›";
+  display: inline-block;
+  color: var(--text3);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 0.15s var(--ease);
+}
+
+.last-push[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.last-push-ok {
+  color: var(--success);
+}
+
+.last-push-fail {
+  color: var(--danger);
 }
 
 .last-push-title {
-  margin-bottom: 8px;
+  margin-bottom: 0;
   color: var(--text2);
   font-size: var(--fs-sm);
   font-weight: 600;
+}
+
+.last-push[open] > .last-push-list {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 .last-push-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
   color: var(--text3);
   font-size: var(--fs-sm);
 }
@@ -2353,9 +2482,10 @@ td.mono,
 .quality-vendor-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--text);
-  font-weight: 500;
+  margin-right: 8px;
+  color: var(--text3);
+  font-size: 15px;
+  line-height: 1;
 }
 
 .quality-status-pill {
@@ -2429,8 +2559,11 @@ td.mono,
 .quality-model-average {
   display: inline-block;
   margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg3);
   color: var(--text2);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -2857,13 +2990,19 @@ td.mono,
 /* ── 16. Settings ──────────────────────────────────────────────────────── */
 
 .settings-panel {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  align-items: start;
+  /* Column flow instead of a 2-column grid: settings cards have wildly
+     different heights, and a grid leaves huge holes next to the short ones. */
+  columns: 2;
+  column-gap: 16px;
   border: 0;
   background: transparent;
   padding: 0;
+}
+
+.settings-panel .settings-card {
+  display: flow-root;
+  break-inside: avoid;
+  margin: 0 0 16px;
 }
 
 .settings-card {
@@ -2872,7 +3011,7 @@ td.mono,
 }
 
 .settings-card.span-2 {
-  grid-column: 1 / -1;
+  column-span: all;
 }
 
 .settings-save-bar {
@@ -2881,7 +3020,43 @@ td.mono,
   align-items: center;
   gap: 10px;
   padding: 14px 20px;
+  margin-top: 8px;
   background: var(--bg3);
+  /* The settings page is long; keep the save action reachable everywhere. */
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.settings-dirty-hint {
+  margin-left: 4px;
+  color: var(--text3);
+  font-size: var(--fs-sm);
+}
+
+.settings-dirty-hint::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  vertical-align: middle;
+}
+
+/* Inside the settings grid, controls belong to the card — stack them instead
+   of letting sibling checkboxes share a line. */
+.settings-card .checkbox-label {
+  display: flex;
+  margin: 8px 0;
+}
+
+.settings-card .checkbox-label + .form-hint {
+  margin: 0 0 12px;
 }
 
 .settings-card > h3 {
@@ -3769,6 +3944,21 @@ tr.selected {
 
 /* ── 19. Responsive ────────────────────────────────────────────────────── */
 
+/* 1440-class laptops: the key table needs the column width more than the
+   vendor list does. Notes and latency are the least actionable columns. */
+@media (max-width: 1600px) {
+  .vendor-layout {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  #keysTable .notes-cell,
+  #keysTable th.notes-col,
+  #keysTable .latency-cell,
+  #keysTable th.latency-col {
+    display: none;
+  }
+}
+
 @media (max-width: 1240px) {
   .stats-row-hero {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3797,11 +3987,11 @@ tr.selected {
   }
 
   .settings-panel {
-    grid-template-columns: minmax(0, 1fr);
+    columns: 1;
   }
 
   .settings-card.span-2 {
-    grid-column: auto;
+    column-span: none;
   }
 
   .vendor-layout {

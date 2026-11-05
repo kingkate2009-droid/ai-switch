@@ -387,14 +387,14 @@
                 <table id="keysTable">
                   <thead>
                     <tr>
-                      <th class="col-check"><input type="checkbox" id="selectAllCheck" onchange="toggleSelectAll()"></th>
+                      <th class="col-check"><input type="checkbox" id="selectAllCheck" onchange="toggleSelectAll()" data-i18n-title="table.selectPage" title="{{ t('table.selectPage') }}"></th>
                       <th data-i18n="table.keyName">{{ t('table.keyName') }}</th>
                       <th data-i18n="table.apiKey">{{ t('table.apiKey') }}</th>
                       <th data-i18n="table.status">{{ t('table.status') }}</th>
-                      <th data-i18n="table.latency">{{ t('table.latency') }}</th>
+                      <th class="latency-col" data-i18n="table.latency">{{ t('table.latency') }}</th>
                       <th data-i18n="table.models">{{ t('table.models') }}</th>
                       <th data-i18n="table.balance">{{ t('table.balance') }}</th>
-                      <th data-i18n="table.notes">{{ t('table.notes') }}</th>
+                      <th class="notes-col" data-i18n="table.notes">{{ t('table.notes') }}</th>
                       <th data-i18n="table.actions">{{ t('table.actions') }}</th>
                     </tr>
                   </thead>
@@ -1110,16 +1110,16 @@
         <div class="settings-card">
           <h3 data-i18n="settings.healthTitle">{{ t('settings.healthTitle') }}</h3>
           <p class="form-hint" data-i18n="settings.healthHint">{{ t('settings.healthHint') }}</p>
-          <label class="checkbox-label" style="margin:12px 0">
+          <label class="checkbox-label">
             <input type="checkbox" id="setHealthEnabled" onchange="onSettingsDirty()">
             <span data-i18n="settings.healthEnabled">{{ t('settings.healthEnabled') }}</span>
           </label>
-          <label class="checkbox-label" style="margin:0 0 12px">
+          <label class="checkbox-label">
             <input type="checkbox" id="setHealthAutoDisable" onchange="onSettingsDirty()">
             <span data-i18n="settings.healthAutoDisable">{{ t('settings.healthAutoDisable') }}</span>
           </label>
           <p class="form-hint" data-i18n="settings.healthAutoDisableHint">{{ t('settings.healthAutoDisableHint') }}</p>
-          <label class="checkbox-label" style="margin:0 0 12px">
+          <label class="checkbox-label">
             <input type="checkbox" id="setHealthAutoFailover" onchange="onSettingsDirty()">
             <span data-i18n="settings.healthAutoFailover">{{ t('settings.healthAutoFailover') }}</span>
           </label>
@@ -1196,7 +1196,7 @@
             <p class="form-hint" id="accessTokenStatus"></p>
           </div>
           <button class="btn btn-sm" onclick="clearAccessToken()" data-i18n="settings.clearToken">{{ t('settings.clearToken') }}</button>
-          <label class="checkbox-label" style="margin:16px 0 8px;display:flex">
+          <label class="checkbox-label">
             <input type="checkbox" id="setReadOnly" onchange="onSettingsDirty()">
             <span data-i18n="settings.readOnly">{{ t('settings.readOnly') }}</span>
           </label>
@@ -1346,10 +1346,11 @@
             </select>
           </div>
         </div>
-        <div class="settings-card span-2 settings-save-bar">
-          <button class="btn btn-primary" id="settingsSaveBtn" onclick="saveSettingsPage()" data-i18n="settings.save">{{ t('settings.save') }}</button>
-          <button class="btn" onclick="showOnboarding(true)" data-i18n="onboarding.replay">{{ t('onboarding.replay') }}</button>
-        </div>
+      </div>
+      <div class="settings-save-bar" id="settingsSaveBar">
+        <button class="btn btn-primary" id="settingsSaveBtn" onclick="saveSettingsPage()" data-i18n="settings.save">{{ t('settings.save') }}</button>
+        <button class="btn" onclick="showOnboarding(true)" data-i18n="onboarding.replay">{{ t('onboarding.replay') }}</button>
+        <span class="settings-dirty-hint" id="settingsDirtyHint" hidden data-i18n="settings.unsaved">{{ t('settings.unsaved') }}</span>
       </div>
       </div>
     </div>
@@ -1907,15 +1908,20 @@ function renderQualityInspection() {
   });
   var checked = (_qualityInspectionRows || []).filter(function(row) { return row.quality_checked; }).length;
   var summary = $('qualityInspectionSummary');
-  if (summary) summary.textContent = (_('quality.inspectionSummary') || '{visible} shown · {checked} checked · {total} total').replace('{visible}', locations.length).replace('{checked}', checked).replace('{total}', (_qualityInspectionRows || []).length);
-  if (!locations.length) { body.innerHTML = '<tr><td colspan="4" class="todo-empty">' + esc(_('quality.empty') || 'No models') + '</td></tr>'; return; }
+  if (summary) summary.textContent = (_('quality.inspectionSummary') || '{visible} shown · {checked} checked · {total} total').replace('{visible}', fmtNum(locations.length)).replace('{checked}', fmtNum(checked)).replace('{total}', fmtNum((_qualityInspectionRows || []).length));
+  if (!locations.length) { body.innerHTML = '<tr><td colspan="4" class="todo-empty">' + esc(_('quality.empty') || 'No models') + '</td></tr>'; setPager('quality', body, { total: 0 }); return; }
   var byVendor = {};
   locations.forEach(function(row) {
     (byVendor[row.vendor_id] || (byVendor[row.vendor_id] = [])).push(row);
   });
-  body.innerHTML = Object.keys(byVendor).sort(function(a, b) {
+  var vendorKeys = Object.keys(byVendor).sort(function(a, b) {
     return String(byVendor[a][0].vendor_name).localeCompare(String(byVendor[b][0].vendor_name));
-  }).map(function(vendorKey) {
+  });
+  pagerRegister('quality', renderQualityInspection);
+  pagerSignature('quality', [q, state, vendorId, sortMode].join('|'));
+  var page = pagerSlice('quality', vendorKeys);
+  setPager('quality', body, page);
+  body.innerHTML = page.rows.map(function(vendorKey) {
     var rows = sortModels(byVendor[vendorKey]);
     var vendor = rows[0];
     var checkedRows = rows.filter(function(row) { return row.quality_checked; });
@@ -1930,7 +1936,7 @@ function renderQualityInspection() {
     var vendorTargetIndex = _qualityInspectionRows.indexOf(vendor);
     var html = '<tr class="quality-vendor-row' + (expanded ? ' expanded' : '') + '" onclick="toggleQualityVendor(' + vendorTargetIndex + ')">' +
       '<td><span class="quality-vendor-toggle" aria-hidden="true">›</span><strong>' + esc(vendor.vendor_name) + '</strong>' + (vendor.official ? ' <span class="official-badge">' + esc(_('vendor.official') || 'Official') + '</span>' : '') + '</td>' +
-      '<td><span class="quality-status-pill ' + statusClass + '">' + esc(statusText) + '</span>' + (average == null ? '' : '<span class="quality-model-average">' + average + '</span>') + ' ' + _ratioBadge(vendorKey, null) + '</td>' +
+      '<td><span class="quality-status-pill ' + statusClass + '">' + esc(statusText) + '</span>' + (average == null ? '' : '<span class="quality-model-average" title="' + esc(_('quality.averageScore') || 'Average quality score') + '">' + esc(_('quality.avgShort') || 'avg') + ' ' + average + '</span>') + ' ' + _ratioBadge(vendorKey, null) + '</td>' +
       '<td class="quality-model-count">' + rows.length + ' ' + esc(_('quality.models') || 'models') + (priceRange ? '<div class="model-price-range" title="' + esc(_('quality.priceRange') || 'Price range') + '">' + priceRange + '</div>' : '') + '</td>' +
       '<td><button class="btn btn-sm" type="button" onclick="event.stopPropagation();runVendorQualityInspection(' + vendorTargetIndex + ')">' + esc(checkedRows.length === rows.length ? (_('quality.rerunVendor') || 'Rerun vendor') : (_('quality.runVendor') || 'Check vendor')) + '</button></td>' +
     '</tr>';
@@ -2054,10 +2060,15 @@ function filterModelsCatalog() {
   }
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="7" class="todo-empty">' + esc(_('models.empty') || 'No models yet') + '</td></tr>';
+    setPager('models', body, { total: 0 });
     return;
   }
+  pagerRegister('models', filterModelsCatalog);
+  pagerSignature('models', [q, epFilter, hideUnavailable ? 1 : 0].join('|'));
+  var page = pagerSlice('models', rows);
+  setPager('models', body, page);
   body.innerHTML = '';
-  rows.forEach(function(m) {
+  page.rows.forEach(function(m) {
     var tr = document.createElement('tr');
     var locs = m.locations || [];
     var MAX_LOC_CHIPS = 3;
@@ -3122,9 +3133,8 @@ async function loadDashHealthSummary() {
         (s.source ? ' · ' + s.source : ''));
     }
     if (res.next_run_at) parts.push((_('health.nextRun') || 'Next') + ': ' + String(res.next_run_at).replace('T', ' ').slice(0, 19));
-    el.innerHTML = esc(parts.join(' · ')) +
-      ' <button class="btn btn-sm" style="margin-left:8px" onclick="switchView(\'health\')">' +
-      esc(_('health.openPage') || 'Open monitor') + '</button>';
+    // The card header already has an "Open monitor" button; don't add a second.
+    el.textContent = parts.join(' · ');
   } catch (e) {
     el.textContent = '—';
   }
@@ -3524,11 +3534,6 @@ function renderBackendSummary(list) {
       ' · <strong>' + missing + '</strong> ' + _('backends.notInstalled'),
     '</span>',
     '<div class="summary-bar-track"><div class="summary-bar-fill" style="width:' + pct + '%"></div></div>',
-    '<div class="summary-actions">',
-      '<button class="btn btn-sm" onclick="refreshBackendStatus()">',
-        '<svg width="14" height="14"><use href="#ico-refresh"/></svg> ' + _('gatewayPanel.refresh'),
-      '</button>',
-    '</div>',
   ].join('');
 }
 
@@ -4557,6 +4562,7 @@ async function selectVendor(id, opts) {
 }
 
 function filterKeys() {
+  if (!_currentVendor) return;
   const q = $('keySearch').value.toLowerCase().trim();
   const f = $('keyFilter').value;
   const tbody = $('keysBody');
@@ -4566,19 +4572,32 @@ function filterKeys() {
   tbody.innerHTML = '';
   const fragment = document.createDocumentFragment();
 
-  for (var idx = _allKeysData.length - 1; idx >= 0; idx--) {
-    const k = _allKeysData[idx];
+  // Filter first, then paginate: the row builder below only ever runs for the
+  // current page, so a vendor with 279 keys no longer builds 279 DOM rows.
+  var matched = [];
+  for (var idx0 = _allKeysData.length - 1; idx0 >= 0; idx0--) {
+    var k0 = _allKeysData[idx0];
+    var h0 = _allHealthData[_currentVendor.id + ':' + k0.id] || {};
+    var notes0 = k0.notes || '';
+    var nameMatch0 = !q || k0.name.toLowerCase().includes(q) || notes0.toLowerCase().includes(q);
+    var statusMatch0 = f === 'all' ||
+      (f === 'healthy' && h0.healthy === true) ||
+      (f === 'unhealthy' && h0.healthy === false) ||
+      (f === 'disabled' && k0.enabled === false);
+    if (nameMatch0 && statusMatch0) matched.push(k0);
+  }
+  pagerRegister('keys', filterKeys);
+  pagerSignature('keys', [q, f, _currentVendor.id].join('|'));
+  var page = pagerSlice('keys', matched);
+  setPager('keys', tbody, page);
+
+  for (var idx = 0; idx < page.rows.length; idx++) {
+    const k = page.rows[idx];
     const ck = _currentVendor.id + ':' + k.id;
     const h = _allHealthData[ck] || {};
     const healthy = h.healthy;
     const enabled = k.enabled !== false;
     const notes = k.notes || '';
-    const nameMatch = !q || k.name.toLowerCase().includes(q) || notes.toLowerCase().includes(q);
-    const statusMatch = f === 'all' ||
-      (f === 'healthy' && healthy === true) ||
-      (f === 'unhealthy' && healthy === false) ||
-      (f === 'disabled' && !enabled);
-    if (!nameMatch || !statusMatch) continue;
 
     const statusClass = healthy === true ? 'healthy' : healthy === false ? 'unhealthy' : 'unknown';
     var statusLabel;
@@ -4608,7 +4627,7 @@ function filterKeys() {
     }
     var rawTitle = h.raw_error || h.error || h.message || '';
     var fullStatus = statusLabel + (statusDetail ? ': ' + statusDetail : '') + checkedAt;
-    const latency = h.latency_ms ? h.latency_ms + 'ms' : '-';
+    const latency = h.latency_ms ? fmtLatency(h.latency_ms) : '-';
     const models = k.models && k.models.length ? k.models : (h.models || []);
     const modelCount = models.length;
     const disabledModels = k.disabled_models || [];
@@ -4657,7 +4676,7 @@ function filterKeys() {
         + '<button type="button" class="btn-icon status-copy-btn" data-status="' + esc(fullStatus) + '" onclick="event.stopPropagation();copyStatusText(this)" title="' + esc(_('common.copy') || 'Copy') + '">'
         + '<svg width="12" height="12"><use href="#ico-copy"/></svg></button>'
         + '</div></td>',
-      '<td>' + latency + '</td>',
+      '<td class="latency-cell">' + latency + '</td>',
       '<td class="models-cell">' + modelStr + '</td>',
       '<td class="balance-cell-wrap">' + balanceStr + '</td>',
       '<td class="notes-cell">' + notesCell + '</td>',
@@ -6197,7 +6216,7 @@ list.innerHTML = '';
       : mh.healthy === false ? (mh.raw_error || mh.error || _('health.unhealthy'))
       : _('health.notChecked');
     var rawDetail = mh.raw_error || mh.error || '';
-    var latency = mh.latency_ms ? mh.latency_ms + 'ms' : '';
+    var latency = mh.latency_ms ? fmtLatency(mh.latency_ms) : '';
     var row = document.createElement('div');
     row.className = 'model-row' + (enabled ? '' : ' model-disabled') + (isPrimary ? ' model-check-primary-row' : '');
     var pricing = (k.pricing && k.pricing[mid]) ? k.pricing[mid] : null;
@@ -7515,6 +7534,7 @@ async function loadLastPushPanel() {
   el.style.display = '';
   var at = String(res.at || '').replace('T', ' ').slice(0, 19);
   var lines = [];
+  var okCount = 0, failCount = 0;
   var results = res.results || {};
   Object.keys(results).forEach(function(name) {
     var r = results[name] || {};
@@ -7526,16 +7546,23 @@ async function loadLastPushPanel() {
       else st = _('sync.skipLabel') || 'skipped';
     } else {
       st = r.ok ? (_('health.healthy') || 'ok') : (_('health.unhealthy') || 'fail');
+      if (r.ok) okCount += 1; else failCount += 1;
     }
     var err = r.error ? (' — ' + r.error) : '';
     var runtime = r.runtime_message ? (' — ' + r.runtime_message) : '';
     lines.push('<li><strong>' + esc(name) + '</strong>: ' + esc(st) + esc(err) + esc(runtime) + '</li>');
   });
+  // Collapsed by default: the per-backend result list used to push the real
+  // backend cards below the fold.
   el.innerHTML =
-    '<div class="last-push-title">' + esc(_('sync.lastPush') || 'Last push to backends') +
-    ' <span class="muted">' + esc(at) + ' UTC</span>' +
-    ' · ' + esc((res.ok || 0) + ' ok / ' + (res.fail || 0) + ' fail') +
-    '</div><ul class="last-push-list">' + lines.join('') + '</ul>';
+    '<details class="last-push">' +
+    '<summary class="last-push-title">' +
+      esc(_('sync.lastPush') || 'Last push to backends') +
+      ' <span class="muted">' + esc(at) + ' UTC</span>' +
+      ' · <span class="last-push-ok">' + okCount + ' ok</span> / <span class="last-push-fail">' + failCount + ' fail</span>' +
+    '</summary>' +
+    '<ul class="last-push-list">' + lines.join('') + '</ul>' +
+    '</details>';
 }
 
 async function refreshBackendStatus() {
@@ -7781,9 +7808,164 @@ function fmtNum(n) {
   return Number(n).toLocaleString();
 }
 
+/* Compact numbers for KPI tiles: 3517 -> 3.5K, 100248573 -> 100.2M.
+   Full precision stays available through the element's title attribute. */
+function fmtCompact(n) {
+  var v = Number(n || 0);
+  if (!isFinite(v)) return '0';
+  var abs = Math.abs(v);
+  if (abs < 1000) return String(v);
+  if (abs < 1e6) return (v / 1e3).toFixed(abs < 1e4 ? 1 : 0).replace(/\.0$/, '') + 'K';
+  if (abs < 1e9) return (v / 1e6).toFixed(abs < 1e7 ? 1 : 0).replace(/\.0$/, '') + 'M';
+  return (v / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+}
+
+/* ── Table pagination ──────────────────────────────────────────────────────
+   Six tables can hold thousands of rows (the model catalog alone is 3.8k).
+   Rendering them all at once makes the scrollbar meaningless and the DOM
+   expensive. Each table keeps its own page/size state; renderers declare
+   their current filter signature so any filter change lands on page 1. */
+var PAGER_SIZES = [25, 50, 100, 200];
+var _pagerState = {};
+
+function pagerState(key) {
+  if (!_pagerState[key]) {
+    var size = 50;
+    try {
+      var saved = parseInt(localStorage.getItem('aiswitch_page_size'), 10);
+      if (saved && PAGER_SIZES.indexOf(saved) >= 0) size = saved;
+    } catch (e) {}
+    _pagerState[key] = { page: 0, size: size };
+  }
+  return _pagerState[key];
+}
+
+/* Jump back to page 1 whenever the filter signature changes. Renderers call
+   this with the current filter state, so paging itself never resets. */
+function pagerSignature(key, sig) {
+  var st = pagerState(key);
+  if (st.sig !== sig) {
+    st.sig = sig;
+    st.page = 0;
+  }
+}
+
+function pagerSlice(key, rows) {
+  var st = pagerState(key);
+  var total = rows.length;
+  var pages = Math.max(1, Math.ceil(total / st.size));
+  if (st.page > pages - 1) st.page = pages - 1;
+  if (st.page < 0) st.page = 0;
+  var start = st.page * st.size;
+  return {
+    rows: rows.slice(start, start + st.size),
+    page: st.page,
+    pages: pages,
+    size: st.size,
+    total: total,
+    start: total ? start + 1 : 0,
+    end: Math.min(total, start + st.size)
+  };
+}
+
+var _pagerRenderers = {};
+
+function pagerRegister(key, fn) {
+  _pagerRenderers[key] = fn;
+}
+
+function pagerRender(key) {
+  if (!_pagerRenderers[key]) return;
+  try { _pagerRenderers[key](); } catch (e) {}
+}
+
+function pagerGo(key, delta) {
+  var st = pagerState(key);
+  if (st.page + delta < 0) return;
+  st.page += delta;
+  pagerRender(key);
+}
+
+function pagerJump(key, page) {
+  var st = pagerState(key);
+  st.page = Math.max(0, Number(page) || 0);
+  pagerRender(key);
+}
+
+function pagerSetSize(key, size) {
+  var st = pagerState(key);
+  st.size = Number(size) || 50;
+  st.page = 0;
+  try { localStorage.setItem('aiswitch_page_size', String(st.size)); } catch (e) {}
+  // row size is a global preference — apply it to every table
+  Object.keys(_pagerState).forEach(function (k) {
+    if (k !== key) { _pagerState[k].size = st.size; _pagerState[k].page = 0; }
+  });
+  Object.keys(_pagerRenderers).forEach(function (k) {
+    // A registered table may no longer be on screen (e.g. no vendor selected);
+    // one failing render must not stop the rest.
+    try { pagerRender(k); } catch (e) {}
+  });
+}
+
+function pagerHtml(key, info) {
+  // Nothing to page: the whole result fits on one page, so no chrome at all.
+  if (!info || info.total <= info.size) return '';
+  var opts = PAGER_SIZES.map(function (s) {
+    return '<option value="' + s + '"' + (s === info.size ? ' selected' : '') + '>' + s + '</option>';
+  }).join('');
+  return '<div class="pager-controls">' +
+      '<span class="pager-info">' + info.start + '\u2013' + info.end + ' / ' + fmtNum(info.total) + '</span>' +
+      '<span class="pager-size">' + esc(_('pager.perPage') || 'per page') +
+        ' <select onchange="pagerSetSize(\'' + key + '\', this.value)">' + opts + '</select></span>' +
+    '</div>' +
+    '<div class="pager-controls">' +
+      '<button type="button" class="btn btn-sm" ' + (info.page <= 0 ? 'disabled' : '') +
+        ' onclick="pagerGo(\'' + key + '\', -1)" title="' + esc(_('pager.prev') || 'Previous page') + '">\u2039</button>' +
+      '<span class="pager-page">' + (info.page + 1) + ' / ' + info.pages + '</span>' +
+      '<button type="button" class="btn btn-sm" ' + (info.page >= info.pages - 1 ? 'disabled' : '') +
+        ' onclick="pagerGo(\'' + key + '\', 1)" title="' + esc(_('pager.next') || 'Next page') + '">\u203a</button>' +
+    '</div>';
+}
+
+/* Render the pager above and below the table's scroll container. Both copies
+   share the same state; the top one is what you see on arrival, the bottom one
+   is what you reach after scrolling 50 rows. */
+function setPager(key, bodyEl, info) {
+  if (!bodyEl) return;
+  var anchor = bodyEl.closest ? bodyEl.closest('.table-wrap') : null;
+  if (!anchor || !anchor.parentElement) anchor = bodyEl.parentElement;
+  if (!anchor) return;
+  var html = pagerHtml(key, info);
+  [['top', 'beforebegin'], ['bottom', 'afterend']].forEach(function(pos) {
+    var id = 'pager-' + key + '-' + pos[0];
+    var host = document.getElementById(id);
+    if (!host) {
+      host = document.createElement('div');
+      host.id = id;
+      anchor.insertAdjacentElement(pos[1], host);
+    }
+    host.className = 'table-pager pager-' + pos[0];
+    host.innerHTML = html;
+    host.hidden = !html;
+  });
+}
+
 function fmtRate(r) {
   if (r === undefined || r === null) return '-';
   return Number(r).toFixed(1) + '%';
+}
+
+/* Latency reads badly in raw milliseconds once it crosses a second:
+   67329 ms is 67s. Keep ms below 1s, then switch to s/m. */
+function fmtLatency(ms) {
+  if (ms == null || ms === '' || !isFinite(Number(ms))) return '—';
+  var n = Math.max(0, Number(ms));
+  if (n < 1000) return Math.round(n) + ' ms';
+  if (n < 60000) return (n / 1000).toFixed(n < 10000 ? 2 : 1) + ' s';
+  var m = Math.floor(n / 60000);
+  var s = Math.round((n % 60000) / 1000);
+  return m + 'm ' + (s < 10 ? '0' + s : s) + 's';
 }
 
 function rateBar(rate) {
@@ -8034,6 +8216,8 @@ function renderStatsCharts(charts) {
   }
 
   var daily = charts.daily || { labels: [], count: [], success: [], fail: [], tokens: [] };
+  // 30 date labels at 45° still collide on narrow screens — cap the ticks.
+  var dailyTicks = Object.assign({}, ticks, { maxTicksLimit: 8, autoSkip: true });
   upsert('daily', 'chartDaily', {
     type: 'line',
     data: {
@@ -8049,7 +8233,7 @@ function renderStatsCharts(charts) {
       maintainAspectRatio: false,
       plugins: { legend: legend },
       scales: {
-        x: { ticks: ticks, grid: grid },
+        x: { ticks: dailyTicks, grid: grid },
         y: { beginAtZero: true, ticks: ticks, grid: grid },
       },
     },
@@ -8224,11 +8408,21 @@ async function loadStats() {
   if (data.error) { showToast(data.error, 'error'); return; }
 
   var total = data.total || {};
-  $('statTotalCount').textContent = fmtNum(total.count);
-  $('statSuccessCount').textContent = fmtNum(total.success_count);
-  $('statFailCount').textContent = fmtNum(total.fail_count);
+  // KPI tiles are narrow; compact numbers stay on one line. The full value
+  // stays available on hover.
+  var kpi = [
+    ['statTotalCount', total.count],
+    ['statSuccessCount', total.success_count],
+    ['statFailCount', total.fail_count],
+    ['statTotalTokens', total.total_tokens],
+  ];
+  kpi.forEach(function(pair) {
+    var el = $(pair[0]);
+    if (!el) return;
+    el.textContent = fmtCompact(pair[1]);
+    el.title = fmtNum(pair[1]);
+  });
   $('statSuccessRate').textContent = fmtRate(total.success_rate);
-  $('statTotalTokens').textContent = fmtNum(total.total_tokens);
   $('statTotalCost').textContent = formatCost(total.total_cost);
   var hint = $('statCostHint');
   if (hint) {
@@ -8371,7 +8565,11 @@ async function loadStats() {
 var _settingsDirty = false;
 var _diagCache = null;
 
-function onSettingsDirty() { _settingsDirty = true; }
+function onSettingsDirty() {
+  _settingsDirty = true;
+  var hint = $('settingsDirtyHint');
+  if (hint) hint.hidden = false;
+}
 
 async function loadProfilesList() {
   var list = $('profilesList');
@@ -8595,6 +8793,8 @@ async function loadSettingsPage() {
     pj.value = Object.keys(pricing).length ? JSON.stringify(pricing, null, 2) : '';
   }
   _settingsDirty = false;
+  var dirtyHint = $('settingsDirtyHint');
+  if (dirtyHint) dirtyHint.hidden = true;
   _syncThemeSelect(document.documentElement.getAttribute('data-theme') || 'light');
   applyReadOnlyUI();
   loadProfilesList();
@@ -9108,7 +9308,7 @@ async function loadHealthMonitor() {
     if (s.total != null) {
       parts.push((_('health.lastSummary') || 'Last run') + ': ' +
         (s.ok || 0) + ' ok / ' + (s.fail || 0) + ' fail / ' + (s.total || 0) +
-        (s.duration_ms != null ? ' · ' + s.duration_ms + 'ms' : '') +
+        (s.duration_ms != null ? ' · ' + fmtLatency(s.duration_ms) : '') +
         (s.source ? ' · ' + s.source : ''));
     }
     if (res.runs_count_session) parts.push((_('health.sessionRuns') || 'Session runs') + ': ' + res.runs_count_session);
@@ -9435,10 +9635,16 @@ function renderCheckinTable() {
 
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="4" class="todo-empty">' + esc(_('checkin.none') || 'No matching vendors') + '</td></tr>';
+    setPager('checkin', body, { total: 0 });
     return;
   }
 
-  body.innerHTML = rows.map(function(v) {
+  pagerRegister('checkin', renderCheckinTable);
+  pagerSignature('checkin', [vid, support, vtype, hideDone ? 1 : 0, availF, statusF].join('|'));
+  var page = pagerSlice('checkin', rows);
+  setPager('checkin', body, page);
+
+  body.innerHTML = page.rows.map(function(v) {
     var vid = String(v.id || '');
     var vidSafe = esc(vid).replace(/'/g, "\\'");
     var tk = _vendorTokenKey(v);
@@ -9530,7 +9736,7 @@ function renderCheckinTable() {
       : '<span class="badge" title="' + esc(_('checkin.noToken') || 'No access token') + '">' + esc(_('checkin.tokenOff') || 'No token') + '</span>';
 
     return '<tr data-vendor-id="' + esc(vid) + '">'
-      + '<td><strong>' + esc(v.name || '') + '</strong> ' + tokenBadge + _availBadge(v) + _statusBadge(v) + '<div class="form-hint">' + esc(v.provider || '') + ' \u00b7 ' + keyCount + ' keys</div></td>'
+      + '<td><strong>' + esc(v.name || '') + '</strong> ' + tokenBadge + _availBadge(v) + _statusBadge(v) + '<div class="form-hint">' + esc(v.provider || '') + ' \u00b7 ' + keyCount + ' ' + (keyCount === 1 ? 'key' : 'keys') + '</div></td>'
       + '<td class="balance-cell-wrap">' + balHtml + '</td>'
       + '<td>' + statusHtml + '</td>'
       + '<td class="actions-cell">' + actions.join('') + '</td>'
@@ -9538,7 +9744,7 @@ function renderCheckinTable() {
   }).join('');
 
   // Fill balance values now that cells exist
-  rows.forEach(function(v) {
+  page.rows.forEach(function(v) {
     var vid = String(v.id);
     var info = _checkinData[vid];
     if (!info || !info.balance) return;
@@ -9584,6 +9790,7 @@ function renderArchivedTable() {
   if (sum) sum.textContent = (_('archived.summary') || '{n} archived').replace('{n}', String(rows.length));
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="6" class="todo-empty">' + esc(_('archived.none') || 'No archived items') + '</td></tr>';
+    setPager('archived', body, { total: 0 });
     return;
   }
   var lines = [];
@@ -9621,7 +9828,11 @@ function renderArchivedTable() {
         '</tr>');
     });
   });
-  body.innerHTML = lines.join('');
+  pagerRegister('archived', renderArchivedTable);
+  pagerSignature('archived', q);
+  var page = pagerSlice('archived', lines);
+  setPager('archived', body, page);
+  body.innerHTML = page.rows.join('');
 }
 
 async function archiveVendorCurrent() {
@@ -9797,9 +10008,14 @@ function renderHealthKeys() {
   }
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="6" class="todo-empty">' + esc(_('health.noKeys') || 'No keys') + '</td></tr>';
+    setPager('health', body, { total: 0 });
     return;
   }
-  body.innerHTML = rows.map(function(r) {
+  pagerRegister('health', renderHealthKeys);
+  pagerSignature('health', q);
+  var page = pagerSlice('health', rows);
+  setPager('health', body, page);
+  body.innerHTML = page.rows.map(function(r) {
     var st;
     if (r.healthy === true) st = '<span class="badge badge-ok">' + esc(_('health.healthy') || 'Healthy') + '</span>';
     else if (r.healthy === false) {
@@ -9807,11 +10023,12 @@ function renderHealthKeys() {
       var label = healthErrorLabel(code);
       var hint = healthErrorSuggestion(code, r.suggestion);
       var tip = (r.error || label) + (hint ? ' · ' + hint : '');
+      // The suggestion is the same sentence for every row of a given error
+      // class — keep it in the tooltip so 900 failing keys stay scannable.
       st = '<span class="badge badge-fail" title="' + esc(tip) + '">' + esc(label) + '</span>';
-      if (hint) st += '<div class="form-hint">' + esc(hint) + '</div>';
     } else st = '<span class="badge">' + esc(_('health.notChecked') || 'Not checked') + '</span>';
     if (r.enabled === false) st += ' <span class="badge badge-readonly">' + esc(_('badge.disabled') || 'Disabled') + '</span>';
-    var lat = r.latency_ms != null && r.healthy != null ? (r.latency_ms + ' ms') : '—';
+    var lat = r.latency_ms != null && r.healthy != null ? fmtLatency(r.latency_ms) : '—';
     var vid = esc(String(r.vendor_id || '')).replace(/'/g, "\\'");
     var kid = esc(String(r.key_id || '')).replace(/'/g, "\\'");
     return '<tr>' +
@@ -9930,7 +10147,7 @@ async function loadHealthHistory() {
     var result;
     if (r.error) result = '<span class="badge badge-fail">' + esc(r.error) + '</span>';
     else result = (r.ok || 0) + ' ok / ' + (r.fail || 0) + ' fail' + (r.total != null ? ' · ' + r.total : '');
-    var dur = r.duration_ms != null ? (r.duration_ms + ' ms') : '—';
+    var dur = r.duration_ms != null ? fmtLatency(r.duration_ms) : '—';
     var id = esc(String(r.id || '')).replace(/'/g, "\\'");
     return '<tr>' +
       '<td>' + esc(when) + '</td>' +
