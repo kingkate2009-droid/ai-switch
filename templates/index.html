@@ -6100,7 +6100,6 @@ list.innerHTML = '';
   // Primary check-model control at top
   var head = document.createElement('div');
   head.className = 'model-check-primary';
-  head.style.cssText = 'margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg2)';
   const checkModels = (k.check_models && k.check_models.length)
     ? k.check_models.map(String)
     : (checkModel ? [checkModel] : []);
@@ -6115,29 +6114,32 @@ list.innerHTML = '';
   }
   const checkModelsSet = new Set(checkModels);
   head.innerHTML = [
-    '<div style="font-weight:600;font-size:13px;margin-bottom:6px">' + esc(_('keyModal.checkModel') || 'Primary check model') + '</div>',
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">',
-      '<span style="font-size:12px;color:var(--text2)">' + esc(
+    '<div class="model-check-heading">' + esc(_('keyModal.checkModel') || 'Primary check model') + '</div>',
+    '<div class="model-check-row">',
+      '<span>' + esc(
         checkModels.length
           ? (checkModels.join(', ').length > 60 ? checkModels.join(', ').slice(0, 60) + '…' : checkModels.join(', '))
           : (_('keyModal.checkModelAuto') || 'Auto (existing logic)')
       ) + '</span>',
       '<button class="btn btn-sm" onclick="clearKeyCheckModel()">' + esc(_('keyModal.checkModelClear') || 'Use auto') + '</button>',
     '</div>',
-    '<p class="form-hint" style="margin:8px 0 0">' + esc(_('keyModal.checkModelHintMulti') || 'Check the box next to each model to make it a primary check model. KEY health will probe ALL selected check models.') + '</p>',
+    '<p class="form-hint model-check-hint">' + esc(_('keyModal.checkModelHintMulti') || 'Check the box next to each model to make it a primary check model. KEY health will probe ALL selected check models.') + '</p>',
   ].join('');
   list.appendChild(head);
-  var syncHint = document.createElement('p');
+  var syncBar = document.createElement('div');
+  syncBar.className = 'models-sync-bar';
+  var syncHint = document.createElement('span');
   syncHint.className = 'form-hint';
   syncHint.textContent = syncModels === null
-    ? 'Sync models: all enabled models'
-    : 'Sync models: explicit selection';
-  list.appendChild(syncHint);
+    ? (_('modelsModal.syncAllHint') || 'Sync models: all enabled models')
+    : (_('modelsModal.syncSelectionHint') || 'Sync models: explicit selection');
   var allSyncBtn = document.createElement('button');
   allSyncBtn.className = 'btn btn-sm';
-  allSyncBtn.textContent = 'Sync all models';
+  allSyncBtn.textContent = _('modelsModal.syncAll') || 'Sync all models';
   allSyncBtn.onclick = function() { clearModelSyncSelection(); };
-  list.appendChild(allSyncBtn);
+  syncBar.appendChild(syncHint);
+  syncBar.appendChild(allSyncBtn);
+  list.appendChild(syncBar);
   var sel = $('modelsModalCheckSelect');
   if (sel) {
     sel.innerHTML = '';
@@ -6230,7 +6232,6 @@ list.innerHTML = '';
       '<div class="model-row-main">',
         '<span class="dot ' + (mh.healthy === true ? 'healthy' : mh.healthy === false ? 'unhealthy' : 'unknown') + '"></span>',
         '<code class="model-id" title="' + esc(mid) + '">' + esc(mid) + '</code>',
-        (isPrimary ? '<span class="badge badge-ok" style="margin-left:6px">' + esc(_('keyModal.checkModelBadge') || 'Check') + '</span>' : ''),
         (quality.score != null ? '<span class="quality-inline-score" title="' + esc(_('quality.score') || 'Quality score') + '">' + Number(quality.score) + '</span>' : ''),
         priceLabel,
         '<span class="model-health ' + hClass + '" title="' + esc(hText) + '">' + esc(hText) + (latency ? ' · ' + latency : '') + '</span>',
