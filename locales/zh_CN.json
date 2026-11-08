@@ -91,6 +91,7 @@
   "action.check": "检测",
   "action.checking": "检测中...",
   "action.copyOpenCode": "复制 OpenCode 配置",
+  "action.sync": "同步",
   "action.edit": "编辑",
   "action.delete": "删除",
   "action.batchEnable": "启用",

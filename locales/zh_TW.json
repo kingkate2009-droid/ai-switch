@@ -91,6 +91,7 @@
   "action.check": "檢測",
   "action.checking": "檢測中...",
   "action.copyOpenCode": "複製 OpenCode 配置",
+  "action.sync": "同步",
   "action.edit": "編輯",
   "action.delete": "刪除",
   "action.batchEnable": "啟用",

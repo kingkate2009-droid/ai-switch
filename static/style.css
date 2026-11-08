@@ -1409,6 +1409,32 @@ tbody tr.row-disabled {
   text-align: right;
 }
 
+/* The key table is wider than a 1440-class detail panel, so the action column
+   used to sit past the right edge and every row demanded a sideways scroll.
+   Pin it to the right edge instead: the middle columns scroll, the buttons
+   never leave the screen. Solid background so scrolled cells pass underneath. */
+#keysTable th:last-child,
+#keysTable td.actions-cell {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: var(--bg2);
+  box-shadow: -10px 0 10px -10px rgba(15, 18, 25, 0.28);
+}
+
+#keysTable th:last-child {
+  z-index: 3;
+}
+
+#keysTable tbody tr:hover td.actions-cell,
+#keysTable tbody tr.row-muted:hover td.actions-cell {
+  background: var(--bg3);
+}
+
+#keysTable tbody tr.selected td.actions-cell {
+  background: var(--primary-dim);
+}
+
 .action-row {
   display: inline-flex;
   align-items: center;
@@ -1444,8 +1470,8 @@ tbody tr.row-disabled {
 }
 
 .status-cell {
-  max-width: 340px;
-  min-width: 220px;
+  max-width: 260px;
+  min-width: 160px;
 }
 
 .status-inner {
@@ -2732,8 +2758,8 @@ td.mono,
 .model-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  padding: 12px 0;
+  gap: 6px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -2790,7 +2816,7 @@ td.mono,
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
+  padding: 2px 7px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg3);

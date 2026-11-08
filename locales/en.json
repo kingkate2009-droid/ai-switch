@@ -91,6 +91,7 @@
   "action.check": "Check",
   "action.checking": "Checking...",
   "action.copyOpenCode": "Copy OpenCode Config",
+  "action.sync": "Sync",
   "action.edit": "Edit",
   "action.delete": "Delete",
   "action.batchEnable": "Enable",
