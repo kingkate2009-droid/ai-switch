@@ -6,7 +6,7 @@ import re
 import time
 from datetime import datetime, timezone
 
-from core.data import get_vendor, get_vendors, list_model_ids, update_model_quality_score
+from core.data import get_vendor, get_vendors, list_model_ids, update_model_quality_score, vendor_headers
 from core.endpoints import effective_model_endpoints, model_is_verified_usable
 from core.pricing import get_model_price
 from core.providers import (
@@ -16,6 +16,7 @@ from core.providers import (
     _responses_url,
     get_probe_timeout,
     official_vendor_info,
+    set_extra_headers,
 )
 
 
@@ -173,6 +174,7 @@ def evaluate_model_quality(vendor_id: str, key_id: str, model_id: str) -> dict:
         return {"error": "No verified endpoint available for quality evaluation", "model": model_id}
 
     api_url = str(vendor.get("proxy_target") or vendor.get("api_url") or "")
+    set_extra_headers(vendor_headers(vendor))
     results = []
     latencies = []
     response_models = []

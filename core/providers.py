@@ -28,6 +28,23 @@ _PROBE_PROMPTS = (
 # Per-thread probe knobs (bulk/quick health can lower timeout without global races)
 _tls = threading.local()
 _session_local = threading.local()
+_extra_headers = threading.local()
+
+
+def set_extra_headers(headers) -> None:
+    """Set the vendor's custom request headers for the current thread.
+
+    Every probe issued after this call merges these on top of the session's
+    default headers, without clobbering the per-request auth/Content-Type the
+    probe sets explicitly. Callers set this once per vendor/key operation.
+    """
+    _extra_headers.value = {
+        str(k): str(v) for k, v in (headers or {}).items() if str(k).strip()
+    } or {}
+
+
+def get_extra_headers() -> dict:
+    return dict(getattr(_extra_headers, "value", {}) or {})
 
 
 def probe_prompt() -> str:
@@ -48,7 +65,24 @@ def _new_session() -> requests.Session:
             "Accept": "application/json",
         })
         _session_local.session = s
+    _apply_extra_headers(s)
     return s
+
+
+def _apply_extra_headers(s: requests.Session) -> None:
+    """Merge the current thread's vendor headers onto a cached session.
+
+    The session is reused across operations, so headers set for a previous
+    vendor are removed before the current set is applied.
+    """
+    extra = getattr(_extra_headers, "value", None) or {}
+    applied = getattr(_session_local, "applied_extra", None) or {}
+    for k in list(applied):
+        if k not in extra:
+            s.headers.pop(k, None)
+    for k, v in extra.items():
+        s.headers[k] = str(v)
+    _session_local.applied_extra = dict(extra)
 
 
 def _set_scan_status(success: bool, error: str = "") -> None:
@@ -1431,6 +1465,7 @@ def check_vendor_availability(vendor: dict) -> dict:
     import time as _time
     import random as _random
     v = vendor or {}
+    set_extra_headers(v.get("headers") or {})
     checkin_url = str(v.get("checkin_url") or "").strip()
     api_url = normalize_api_url(v.get("proxy_target") or v.get("api_url") or "")
     url = checkin_url or api_url

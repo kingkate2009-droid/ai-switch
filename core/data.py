@@ -491,6 +491,11 @@ def get_vendor(vendor_id: str) -> Optional[dict]:
     return None
 
 
+def vendor_headers(vendor: Optional[dict]) -> dict:
+    """Public accessor for a vendor's custom request headers (always a dict)."""
+    return _normalize_headers((vendor or {}).get("headers"))
+
+
 def archive_key(vendor_id: str, key_id: str, archived: bool = True) -> Optional[dict]:
     """Archive (or restore) one key. Returns updated key, or None if not found."""
     data = _load_data()
@@ -527,6 +532,35 @@ def archive_vendor(vendor_id: str, archived: bool = True, *, archive_keys: bool 
     return None
 
 
+def _normalize_headers(raw) -> dict:
+    """Normalize a vendor's custom request headers to {name: value}.
+
+    Used when AI Switch calls the vendor (probes, balance) and when the proxy
+    forwards traffic upstream. Names/values are trimmed, blanks dropped, and
+    sizes capped so a paste can't bloat the data file.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        import json as _json
+        try:
+            raw = _json.loads(raw)
+        except Exception:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for k, val in raw.items():
+        name = str(k or "").strip()
+        if not name:
+            continue
+        value = str(val if val is not None else "").strip()
+        out[name[:80]] = value[:1000]
+        if len(out) >= 40:
+            break
+    return out
+
+
 def _normalize_tags(raw) -> list[str]:
     """Normalize tags list: strip, lower for dedupe key, preserve display casing of first seen."""
     if raw is None:
@@ -551,7 +585,8 @@ def _normalize_tags(raw) -> list[str]:
 
 def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "openai",
                thinking_disabled: bool = False, proxy_target: str = "", tags=None,
-               checkin_url: str = "", vtype: str = "", *, force_new: bool = False) -> dict:
+               checkin_url: str = "", vtype: str = "", *, headers=None,
+               force_new: bool = False) -> dict:
     """Create vendor. Same normalized API URL auto-merges into existing (unless force_new)."""
     url = normalize_api_url(api_url)
     vtype = _normalize_vendor_type(vtype)
@@ -571,6 +606,12 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
                     patch["tags"] = merged_tags
             if vtype and not (existing.get("vtype") or ""):
                 patch["vtype"] = vtype
+            norm_headers = _normalize_headers(headers)
+            if norm_headers:
+                merged_headers = dict(existing.get("headers") or {})
+                merged_headers.update(norm_headers)
+                if merged_headers != (existing.get("headers") or {}):
+                    patch["headers"] = merged_headers
             # Prefer /v1 OpenAI URL when existing lacks version path
             cur = (existing.get("api_url") or "").rstrip("/")
             if url.lower().endswith("/v1") and not cur.lower().endswith("/v1"):
@@ -596,6 +637,7 @@ def add_vendor(name: str, provider: str, api_url: str, endpoint_type: str = "ope
         "checkin_url": (checkin_url or "").strip(),
         "tags": _normalize_tags(tags),
         "vtype": vtype,
+        "headers": _normalize_headers(headers),
         "archived": False,
         "access_token_user_id": "",
         "status": "normal",
@@ -684,6 +726,8 @@ def update_vendor(vendor_id: str, **kwargs) -> Optional[dict]:
                     v[key] = kwargs[key]
             if "tags" in kwargs:
                 v["tags"] = _normalize_tags(kwargs["tags"])
+            if "headers" in kwargs:
+                v["headers"] = _normalize_headers(kwargs["headers"])
             _save_data(data)
             return v
     return None

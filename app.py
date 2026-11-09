@@ -46,6 +46,7 @@ from core.data import (
     update_key_data,
     update_settings,
     update_vendor,
+    vendor_headers,
 )
 from core.health_checker import (
     apply_health_to_backends,
@@ -1107,6 +1108,7 @@ def api_create_vendor():
         tags=data.get("tags"),
         checkin_url=data.get("checkin_url", ""),
         vtype=data.get("type") or data.get("vtype", ""),
+        headers=data.get("headers"),
     )
     log_event("vendor.add", vendor_id=v.get("id"), name=v.get("name"), provider=v.get("provider"))
     return jsonify(v), 201
@@ -1119,7 +1121,7 @@ def api_update_vendor(vendor_id):
     allowed = {k: data[k] for k in (
         "name", "provider", "api_url", "endpoint_type",
         "thinking_disabled", "proxy_target", "tags", "checkin_url",
-        "vtype", "archived", "access_token_user_id", "status",
+        "vtype", "archived", "access_token_user_id", "status", "headers",
     ) if k in data}
     if "vtype" not in allowed and "type" in data:
         allowed["vtype"] = data["type"]
@@ -1717,6 +1719,11 @@ def api_key_opencode_config(vendor_id, key_id):
         },
         "models": models_dict,
     }
+    # Vendor custom request headers are carried into the generated provider so
+    # OpenCode sends them (User-Agent, originator, OpenAI-Beta, ...).
+    _vheaders = vendor_headers(v)
+    if _vheaders:
+        provider_block["options"]["headers"] = _vheaders
 
     # Emit only this key's entry — no outer braces, no ``provider`` wrapper, no
     # ``$schema`` — so it drops straight into the existing ``"provider"`` object
@@ -3268,6 +3275,16 @@ def _proxy_upstream(vendor: dict, key: dict, *, path: str, body: bytes, headers:
     else:
         hdrs["Authorization"] = "Bearer " + key["api_key"]
         hdrs["content-type"] = "application/json"
+    # Vendor-configured custom headers (User-Agent, originator, OpenAI-Beta,
+    # session-id, ...). Applied last so they override forwarded client values,
+    # but never allowed to break transport or the key we just injected.
+    for hk, hv in vendor_headers(vendor).items():
+        low = hk.lower()
+        if low in ("host", "content-length", "authorization", "x-api-key"):
+            continue
+        for existing in [k for k in hdrs if k.lower() == low]:
+            hdrs.pop(existing, None)
+        hdrs[hk] = hv
     method = request.method if request.method != "GET" else "POST"
     r = py_requests.request(
         method=method, url=url, headers=hdrs, data=body, stream=stream,

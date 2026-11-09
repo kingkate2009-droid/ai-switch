@@ -34,7 +34,8 @@ from typing import Optional
 
 import requests
 
-from core.providers import _new_session, get_probe_timeout
+from core.providers import _new_session, get_probe_timeout, set_extra_headers
+from core.data import vendor_headers
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ def fetch_ratios(vendor: dict, key_entry: dict, force: bool = False) -> dict:
     """
     vendor = vendor or {}
     key_entry = key_entry or {}
+    set_extra_headers(vendor_headers(vendor))
     base = _relay_base(str(vendor.get("api_url") or ""))
     if not base:
         return {"error": "No base URL configured", "group_ratio": {}, "model_ratio": {}}
@@ -522,6 +524,7 @@ def checkin(vendor: dict, key_entry: dict) -> dict:
       - ``min_quota`` / ``max_quota`` int|None: site configured bounds
       - ``stats`` dict|None: month stats from GET (signed count etc.)
     """
+    set_extra_headers(vendor_headers(vendor))
     base = _relay_base(str((vendor or {}).get("api_url") or ""))
     access_token = (str((key_entry or {}).get("access_token") or (vendor or {}).get("access_token") or "")).strip()
     provider_id = str((vendor or {}).get("provider") or "")
@@ -716,6 +719,7 @@ def checkin_status(vendor: dict, key_entry: dict) -> dict:
     Mirrors :func:`checkin` but only does the GET (never POSTs), returning
     ``checkin_date`` when already signed in today and ``claimed=False``.
     """
+    set_extra_headers(vendor_headers(vendor))
     base = _relay_base(str((vendor or {}).get("api_url") or ""))
     access_token = (str((key_entry or {}).get("access_token") or (vendor or {}).get("access_token") or "")).strip()
 
@@ -829,6 +833,7 @@ def fetch_consumption_logs(
       - ``quota_per_unit`` — conversion rate for USD computation
       - ``error`` — if the fetch failed
     """
+    set_extra_headers(vendor_headers(vendor))
     base = _relay_base(str((vendor or {}).get("api_url") or ""))
     access_token = (str((key_entry or {}).get("access_token") or (vendor or {}).get("access_token") or "")).strip()
     provider_id = str((vendor or {}).get("provider") or "")
@@ -1215,6 +1220,7 @@ def get_balance_for_key(vendor: dict, key_entry: dict, force: bool = False) -> d
     """Convenience: fetch balance using vendor + key data."""
     vendor = vendor or {}
     key_entry = key_entry or {}
+    set_extra_headers(vendor_headers(vendor))
     return fetch_balance(
         provider_id=vendor.get("provider", ""),
         api_url=vendor.get("api_url", ""),

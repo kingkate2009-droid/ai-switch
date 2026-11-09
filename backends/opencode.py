@@ -11,6 +11,7 @@ from urllib.parse import quote
 import requests
 
 from backends.base import BackendAdapter, home_config_dir, home_data_dir
+from core.data import vendor_headers
 
 log = logging.getLogger(__name__)
 
@@ -571,12 +572,20 @@ class OpenCodeAdapter(BackendAdapter):
         }
         if key.get("api_key"):
             block["options"]["apiKey"] = key["api_key"]
+        self._apply_vendor_headers(block, vendor)
         # Prefer non-empty baseURL from existing if new empty
         if not base_url and existing:
             prev = (existing.get("options") or {}).get("baseURL")
             if prev:
                 block["options"]["baseURL"] = prev
         return block
+
+    @staticmethod
+    def _apply_vendor_headers(block: dict, vendor: dict) -> None:
+        """Attach a vendor's custom request headers to a provider block."""
+        headers = vendor_headers(vendor)
+        if headers:
+            block.setdefault("options", {})["headers"] = headers
 
     @staticmethod
     def _endpoint_family(endpoint: str) -> str:
@@ -633,6 +642,7 @@ class OpenCodeAdapter(BackendAdapter):
         }
         if key.get("api_key"):
             block["options"]["apiKey"] = key["api_key"]
+        self._apply_vendor_headers(block, vendor)
         if not block["options"]["baseURL"] and existing:
             prev = (existing.get("options") or {}).get("baseURL")
             if prev:

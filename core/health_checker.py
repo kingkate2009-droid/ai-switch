@@ -17,6 +17,7 @@ from core.data import (
     save_kv_payload,
     update_key_data,
     update_keys_data_bulk,
+    vendor_headers,
 )
 from core.providers import (
     get_provider,
@@ -25,6 +26,7 @@ from core.providers import (
     probe_single_model_endpoint,
     probe_single_model,
     scan_models_with_status,
+    set_extra_headers,
 )
 from core.endpoints import (
     capability_record,
@@ -653,6 +655,7 @@ def check_model_endpoints(
     if not model:
         return {"error": "Model id required", "model": model, "checks": {}}
 
+    set_extra_headers(vendor_headers(vendor))
     checks = {}
     detected = []
     started = time.time()
@@ -1048,6 +1051,7 @@ def _check_key_health_inner(
 
     api_url = vendor.get("proxy_target", "") or vendor["api_url"]
     api_key = key_entry["api_key"]
+    set_extra_headers(vendor_headers(vendor))
     check_type = _resolve_check_type(vendor)
     wants_responses = check_type == "openai_responses" or _vendor_wants_responses(vendor, key_entry)
     check_model = str(key_entry.get("check_model") or "").strip()
@@ -1314,6 +1318,7 @@ def check_key_models(vendor_id: str, key_id: str) -> dict:
 
     api_url = vendor.get("proxy_target", "") or vendor.get("api_url", "")
     api_key = key_entry.get("api_key", "")
+    set_extra_headers(vendor_headers(vendor))
     models = list_model_ids(key_entry)
 
     # If inventory empty, try scanning once (system retains scan results)

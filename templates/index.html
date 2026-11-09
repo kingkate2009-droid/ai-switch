@@ -1472,6 +1472,15 @@
         <input type="text" id="vendorAccessUserId" data-i18n-placeholder="keyModal.balanceUserIdPh" placeholder="{{ t('keyModal.balanceUserIdPh') }}">
         <p class="form-hint" data-i18n="keyModal.balanceUserIdHint">{{ t('keyModal.balanceUserIdHint') }}</p>
       </div>
+      <div class="form-group form-group-wide" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+        <label data-i18n="vendorModal.headers">{{ t('vendorModal.headers') }}</label>
+        <p class="form-hint" data-i18n="vendorModal.headersHint">{{ t('vendorModal.headersHint') }}</p>
+        <div id="vendorHeaderRows" class="header-rows"></div>
+        <div class="header-actions">
+          <button type="button" class="btn btn-sm" onclick="addVendorHeaderRow()" data-i18n="vendorModal.headersAdd">{{ t('vendorModal.headersAdd') }}</button>
+          <button type="button" class="btn btn-sm" onclick="importVendorHeadersJson()" data-i18n="vendorModal.headersImport">{{ t('vendorModal.headersImport') }}</button>
+        </div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeVendorModal()" data-i18n="modal.cancel">{{ t('modal.cancel') }}</button>
@@ -5117,6 +5126,82 @@ function onProviderSelectChange() {
   }
 }
 
+// ── Vendor custom request headers ────────────────────────────
+function addVendorHeaderRow(name, value) {
+  var wrap = $('vendorHeaderRows');
+  if (!wrap) return;
+  var row = document.createElement('div');
+  row.className = 'header-row';
+  var nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'header-name';
+  nameInput.placeholder = 'Header-Name';
+  nameInput.value = name || '';
+  var valInput = document.createElement('input');
+  valInput.type = 'text';
+  valInput.className = 'header-value';
+  valInput.placeholder = 'value';
+  valInput.value = value || '';
+  var del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'btn btn-icon header-remove';
+  del.title = _('common.delete') || 'Delete';
+  del.innerHTML = '&times;';
+  del.onclick = function() { row.remove(); };
+  row.appendChild(nameInput);
+  row.appendChild(valInput);
+  row.appendChild(del);
+  wrap.appendChild(row);
+  return row;
+}
+
+function renderVendorHeaderRows(headers) {
+  var wrap = $('vendorHeaderRows');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  Object.keys(headers || {}).forEach(function(k) {
+    addVendorHeaderRow(k, headers[k]);
+  });
+}
+
+function collectVendorHeaders() {
+  var wrap = $('vendorHeaderRows');
+  var out = {};
+  if (!wrap) return out;
+  Array.prototype.forEach.call(wrap.querySelectorAll('.header-row'), function(row) {
+    var n = row.querySelector('.header-name');
+    var v = row.querySelector('.header-value');
+    var name = n ? n.value.trim() : '';
+    if (!name) return;
+    out[name] = v ? v.value.trim() : '';
+  });
+  return out;
+}
+
+function importVendorHeadersJson() {
+  var example = '{\n  "User-Agent": "codex_cli_rs/0.167.0",\n  "originator": "codex_cli_rs"\n}';
+  var raw = prompt(_('vendorModal.headersImportPrompt') || 'Paste headers JSON', example);
+  if (raw === null) return;
+  raw = String(raw).trim();
+  if (!raw) return;
+  var parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { showToast(_('vendorModal.headersJsonInvalid') || 'Invalid JSON', 'error'); return; }
+  if (parsed && typeof parsed === 'object' && parsed.headers && typeof parsed.headers === 'object') {
+    parsed = parsed.headers;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    showToast(_('vendorModal.headersJsonInvalid') || 'Invalid JSON', 'error');
+    return;
+  }
+  var merged = collectVendorHeaders();
+  Object.keys(parsed).forEach(function(k) {
+    var name = String(k || '').trim();
+    if (name) merged[name] = String(parsed[k] == null ? '' : parsed[k]);
+  });
+  renderVendorHeaderRows(merged);
+}
+
 async function showAddVendorModal() {
   $('vendorModalTitle').textContent = _('vendorModal.addTitle');
   $('editVendorId').value = '';
@@ -5133,6 +5218,7 @@ async function showAddVendorModal() {
   if ($('vendorTags')) $('vendorTags').value = '';
   if ($('vendorCheckinUrl')) $('vendorCheckinUrl').value = '';
   if ($('vendorAccessUserId')) $('vendorAccessUserId').value = '';
+  renderVendorHeaderRows({});
   if ($('vendorTypeSelect')) $('vendorTypeSelect').value = 'public';
   if ($('vendorStatus')) $('vendorStatus').value = 'normal';
   await loadProviderSelect();
@@ -5166,6 +5252,7 @@ async function editVendor() {
   if ($('vendorTags')) $('vendorTags').value = formatTags(v.tags || []);
   if ($('vendorCheckinUrl')) $('vendorCheckinUrl').value = v.checkin_url || '';
   if ($('vendorAccessUserId')) $('vendorAccessUserId').value = v.access_token_user_id || '';
+  renderVendorHeaderRows(v.headers || {});
   if ($('vendorTypeSelect')) $('vendorTypeSelect').value = v.vtype || 'public';
   if ($('vendorStatus')) $('vendorStatus').value = v.status || 'normal';
   await loadProviderSelect();
@@ -5216,6 +5303,7 @@ async function saveVendor() {
     type: $('vendorTypeSelect') ? $('vendorTypeSelect').value : '',
     status: $('vendorStatus') ? $('vendorStatus').value : 'normal',
     access_token_user_id: ($('vendorAccessUserId') && $('vendorAccessUserId').value.trim()) || '',
+    headers: collectVendorHeaders(),
   };
   if (!data.name) { alert(_('validation.nameRequired') || 'Name is required'); return; }
   setButtonLoading(btn, true, _('common.saving') || 'Saving...');

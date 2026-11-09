@@ -864,6 +864,54 @@ input[type="radio"] {
   min-width: 0;
 }
 
+/* Vendor custom request headers editor */
+.header-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 10px;
+}
+
+.header-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.header-row .header-name {
+  flex: 0 0 34%;
+  min-width: 120px;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--fs-sm);
+}
+
+.header-row .header-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--fs-sm);
+}
+
+.header-row .header-remove {
+  flex: 0 0 auto;
+  color: var(--text3);
+}
+
+.header-row .header-remove:hover {
+  color: var(--danger, #d9534f);
+}
+
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.header-actions .btn-sm {
+  padding: 5px 12px;
+  font-size: var(--fs-sm);
+}
+
 .checkbox-label {
   display: inline-flex;
   align-items: center;
