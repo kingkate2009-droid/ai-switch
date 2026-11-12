@@ -13,6 +13,12 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 
+# Release / packaging tooling (not needed at runtime)
+release.sh
+scripts
+packaging
+bin
+
 # Internal notes & docs (not needed at runtime)
 docs
 memory
