@@ -63,6 +63,26 @@ release.sh
 
 # Local memory/notes
 memory/
+memory.md
+
+# Tests & dev-only tooling (kept local, not part of the deployed package)
+tests/
+requirements-dev.txt
+
+# Internal notes & old release notes (not user-facing docs)
+docs/growth-*.md
+docs/posts-final.md
+docs/product-*.md
+docs/ui-*.md
+docs/demo-script-*.md
+docs/release-notes-2.0.5.md
+docs/release-notes-2.2.0.md
+docs/release-notes-2.3.0.md
+docs/release-notes-2.4.9.md
+
+# Repo meta not needed for deployment
+.github/ISSUE_TEMPLATE/
+.github/workflows/ci.yml
 
 # Packaging / build
 build/

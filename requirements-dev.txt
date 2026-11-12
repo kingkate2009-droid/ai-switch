@@ -1,4 +1,0 @@
--r requirements.txt
-
-# Test tooling (not needed to run AI Switch).
-pytest>=8.0

@@ -337,23 +337,6 @@ Also included when you need them: **vendor types (Public/Relay/Raw key)** with f
 
 ---
 
-## Development
-
-```bash
-pip install -r requirements-dev.txt
-python -m pytest tests -q           # access policy / sync safety / notifications / accounts
-python tests/check_template_js.py   # syntax-check the inline UI script
-```
-
-Every test file also runs standalone (`python3 tests/test_notify.py`), and they
-all redirect `HOME` to a throwaway directory, so a test run never touches your
-real `~/.ai-switch` data. Notification tests spin up a local HTTP server to
-verify real payload delivery.
-
-CI runs both on every push and pull request (`.github/workflows/ci.yml`).
-
----
-
 ## Supported backends
 
 | Backend | Notes |

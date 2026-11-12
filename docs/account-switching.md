@@ -170,12 +170,3 @@ Planned approach: one `os_crypt.py` module that uses the `cryptography` package
 "crypto layer unavailable" instead of failing obscurely when it is not. That
 keeps AI Switch installable without the dependency while still reaching parity
 for users who want it.
-
-
-## Tests
-
-- `tests/test_account_adapters.py` — registry, alias normalisation, per-provider
-  read/switch round-trips, `state.vscdb` accessor, backup behaviour.
-- `tests/test_account_switch_api.py` — end-to-end through the HTTP API:
-  import → activate → the tool's credential is rewritten and a backup exists;
-  read-only mode blocks it.

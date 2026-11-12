@@ -47,4 +47,3 @@ python3 run.py
 - [后端差异与路径](./backends.md)  
 - [Codex 连不上](./troubleshoot-codex.md)  
 - [适配器贡献指南](./adapter-contribution.md)  
-- [产品优化进度](./product-optimization.md)  

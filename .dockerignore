@@ -1,0 +1,50 @@
+# Keep the Docker build context limited to what the app needs at runtime.
+# Without this, `COPY . .` bakes tests, docs, notes and local data into the image.
+
+# Version control / CI
+.git
+.gitignore
+.github
+
+# Dev-only files
+tests
+requirements-dev.txt
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Internal notes & docs (not needed at runtime)
+docs
+memory
+memory.md
+
+# Caches / build output
+__pycache__
+**/__pycache__
+*.pyc
+**/*.pyc
+*.pyo
+**/*.pyo
+*.pyd
+**/*.pyd
+.pytest_cache
+build
+dist
+.venv
+venv
+
+# Local runtime state / secrets
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data.json
+usage.json
+config.json
+health_cache.json
+secrets.json
+credentials.json
+auth.json
+accounts.json
