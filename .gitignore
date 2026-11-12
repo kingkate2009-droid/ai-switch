@@ -10,9 +10,44 @@ nohup.out
 # Sensitive runtime data
 ~/.openclaw-auto-manager/
 ~/.ai-switch/
+.ai-switch/
 data.json
 health_cache.json
 config.json
+usage.json
+secrets.json
+secrets.yaml
+secrets.yml
+credentials.json
+auth.json
+accounts.json
+cookies.txt
+
+# Local databases (runtime state)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Private keys / certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Env variants (keep the example)
+.env.*
+!.env.example
+
+# Backups / archives of real data
+*.bak
+*.backup
+*.tar.gz
+*.tgz
+*.zip
 
 # OS files
 .DS_Store
