@@ -48,12 +48,22 @@ If you juggle **relay / multi-vendor API keys** across **OpenClaw, OpenCode, Cod
 
 ## Screenshots
 
-<p align="center"><img src="docs/screenshots/01-dashboard.png" alt="Dashboard" width="800"></p>
+> All screenshots use an isolated demo instance with **fictional data** — no real vendors, keys, accounts or usage.
+
+<p align="center">
+  <img src="docs/screenshots/01-dashboard.png" alt="Dashboard" width="820"><br>
+  <sub><b>Dashboard</b> — vendor / key / health counters, today's calls and spend, the single next action to take, and recent audit activity.</sub>
+</p>
 
 <p align="center">
   <img src="docs/screenshots/02-vendors.png" alt="Vendors" width="390">
   &nbsp;
   <img src="docs/screenshots/03-backends.png" alt="Backends" width="390">
+</p>
+
+<p align="center">
+  <sub><b>Vendors</b> — tags, per-vendor key table with live status, model counts, balance and one-click actions.</sub><br>
+  <sub><b>Backends</b> — 19 supported engines with install / running state and per-engine sync config.</sub>
 </p>
 
 <p align="center">
@@ -63,9 +73,19 @@ If you juggle **relay / multi-vendor API keys** across **OpenClaw, OpenCode, Cod
 </p>
 
 <p align="center">
+  <sub><b>Models</b> — every model discovered on your keys: blended price, endpoints, key / vendor counts, enabled ratio and locations.</sub><br>
+  <sub><b>Quality checks</b> — deterministic 4-prompt benchmarks with per-vendor scores and re-run controls.</sub>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/06-routes.png" alt="Routes" width="390">
   &nbsp;
   <img src="docs/screenshots/07-health.png" alt="Health monitor" width="390">
+</p>
+
+<p align="center">
+  <sub><b>Routes</b> — downstream OpenAI-compatible keys that aggregate healthy vendors, with auto or manual model selection.</sub><br>
+  <sub><b>Health</b> — scheduled monitoring, per-key status and latency, and a run history you can clear.</sub>
 </p>
 
 <p align="center">
@@ -75,12 +95,25 @@ If you juggle **relay / multi-vendor API keys** across **OpenClaw, OpenCode, Cod
 </p>
 
 <p align="center">
+  <sub><b>Statistics</b> — calls, success rate, tokens and cost, with daily trend, top models / vendors and the engine split.</sub><br>
+  <sub><b>Check-in</b> — vendors with a check-in URL or an access token; manual link vs automatic daily check-in.</sub>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/10-archived.png" alt="Archived" width="390">
   &nbsp;
   <img src="docs/screenshots/11-diagnostics.png" alt="Diagnostics" width="390">
 </p>
 
-<p align="center"><img src="docs/screenshots/12-settings.png" alt="Settings" width="800"></p>
+<p align="center">
+  <sub><b>Archived</b> — archived vendors and single keys, hidden from every other view and excluded from checks, restorable in one click.</sub><br>
+  <sub><b>Diagnostics</b> — environment and backend JSON report plus the local audit log, for bug reports.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/12-settings.png" alt="Settings" width="820"><br>
+  <sub><b>Settings</b> — health schedule and adaptive intervals, on-disk key encryption, local access token, and usage budgets.</sub>
+</p>
 
 ---
 
