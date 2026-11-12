@@ -37,3 +37,31 @@ Check the actual vendor site users visit, distinguish real pages from proxy/WAF 
 - Network outcomes can vary by time, DNS, proxy/VPN, and client location. A single external probe is not a global uptime guarantee.
 - Full scans across hundreds of vendors can be slow due to unreachable hosts and request timeouts; targeted checks are faster.
 - Keep unrelated pending changes out of the availability commit unless explicitly requested.
+
+## README Screenshots & UI Polish (2026-11-11/12)
+
+### Goal
+
+Re-shoot every README screenshot after the Calm Console rebuild, using only fictional demo data, with a caption under each image; keep secrets and runtime data out of the public repo.
+
+### How screenshots are produced
+
+- Seed a throwaway dataset with `HOME=/tmp/ocdemo` (never the real `~/.ai-switch`): fake vendors `Aurora Relay` / `Bluepeak AI` / `Cobalt Cloud` / `Driftwood Labs` (+ archived `Legacy Sandbox`, `Old Relay`), keys `sk-demo-*`, 7 days of usage, health cache, quality scores, downstream keys, audit JSONL.
+- Run the app from a **copy** of the source at `/tmp/ocdemo-app` so Diagnostics `resource_root` cannot leak the developer's real path.
+- Playwright (system `/usr/bin/python3` + `PYTHONPATH=.../Python/3.9/lib/python/site-packages`) with `locale="en-US"`, viewport 1440x1000, light theme, `aiswitch_onboarding_skip=1`.
+- Correct `endpoint_capabilities` shape matters: `{mode, detected, selected, checks:{ep:{healthy,checked_at,status_code}}, checked_at, classified}`; `model_health[m]` needs a fresh `checked_at`, otherwise the Models "Enabled" column reads 0/N.
+
+### Bugs the screenshots exposed (fixed)
+
+- `#miniLabel` had `data-i18n` so `updateI18n()` kept resetting it to "Checking..."; removed the attribute and call `updateMiniStatus()` from `loadDashboard()`.
+- `pagerHtml` compared `info.total <= info.size` where `size` is undefined for empty tables, printing `undefined–undefined / 0` and `NaN`; guard numerically.
+- Check-in summary counted only access tokens, so URL-only vendors showed "Not supported" next to "Open link"; count `token || checkin_url` and add a `Manual link` badge.
+- Accounts nav label and the models-modal filter toolbar were hardcoded Chinese; routed through i18n.
+- Missing `models.modality.other` printed the raw key; added to all three locales.
+
+### Caveats
+
+- Backends screenshot reflects the real host CLI detection (running gateways/ports) — environment info only, no keys or accounts.
+- `pytest tests/` as one run fails (~25) due to cross-module env/state leakage; this is pre-existing (same on a clean `f3eb7d7` worktree). Run each file standalone instead.
+- Release `v2.5.0` tags `ea3c8af` on `main`.
+
