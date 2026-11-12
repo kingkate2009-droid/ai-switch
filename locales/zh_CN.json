@@ -574,6 +574,7 @@
   "models.modality.video": "视频",
   "models.modality.audio": "音频",
   "models.modality.translation": "翻译",
+  "models.modality.other": "向量 / 其他",
   "models.empty": "暂无模型 — 请先对密钥做健康检测或模型扫描",
   "quality.title": "模型质量检测",
   "quality.desc": "对当前可用模型进行四项固定题评测，检测准确率、延迟和返回模型一致性。",
@@ -945,6 +946,8 @@
   "checkin.statusDone": "已签到",
   "checkin.statusFailed": "签到失败",
   "checkin.unsupported": "不支持签到",
+  "checkin.manualLink": "手动链接",
+  "checkin.manualLinkHint": "打开站点页面手动签到",
   "checkin.running": "签到中...",
   "checkin.allResult": "签到结果：成功 {ok}，失败 {fail}",
   "keyModal.balanceUserId": "用户 ID（可选）",
@@ -1024,5 +1027,13 @@
   "table.selectPage": "全选本页",
   "settings.unsaved": "有未保存的修改",
   "quality.avgShort": "均分",
-  "quality.averageScore": "平均质量分"
+  "quality.averageScore": "平均质量分",
+  "modelsModal.searchPh": "搜索模型名称…",
+  "modelsModal.allEndpoints": "全部端点类型",
+  "modelsModal.epChat": "文本 (Chat)",
+  "modelsModal.epImage": "图片 (Image)",
+  "modelsModal.epVideo": "视频 (Video)",
+  "modelsModal.epAudio": "音频 (Audio)",
+  "modelsModal.epTranslation": "翻译 (Translation)",
+  "modelsModal.clearFilter": "清除"
 }

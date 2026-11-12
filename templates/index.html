@@ -58,7 +58,7 @@
         </a>
         <a href="#" class="nav-item" data-view="accounts" onclick="switchView('accounts');return false">
           <svg width="18" height="18"><use href="#ico-users"/></svg>
-          <span data-i18n="nav.accounts">账号管理</span>
+          <span data-i18n="nav.accounts">{{ t('nav.accounts') }}</span>
         </a>
         <a href="#" class="nav-item" data-view="backends" onclick="switchView('backends');return false">
           <svg width="18" height="18"><use href="#ico-box"/></svg>
@@ -116,7 +116,7 @@
       </button>
       <div class="mini-status" id="miniBackendStatus">
         <span class="dot unknown" id="miniDot"></span>
-        <span id="miniLabel" data-i18n="gateway.checking">{{ t('gateway.checking') }}</span>
+        <span id="miniLabel">{{ t('gateway.checking') }}</span>
       </div>
       <div class="sidebar-links">
         <a href="https://github.com/kingkate2009-droid/ai-switch" target="_blank" rel="noopener noreferrer" class="sidebar-link" title="GitHub">GitHub</a>
@@ -224,7 +224,7 @@
     <div class="view" id="view-accounts">
       <div class="page-head">
         <div class="page-head-main">
-          <h2 data-i18n="nav.accounts">账号管理</h2>
+          <h2 data-i18n="nav.accounts">{{ t('nav.accounts') }}</h2>
           <p class="page-desc" data-i18n="accounts.pageDesc">管理 OAuth / 登录态账号（Codex auth.json、Claude Code、Gemini、Grok），支持导入凭据、浏览器授权登录与官方额度查询。</p>
         </div>
         <div class="page-actions">
@@ -1599,16 +1599,16 @@
       </div>
       <div class="models-modal-toolbar" style="margin-top:8px;gap:8px;align-items:center">
         <input type="search" id="modelsModalSearch" class="form-input" style="flex:1;min-width:160px"
-          placeholder="搜索模型名称…" oninput="onModelsModalFilterChange()">
+          placeholder="{{ t('modelsModal.searchPh') }}" data-i18n-placeholder="modelsModal.searchPh" oninput="onModelsModalFilterChange()">
         <select id="modelsModalEndpointFilter" style="min-width:150px" onchange="onModelsModalFilterChange()">
-          <option value="">全部端点类型</option>
-          <option value="chat">文本 (Chat)</option>
-          <option value="image">图片 (Image)</option>
-          <option value="video">视频 (Video)</option>
-          <option value="audio">音频 (Audio)</option>
-          <option value="translation">翻译 (Translation)</option>
+          <option value="" data-i18n="modelsModal.allEndpoints">{{ t('modelsModal.allEndpoints') }}</option>
+          <option value="chat" data-i18n="modelsModal.epChat">{{ t('modelsModal.epChat') }}</option>
+          <option value="image" data-i18n="modelsModal.epImage">{{ t('modelsModal.epImage') }}</option>
+          <option value="video" data-i18n="modelsModal.epVideo">{{ t('modelsModal.epVideo') }}</option>
+          <option value="audio" data-i18n="modelsModal.epAudio">{{ t('modelsModal.epAudio') }}</option>
+          <option value="translation" data-i18n="modelsModal.epTranslation">{{ t('modelsModal.epTranslation') }}</option>
         </select>
-        <button class="btn btn-sm" onclick="clearModelsModalFilter()">清除</button>
+        <button class="btn btn-sm" onclick="clearModelsModalFilter()" data-i18n="modelsModal.clearFilter">{{ t('modelsModal.clearFilter') }}</button>
       </div>
       <div id="modelsModalList"></div>
     </div>
@@ -2958,6 +2958,9 @@ async function loadDashboard() {
   const backends = loaded[1];
   _allVendorsData = data.vendors || [];
   _allHealthData = data.health || {};
+  // The sidebar status widget lives outside any view; keep it accurate on the
+  // first paint instead of waiting for someone to visit the Vendors page.
+  updateMiniStatus(data);
 
   var totalKeys = 0, healthy = 0, unhealthy = 0, unchecked = 0;
   _allVendorsData.forEach(function(v) {
@@ -7999,7 +8002,9 @@ function pagerSetSize(key, size) {
 
 function pagerHtml(key, info) {
   // Nothing to page: the whole result fits on one page, so no chrome at all.
-  if (!info || info.total <= info.size) return '';
+  // Empty tables pass {total: 0} without size/page fields, so compare loosely
+  // against numbers to avoid "undefined–undefined / NaN" chrome.
+  if (!info || !(Number(info.total) > Number(info.size || 0))) return '';
   var opts = PAGER_SIZES.map(function (s) {
     return '<option value="' + s + '"' + (s === info.size ? ' selected' : '') + '>' + s + '</option>';
   }).join('');
@@ -9713,12 +9718,17 @@ function renderCheckinTable() {
   });
 
   var tokenCount = rows.filter(function(v) { return _vendorTokenKey(v); }).length;
+  // "Supported" means this vendor can be handled here at all: an access token
+  // (automatic check-in) or a check-in URL (manual link). Counting only tokens
+  // made url-only vendors read as "not supported" right next to an Open link
+  // button.
+  var supportedCount = rows.filter(function(v) { return !!(_vendorTokenKey(v) || v.checkin_url); }).length;
   var sum = $('checkinSummary');
   if (sum) {
     sum.textContent = (_('checkin.summary') || '{total} vendors \u00b7 {token} can check in')
       .replace('{total}', String(rows.length))
-      .replace('{yes}', String(tokenCount))
-      .replace('{no}', String(rows.length - tokenCount))
+      .replace('{yes}', String(supportedCount))
+      .replace('{no}', String(rows.length - supportedCount))
       .replace('{token}', String(tokenCount));
   }
 
@@ -9771,7 +9781,10 @@ function renderCheckinTable() {
     if (st === 'running') {
       statusHtml = '<span class="badge">\u23F3 ' + esc(_('checkin.running') || 'Signing in...') + '</span>';
     } else if (!tk) {
-      statusHtml = '<span class="badge badge-muted">' + esc(_('checkin.unsupported') || 'Not supported') + '</span>';
+      statusHtml = v.checkin_url
+        ? '<span class="badge" title="' + esc(_('checkin.manualLinkHint') || 'Open the site page and check in manually') + '">' + esc(_('checkin.manualLink') || 'Manual link') + '</span>'
+        : '<span class="badge badge-muted">' + esc(_('checkin.unsupported') || 'Not supported') + '</span>';
+
     } else if (st === 'done') {
       var rewardTxt = '';
       if (rewardVal != null && rewardVal > 0) {

@@ -574,6 +574,7 @@
   "models.modality.video": "Video",
   "models.modality.audio": "Audio",
   "models.modality.translation": "Translation",
+  "models.modality.other": "Embedding / Other",
   "models.empty": "No models yet — run health check or model scan on keys",
   "quality.title": "Quality checks",
   "quality.desc": "Checks currently usable models using four deterministic prompts, accuracy, latency and response identity.",
@@ -946,6 +947,8 @@
   "checkin.statusDone": "Checked in",
   "checkin.statusFailed": "Check-in failed",
   "checkin.unsupported": "Not supported",
+  "checkin.manualLink": "Manual link",
+  "checkin.manualLinkHint": "Open the site page and check in manually",
   "checkin.running": "Signing in...",
   "checkin.allResult": "Check-in: {ok} success, {fail} failed",
   "keyModal.balanceUserId": "User ID (optional)",
@@ -1025,5 +1028,13 @@
   "table.selectPage": "Select all on this page",
   "settings.unsaved": "Unsaved changes",
   "quality.avgShort": "avg",
-  "quality.averageScore": "Average quality score"
+  "quality.averageScore": "Average quality score",
+  "modelsModal.searchPh": "Search models…",
+  "modelsModal.allEndpoints": "All endpoint types",
+  "modelsModal.epChat": "Text (Chat)",
+  "modelsModal.epImage": "Image",
+  "modelsModal.epVideo": "Video",
+  "modelsModal.epAudio": "Audio",
+  "modelsModal.epTranslation": "Translation",
+  "modelsModal.clearFilter": "Clear"
 }

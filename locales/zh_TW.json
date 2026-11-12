@@ -574,6 +574,7 @@
   "models.modality.video": "影片",
   "models.modality.audio": "音訊",
   "models.modality.translation": "翻譯",
+  "models.modality.other": "向量 / 其他",
   "models.empty": "暫無模型 — 請先對金鑰做健康檢測或模型掃描",
   "quality.title": "模型品質檢測",
   "quality.desc": "對目前可用模型進行四項固定題評測，檢測準確率、延遲和回傳模型一致性。",
@@ -945,6 +946,8 @@
   "checkin.statusDone": "已簽到",
   "checkin.statusFailed": "簽到失敗",
   "checkin.unsupported": "不支援簽到",
+  "checkin.manualLink": "手動連結",
+  "checkin.manualLinkHint": "開啟站點頁面手動簽到",
   "checkin.running": "簽到中...",
   "checkin.allResult": "簽到結果：成功 {ok}，失敗 {fail}",
   "keyModal.balanceUserId": "使用者 ID（可選）",
@@ -1024,5 +1027,13 @@
   "table.selectPage": "全選本頁",
   "settings.unsaved": "有未儲存的修改",
   "quality.avgShort": "均分",
-  "quality.averageScore": "平均品質分"
+  "quality.averageScore": "平均品質分",
+  "modelsModal.searchPh": "搜尋模型名稱…",
+  "modelsModal.allEndpoints": "全部端點類型",
+  "modelsModal.epChat": "文字 (Chat)",
+  "modelsModal.epImage": "圖片 (Image)",
+  "modelsModal.epVideo": "影片 (Video)",
+  "modelsModal.epAudio": "音訊 (Audio)",
+  "modelsModal.epTranslation": "翻譯 (Translation)",
+  "modelsModal.clearFilter": "清除"
 }
